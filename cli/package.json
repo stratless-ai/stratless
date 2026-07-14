@@ -3,8 +3,9 @@
   "version": "0.1.0",
   "description": "Your coding assistant explains itself. Ask why any line of your code is the way it is.",
   "type": "module",
-  "bin": { "stratless": "./dist/index.js" },
-
+  "bin": {
+    "stratless": "dist/index.js"
+  },
   "//": "The npm page is where a stranger lands, and this package asks to read their entire",
   "//1": "conversation history. Without these three links it would ask for that trust while",
   "//2": "showing no source at all. The line count IS the argument — so point at the lines.",
@@ -15,9 +16,13 @@
   },
   "homepage": "https://stratless.com",
   "bugs": "https://github.com/stratless-ai/stratless/issues",
-
-  "files": ["dist", "!dist/*.test.js"],
-  "engines": { "node": ">=18" },
+  "files": [
+    "dist",
+    "!dist/*.test.js"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",
@@ -25,7 +30,14 @@
     "test": "node --test dist/*.test.js",
     "prepublishOnly": "npm run build && npm test"
   },
-  "keywords": ["claude-code", "cursor", "ai", "codebase", "provenance", "git-blame"],
+  "keywords": [
+    "claude-code",
+    "cursor",
+    "ai",
+    "codebase",
+    "provenance",
+    "git-blame"
+  ],
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^22.10.0",
