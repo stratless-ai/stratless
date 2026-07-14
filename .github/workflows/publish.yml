@@ -123,7 +123,13 @@ jobs:
 
       # Prove it, from outside. A green publish step means npm accepted the tarball; it does not
       # mean the world can install it, and it does not mean the signature is real.
+      #
+      # TAGS ONLY. On a manual trust probe there is no tag, so GITHUB_REF_NAME is "main" and this
+      # spends two minutes retrying `npm view stratless@main` before failing — a release check
+      # running during a probe, turning a passing probe red for a reason that has nothing to do
+      # with the thing being probed.
       - name: a stranger installs it from the registry
+        if: startsWith(github.ref, 'refs/tags/')
         run: |
           set -euo pipefail
           for i in $(seq 1 10); do
