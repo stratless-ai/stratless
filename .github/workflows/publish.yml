@@ -1,0 +1,90 @@
+name: publish
+
+# Publishes `stratless` to npm. Fires ONLY on a `cli-v*` tag.
+#
+# ─── why this is its own file, and not a job in cli.yml ───────────────────────────────────────
+# cli.yml has a `paths:` filter. GitHub applies `paths:` to EVERY push matched by the trigger —
+# tag pushes included. A tag pointing at a commit already on main carries no file changes, so the
+# paths filter matches nothing and the job silently never runs. No error, no red X, just an empty
+# npm registry and an afternoon of confusion. This file has no paths filter, so it cannot happen.
+#
+# ─── why the gates run again here ─────────────────────────────────────────────────────────────
+# It would be cheaper to depend on cli.yml's green run. But that run tested whatever was on main
+# at the time; this tag might point somewhere else entirely. A publish is the one thing you cannot
+# take back, so it re-earns its green on the exact commit being shipped.
+#
+# ─── why --provenance ─────────────────────────────────────────────────────────────────────────
+# stratless exists to say "this line came from that decision — here is the receipt". A stratless
+# tarball arriving on npm from an unknown laptop, unverifiable, would be the tool failing its own
+# test in public. --provenance makes npm mint a signed Sigstore attestation binding this tarball
+# to this repo, this commit, this run. npm shows "Built and signed on GitHub Actions"; anyone can
+# check it with `npm audit signatures`. It is also the only thing that will ever assert that what
+# is on npm equals what is on main.
+#
+# ─── after the first publish ──────────────────────────────────────────────────────────────────
+# NPM_TOKEN exists only because npm's Trusted Publishing must be configured on a package that
+# already exists — you cannot preconfigure a name nobody owns. Once stratless@0.1.0 is live:
+# configure Trusted Publishing on npmjs.com, delete the NPM_TOKEN secret, revoke the token.
+# Provenance keeps working automatically over OIDC. Zero long-lived npm credentials.
+
+on:
+  push:
+    tags: ['cli-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: verify · sign · publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # mint the provenance attestation
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+        with: { version: 9.15.0 }
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      # The tag and package.json are TWO PLACES holding ONE number, and they drift in silence.
+      # Tag cli-v0.2.0 against a package.json still reading 0.1.0 and npm either rejects it as a
+      # duplicate or ships the wrong version under the right name. Fail here instead, loudly.
+      - name: the tag must equal the version
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#cli-v}"
+          pkg="$(node -p "require('./cli/package.json').version")"
+          echo "tag: cli-v$tag   package.json: $pkg"
+          [ "$tag" = "$pkg" ] || { echo "::error::tag cli-v$tag ≠ package.json $pkg"; exit 1; }
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter ./cli exec tsc --noEmit
+      - run: pnpm --filter ./cli build
+      - run: pnpm --filter ./cli test
+
+      - name: npm publish --provenance
+        run: npm publish --provenance --access public
+        working-directory: cli
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Prove it, from outside. A green publish step means npm accepted the tarball; it does not
+      # mean the world can install it, and it does not mean the signature is real.
+      - name: a stranger installs it from the registry
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 10); do
+            npm view "stratless@${GITHUB_REF_NAME#cli-v}" version && break
+            echo "  not on the registry yet — retry $i"; sleep 12
+          done
+          cd "$(mktemp -d)"
+          npm install -g "stratless@${GITHUB_REF_NAME#cli-v}"
+          stratless --help | grep -q "stratless why"
+          npm audit signatures --prefix "$(npm root -g)/.." || true
+          echo "✓ installed from npm and ran"
