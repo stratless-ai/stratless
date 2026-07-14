@@ -1,0 +1,22 @@
+{
+  "name": "stratless",
+  "version": "0.1.0",
+  "description": "Your coding assistant explains itself. Ask why any line of your code is the way it is.",
+  "type": "module",
+  "bin": { "stratless": "./dist/index.js" },
+  "files": ["dist"],
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test dist/*.test.js"
+  },
+  "keywords": ["claude-code", "cursor", "ai", "codebase", "provenance", "git-blame"],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

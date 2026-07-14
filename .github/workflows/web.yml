@@ -1,0 +1,47 @@
+name: web
+
+# stratless.com → Cloudflare Pages (Direct Upload; the project is `stratless`).
+#
+# ⚠️ This workflow has NEVER SUCCEEDED. The repo has no Cloudflare secrets, so every run dies on
+# an empty CLOUDFLARE_API_TOKEN — and the site has been deployed BY HAND from a laptop instead.
+# That means nothing verifies that a green `main` equals what is on the domain. Set the two
+# secrets and this becomes the only way the site ships.
+on:
+  push:
+    branches: [main]
+    paths: ['web/**', '.github/workflows/web.yml', 'pnpm-lock.yaml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: build + deploy → Cloudflare Pages
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-pages
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+        with: { version: 9.15.0 }
+      - uses: actions/setup-node@v6
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      # nuxi generate prerenders every route to static HTML. A broken import or a failed prerender
+      # dies HERE — the gate before anything reaches the domain.
+      - run: pnpm --filter ./web generate
+      - name: deploy
+        run: pnpm --filter ./web exec wrangler pages deploy .output/public --project-name=stratless --branch=main --commit-dirty=true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: post-deploy smoke
+        run: |
+          set -euo pipefail
+          echo "→ GET https://stratless.com/"
+          curl -fsSL --max-time 25 -o /dev/null "https://stratless.com/"
+          echo "→ GET https://stratless.com/docs/"
+          curl -fsSL --max-time 25 -o /dev/null "https://stratless.com/docs/"
+          echo "✓ smoke passed"

@@ -1,0 +1,346 @@
+/* ============================================================================
+   stratless design system — warm daylight-terminal (memory: stratless-design-system)
+   Palette + fonts from the old landing (git 7b33660) + Sun's new kit + favicon blue.
+   ========================================================================== */
+
+/* ── fonts ──────────────────────────────────────────────────────────────── */
+/* (Code retired 2026-07-06 — it's unicase, so as the body/UI font it forced all-caps UI text; body/UI now
+   uses Inter. Evogria = CTA only, Epetri = logo only, Space Grotesk = headlines, mono = technical labels.) */
+@font-face {
+  font-family: 'Evogria';
+  src: url('/fonts/evogria.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Evogria';
+  src: url('/fonts/evogria-italic.woff2') format('woff2');
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Epetri';
+  src: url('/fonts/epetri.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+/* Space Grotesk (Google Fonts, OFL — free for commercial use) — the headline face. Has TRUE lowercase, so
+   sentence-case headlines work (Evogria/Code/Epetri are all unicase). Self-hosted; 400-700 map to the Bold file. */
+@font-face {
+  font-family: 'Space Grotesk';
+  src: url('/fonts/space-grotesk.woff2') format('woff2');
+  font-weight: 400 700;
+  font-display: swap;
+}
+/* Inter — the readable text face (same as Firecrawl), self-hosted (no Google Fonts fetch). Prose + subheads. */
+@font-face {
+  font-family: 'Inter';
+  src: url('/fonts/inter/inter-400.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Inter';
+  src: url('/fonts/inter/inter-500.woff2') format('woff2');
+  font-weight: 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Inter';
+  src: url('/fonts/inter/inter-600.woff2') format('woff2');
+  font-weight: 600;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Inter';
+  src: url('/fonts/inter/inter-700.woff2') format('woff2');
+  font-weight: 700;
+  font-display: swap;
+}
+
+/* ── tokens ─────────────────────────────────────────────────────────────── */
+:root {
+  --paper: #e9e5d8; /* page field — manila daylight */
+  --paper-2: #f4f1e8; /* panels / surfaces — a step brighter */
+  --ink: #15140f; /* text + borders */
+  --ink-2: #46443d; /* warm dark grey — softened body/subhead text */
+  --mid: #6b6a63; /* warm grey (favicon #6f6d65) */
+  --accent-deep: #3f7f97; /* deeper blue for primary CTAs (pale #a3cfdc reads weak on paper) */
+  --accent-soft: rgba(163, 207, 220, 0.28);
+
+  --font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif; /* headlines (lowercase → sentence case) */
+  --font-cta: 'Evogria', ui-sans-serif, system-ui, sans-serif; /* CTA buttons (unicase → all-caps punch) */
+  --font-body: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; /* body + UI (Inter) */
+  --font-read: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; /* readable prose — subhead + body (Inter, self-hosted) */
+  --font-mark: 'Epetri', ui-monospace, monospace; /* wordmark / logo only */
+  --font-mono: ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Menlo, monospace; /* code */
+
+  --radius: 7px;
+  --shadow: 3px 3px 0 var(--ink);
+  --shadow-lg: 5px 5px 0 var(--ink);
+  --dur: 0.12s;
+
+  /* the scanline stripe (favicon-exact ratio 9:4, em-scaled so it tracks font size) */
+  --stripe: repeating-linear-gradient(
+    to bottom,
+    var(--ink) 0,
+    var(--ink) 0.15em,
+    var(--mid) 0.15em,
+    var(--mid) 0.22em
+  );
+}
+
+/* ── base ───────────────────────────────────────────────────────────────── */
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+html {
+  /* the rubber-band "extra": suppress the bounce, and if a browser bounces anyway, show clean paper.
+     Trade-off: overscroll-behavior none also disables Android pull-to-refresh. */
+  background-color: #e9e5d8;
+  overscroll-behavior-y: none;
+}
+body {
+  /* plain paper. The graph-paper grid was retired (2026-07-14) along with the asanoha band —
+     seigaiha is the site's only texture now, and it carries its own opaque paper base. */
+  background-color: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 17px;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+}
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display);
+  /* the woff2 is now the VARIABLE font, so weight is real (was a static 700 file forcing every heading bold);
+     700 here preserves the existing look everywhere — the hero overrides itself lighter (.hero h1). */
+  font-weight: 700;
+  line-height: 1.08;
+  letter-spacing: 0.005em;
+  margin: 0 0 0.5em;
+}
+h1 {
+  font-size: clamp(2.6rem, 6vw, 4.4rem);
+}
+h2 {
+  font-size: clamp(1.9rem, 4vw, 2.8rem);
+}
+p {
+  margin: 0 0 1rem;
+}
+a {
+  color: var(--ink);
+  text-decoration-color: var(--accent-deep);
+  text-underline-offset: 3px;
+}
+code,
+pre,
+kbd {
+  font-family: var(--font-mono);
+}
+::selection {
+  background: var(--accent-soft);
+}
+
+/* ── components ─────────────────────────────────────────────────────────── */
+
+/* eyebrow — small technical label in mono (Epetri stays reserved for the logo/wordmark) */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--mid);
+  text-transform: uppercase;
+}
+
+/* the striped wordmark — Epetri glyphs filled with the favicon scanline stripes */
+.wordmark {
+  font-family: var(--font-mark);
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  background: var(--stripe);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  /* crisp pixel edges */
+  -webkit-font-smoothing: none;
+}
+
+
+/* buttons — Evogria (unicase display) for CTA punch */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  font-family: var(--font-cta);
+  font-weight: 400;
+  font-size: 1.02rem;
+  line-height: 1; /* deterministic height — independent of inherited line-height (nav vs hero context) */
+  letter-spacing: 0.05em;
+  padding: 0.72rem 1.2rem;
+  min-width: 11.5rem; /* every CTA the exact same size — must fit the longest label ("Read the docs") so none grows past it */
+  justify-content: center;
+  border: 1.5px solid var(--ink);
+  border-radius: var(--radius);
+  background: var(--paper-2);
+  color: var(--ink);
+  text-decoration: none;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  transition:
+    transform var(--dur) ease,
+    box-shadow var(--dur) ease,
+    background var(--dur) ease;
+}
+.btn:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: var(--shadow-lg);
+}
+.btn:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 var(--ink);
+}
+.btn-cta {
+  background: var(--accent-deep);
+  color: #f4f1e8;
+}
+
+/* blinking underscore cursor */
+@keyframes blink {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  50.01%,
+  100% {
+    opacity: 0;
+  }
+}
+.cursor::after {
+  content: '_';
+  color: var(--accent-deep);
+  animation: blink 1s step-end infinite;
+  font-family: var(--font-mono);
+}
+
+/* layout helpers */
+.container {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+@media (max-width: 640px) {
+  .container {
+    padding: 0 1rem; /* phones: 24px gutters waste width the nav + panels need */
+  }
+}
+.section {
+  padding: 5rem 0;
+}
+
+/* ── docs prose (rendered markdown — global, ContentRenderer output is unscoped) ── */
+.prose h1 {
+  font-family: var(--font-display);
+  font-size: clamp(1.9rem, 4vw, 2.4rem);
+  margin: 0 0 1rem;
+}
+.prose h2 {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  margin: 2.75rem 0 0.9rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid rgba(21, 20, 15, 0.15);
+}
+.prose h3 {
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  margin: 1.9rem 0 0.5rem;
+}
+.prose p {
+  font-family: var(--font-read);
+  line-height: 1.7;
+  color: var(--ink-2);
+  margin: 0 0 1.1rem;
+}
+.prose a:not(.btn) {
+  color: var(--accent-deep);
+}
+.prose strong {
+  color: var(--ink);
+}
+.prose ul,
+.prose ol {
+  font-family: var(--font-read);
+  color: var(--ink-2);
+  line-height: 1.7;
+  padding-left: 1.3rem;
+  margin: 0 0 1.1rem;
+}
+.prose li {
+  margin: 0.3rem 0;
+}
+.prose :not(pre) > code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--paper-2);
+  border: 1px solid rgba(21, 20, 15, 0.14);
+  border-radius: 4px;
+  padding: 0.05rem 0.35rem;
+}
+.prose pre {
+  background: var(--paper-2) !important;
+  border: 1.5px solid var(--ink);
+  border-radius: var(--radius);
+  padding: 1.1rem 1.2rem;
+  overflow-x: auto;
+  margin: 0 0 1.5rem;
+  box-shadow: var(--shadow);
+}
+.prose pre code {
+  font-family: var(--font-mono);
+  font-size: 0.84rem;
+  line-height: 1.6;
+  background: none;
+  border: none;
+  padding: 0;
+}
+.prose blockquote {
+  border-left: 3px solid var(--accent-deep);
+  padding-left: 1rem;
+  color: var(--mid);
+  margin: 0 0 1.1rem;
+}
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 1.5rem;
+  font-family: var(--font-read);
+  font-size: 0.9rem;
+}
+.prose th,
+.prose td {
+  border: 1px solid rgba(21, 20, 15, 0.15);
+  padding: 0.5rem 0.7rem;
+  text-align: left;
+}
+.prose th {
+  background: var(--paper-2);
+}
+.prose hr {
+  border: none;
+  border-top: 1px solid rgba(21, 20, 15, 0.15);
+  margin: 2rem 0;
+}
+

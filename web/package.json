@@ -1,0 +1,24 @@
+{
+  "name": "stratless-web",
+  "private": true,
+  "type": "module",
+  "description": "stratless.com \u2014 the front door. Your AI wrote your product. Ask it why.",
+  "scripts": {
+    "dev": "nuxi dev",
+    "build": "nuxi build",
+    "generate": "nuxi generate",
+    "preview": "nuxi preview",
+    "typecheck": "nuxi typecheck"
+  },
+  "dependencies": {
+    "markdown-it": "^14.1.0",
+    "nuxt": "^3.15.0"
+  },
+  "devDependencies": {
+    "@types/markdown-it": "^14.1.2",
+    "typescript": "^5.7.0",
+    "vue-tsc": "^2.2.0",
+    "wrangler": "^4.106.0"
+  },
+  "packageManager": "pnpm@9.15.0"
+}

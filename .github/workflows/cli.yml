@@ -1,0 +1,47 @@
+name: cli
+
+# The CLI had NO CI at all until 2026-07-14 — its tests had never run anywhere but a laptop, and
+# a missing file (canary.ts) once shipped a repo that did not build. This is the gate.
+on:
+  push:
+    branches: [main]
+    paths: ['cli/**', '.github/workflows/cli.yml', 'pnpm-lock.yaml']
+  pull_request:
+    paths: ['cli/**', '.github/workflows/cli.yml', 'pnpm-lock.yaml']
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: typecheck · test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+        with: { version: 9.15.0 }
+      - uses: actions/setup-node@v6
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter ./cli exec tsc --noEmit
+      - run: pnpm --filter ./cli build
+      - run: pnpm --filter ./cli test
+
+  # A STRANGER CLONES IT AND IT RUNS. That is the bar, and it is not the same as "the tests pass"
+  # — a file can be missing from git and still be on the developer's disk. It happened.
+  stranger:
+    name: a stranger clones it and it runs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with: { node-version: 22 }
+      - name: build from a clean checkout, with npm, like anyone would
+        run: |
+          set -euo pipefail
+          cd cli
+          npm install --no-package-lock
+          npx tsc --noEmit
+          npx tsc
+          node dist/index.js --help | grep -q "stratless why"
+          echo "✓ a clean clone builds and runs"

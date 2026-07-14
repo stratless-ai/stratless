@@ -1,0 +1,70 @@
+<!doctype html>
+<!-- og.png source — the 1200×630 social card. public/og.png is a screenshot of this file.
+     Rewritten 2026-07-14 for the CLI. The old card advertised a competitive-analysis API that 404s.
+     Regenerate: serve apps/web/public at / (so /fonts + /favicon.svg resolve), then
+       chrome --headless=new --window-size=1200,630 --screenshot=og.png http://localhost:PORT/og-card.html
+     (drop a copy of this file into the served dir first; it lives in scripts/ so it isn't deployed). -->
+<meta charset="utf-8">
+<style>
+  @font-face { font-family: 'Space Grotesk'; src: url('/fonts/space-grotesk.woff2') format('woff2'); font-weight: 400 700; }
+  @font-face { font-family: 'Epetri'; src: url('/fonts/epetri.woff2') format('woff2'); }
+  :root {
+    --paper: #e9e5d8; --paper-2: #f4f1e8; --ink: #15140f; --ink-2: #46443d;
+    --accent: #a3cfdc; --accent-deep: #3f7f97;
+    --mono: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  }
+  html, body { margin: 0; width: 1200px; height: 630px; }
+  body {
+    background: var(--paper);
+    /* faint drafting grid */
+    background-image:
+      linear-gradient(to right, rgba(21, 20, 15, 0.06) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(21, 20, 15, 0.06) 1px, transparent 1px);
+    background-size: 48px 48px;
+    font-family: 'Space Grotesk', sans-serif;
+  }
+  .card {
+    position: absolute; inset: 40px 46px 46px 40px;
+    background: var(--paper-2);
+    border: 2px solid var(--ink); border-radius: 10px;
+    box-shadow: 10px 10px 0 var(--ink);
+    padding: 62px 68px; box-sizing: border-box;
+  }
+  .logo { display: inline-flex; align-items: center; gap: 3px; --H: 65px; }
+  .logo img { display: block; height: calc(var(--H) * 0.86); width: calc(var(--H) * 0.86); }
+  .wordmark {
+    font-family: 'Epetri', monospace; font-weight: 400; letter-spacing: 0.08em;
+    font-size: calc(var(--H) * 0.74);
+    background: repeating-linear-gradient(to bottom, var(--ink) 0, var(--ink) 0.15em, #6f6d65 0.15em, #6f6d65 0.22em);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+    -webkit-font-smoothing: none;
+  }
+  h1 {
+    margin: 42px 0 0; font-size: 68px; font-weight: 700; letter-spacing: -0.02em;
+    line-height: 1.18; color: var(--ink);
+  }
+  .sub {
+    margin: 20px 0 0; font-size: 29px; font-weight: 600; line-height: 1.45;
+    color: var(--ink-2); max-width: 900px;
+  }
+  .sub b { color: var(--accent-deep); font-weight: 600; }
+  .foot {
+    position: absolute; left: 68px; right: 68px; bottom: 48px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .site { font-family: var(--mono); font-size: 27px; letter-spacing: 0.08em; color: var(--accent-deep); }
+  .badge {
+    font-family: var(--mono); font-size: 22px; color: var(--ink);
+    background: rgba(163, 207, 220, 0.55); border: 2px solid var(--ink); border-radius: 12px;
+    padding: 10px 20px;
+  }
+</style>
+<div class="card">
+  <div class="logo"><img src="/favicon.svg" alt=""><span class="wordmark">tratless</span></div>
+  <h1>Your AI wrote your product.<br>Ask it why.</h1>
+  <p class="sub">Reads your coding assistant's own history and tells you <b>what it<br>decided for you</b>&nbsp;—&nbsp;in plain English. Runs on your machine.</p>
+  <div class="foot">
+    <span class="site">stratless.com</span>
+    <span class="badge">Open source · no API key</span>
+  </div>
+</div>

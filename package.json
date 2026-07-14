@@ -1,0 +1,14 @@
+{
+  "name": "stratless",
+  "private": true,
+  "description": "Your AI wrote your product. Ask it why.",
+  "scripts": {
+    "test": "pnpm --filter ./cli test",
+    "typecheck": "pnpm -r typecheck",
+    "build": "pnpm -r build",
+    "dev:web": "pnpm --filter ./web dev",
+    "generate": "pnpm --filter ./web generate"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "engines": { "node": ">=18" }
+}
