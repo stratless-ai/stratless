@@ -97,8 +97,29 @@ jobs:
       # Provenance is automatic under OIDC (npm signs without being asked); --provenance is kept
       # only so a laptop publish, if anyone ever tries one, still signs.
       - name: npm publish (trusted publishing — OIDC, no token)
-        run: npm publish --provenance --access public
         working-directory: cli
+        run: |
+          set -o pipefail
+          out=$(npm publish --provenance --access public 2>&1) && { echo "$out"; exit 0; }
+          echo "$out"
+
+          # A MANUAL RUN IS A TRUST PROBE, NOT A RELEASE.
+          #
+          # It re-publishes the version already on the registry. npm authenticates FIRST and
+          # checks for a duplicate SECOND — so "cannot publish over the previously published
+          # versions" is the ONLY error that proves the OIDC trust is intact: npm knew who we
+          # were, found us to be the owner, and refused for the one harmless reason. That is a
+          # PASS, and it must be green, because a red X that means "fine, ignore it" is a lie
+          # you will either panic at or learn to ignore — and then miss the real one.
+          #
+          # Anything else — ENEEDAUTH, EOTP, E404 (npm masks unauthorized publishes as 404) —
+          # means the trust is BROKEN and you would only find out mid-release. Those stay red.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] \
+             && grep -q "cannot publish over the previously published versions" <<<"$out"; then
+            echo "::notice::OIDC trust VERIFIED — npm authenticated us with no token, then refused the duplicate. This is the pass."
+            exit 0
+          fi
+          exit 1
 
       # Prove it, from outside. A green publish step means npm accepted the tarball; it does not
       # mean the world can install it, and it does not mean the signature is real.
