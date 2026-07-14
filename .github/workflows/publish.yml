@@ -55,7 +55,14 @@ jobs:
       # The tag and package.json are TWO PLACES holding ONE number, and they drift in silence.
       # Tag cli-v0.2.0 against a package.json still reading 0.1.0 and npm either rejects it as a
       # duplicate or ships the wrong version under the right name. Fail here instead, loudly.
+      #
+      # Skipped on workflow_dispatch, where the ref is a branch and there is no tag to compare.
+      # A manual run is how you PROVE the OIDC trust still works: it attempts to publish whatever
+      # version is on main, npm authenticates FIRST and rejects the duplicate SECOND, so an
+      # "E403 cannot publish over previously published versions" is a PASS — it means npm knew who
+      # we were. ENEEDAUTH/EOTP/401 would mean the trusted publisher is not wired up.
       - name: the tag must equal the version
+        if: startsWith(github.ref, 'refs/tags/')
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME#cli-v}"
@@ -68,11 +75,20 @@ jobs:
       - run: pnpm --filter ./cli build
       - run: pnpm --filter ./cli test
 
-      - name: npm publish --provenance
+      # NO TOKEN. This publishes over npm Trusted Publishing (OIDC): GitHub mints a short-lived
+      # identity token proving to npm which repo, which workflow file and which commit is asking,
+      # and npm checks that against the trusted publisher configured on the package itself.
+      #
+      # There is no long-lived credential in existence to leak. The NPM_TOKEN that published 0.1.0
+      # had "Bypass 2FA" switched ON — it had to, or CI could never publish — which made it a
+      # credential that could push code to every machine that runs `npm i -g stratless`, with no
+      # second factor. It existed for eleven minutes and was revoked. Do not bring it back.
+      #
+      # Provenance is automatic under OIDC (npm signs without being asked); --provenance is kept
+      # only so a laptop publish, if anyone ever tries one, still signs.
+      - name: npm publish (trusted publishing — OIDC, no token)
         run: npm publish --provenance --access public
         working-directory: cli
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # Prove it, from outside. A green publish step means npm accepted the tarball; it does not
       # mean the world can install it, and it does not mean the signature is real.
