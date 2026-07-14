@@ -52,6 +52,16 @@ jobs:
           cache: pnpm
           registry-url: https://registry.npmjs.org
 
+      # Trusted Publishing needs npm >= 11.5.1. Node 22 ships npm 10.x, which does not know OIDC
+      # exists — it will not fail loudly, it will PUT the tarball with NO credential and take
+      # npm's 404 (npm masks unauthorized publishes as 404 so it cannot be used to probe which
+      # package names are taken). The symptom is an E404 on a package you own, which reads like a
+      # registry problem and is actually a client that is eight months out of date.
+      - name: npm >= 11.5.1 (Trusted Publishing needs it; Node 22 ships npm 10)
+        run: |
+          npm install -g npm@latest
+          echo "npm $(npm --version) · node $(node --version)"
+
       # The tag and package.json are TWO PLACES holding ONE number, and they drift in silence.
       # Tag cli-v0.2.0 against a package.json still reading 0.1.0 and npm either rejects it as a
       # duplicate or ships the wrong version under the right name. Fail here instead, loudly.
