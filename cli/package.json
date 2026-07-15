@@ -1,6 +1,6 @@
 {
   "name": "stratless",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Give your AI coding assistant a model of who you are — read from your own history — so it stops making you feel stupid. Local, private, no account.",
   "type": "module",
   "bin": {
@@ -18,7 +18,8 @@
   "bugs": "https://github.com/stratless-ai/stratless/issues",
   "files": [
     "dist",
-    "!dist/*.test.js"
+    "!dist/*.test.js",
+    "CHANGELOG.md"
   ],
   "engines": {
     "node": ">=18"
