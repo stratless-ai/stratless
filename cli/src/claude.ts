@@ -10,7 +10,18 @@
  */
 import { execFileSync } from 'node:child_process';
 
-export { findAssistant } from './explain.js';
+/** Is a borrowable assistant CLI on PATH? (No API key — we ride the one you already have.) */
+export function findAssistant(): string | undefined {
+  for (const bin of ['claude']) {
+    try {
+      execFileSync('which', [bin], { stdio: ['ignore', 'pipe', 'ignore'] });
+      return bin;
+    } catch {
+      /* not installed — try the next */
+    }
+  }
+  return undefined;
+}
 
 /**
  * Ask the person's own assistant one thing, in --print mode. Returns undefined if it can't answer.
