@@ -110,7 +110,7 @@ function profiler(kind: 'profile' | 'report', backfill: boolean): void {
 
   const sessions = sessionCount(exchanges);
   process.stderr.write(`\n  ${C.dim(`reading ${exchanges.length.toLocaleString()} exchanges across ${sessions} sessions…`)}\n`);
-  const run = judgeAll(exchanges, bin, {
+  const run = judgeAll([...exchanges].reverse(), bin, {
     limit: judgeLimit(backfill),
     onProgress: (done, total) => process.stderr.write(`\r  ${C.dim(`judging ${done}/${total} new…`)}   `),
   });
@@ -180,7 +180,7 @@ function update(backfill: boolean): void {
 
   const sessions = sessionCount(exchanges);
   process.stderr.write(`\n  ${C.dim(`reading ${exchanges.length.toLocaleString()} exchanges across ${sessions} sessions…`)}\n`);
-  const run = judgeAll(exchanges, bin, {
+  const run = judgeAll([...exchanges].reverse(), bin, {
     limit: judgeLimit(backfill),
     onProgress: (done, total) => process.stderr.write(`\r  ${C.dim(`judging ${done}/${total} new…`)}   `),
   });
