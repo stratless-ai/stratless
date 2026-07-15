@@ -46,6 +46,8 @@ as that history grows.
 stratless init       turn it on: keep your history, and start reading it
 stratless profile    the model of you your assistant should load
 stratless report     the same picture, written for you to read
+stratless update     re-read what's new, rebuild the profile, and load it into your assistant
+stratless stop       turn the after-session refresh back off
 stratless stats      raw counts — instant, free, spends nothing
 ```
 
@@ -63,6 +65,9 @@ No model of ours. No server. No training. No inference bill.
    and asks one question: *did understanding transfer, and about what?* One line back, **cached
    forever** — each exchange is read exactly once, ever.
 3. **Synthesize.** It reads the whole stack of those judgments and writes the profile above.
+4. **Load.** It writes the profile to `~/.claude/HUMAN.md` and points your assistant's own config at it,
+   so your next session starts already knowing you — and `stratless update` refreshes it after each
+   session. `stratless stop` turns that off and unloads it.
 
 It spends your own plan's tokens, never a separate bill. The first run reads your backlog once;
 after that it only ever reads what's new. If the assistant can't answer honestly, it says nothing —

@@ -44,5 +44,5 @@ jobs:
           npm install --no-package-lock
           npx tsc --noEmit
           npx tsc
-          node dist/index.js --help | grep -q "stratless why"
+          node dist/index.js --help | grep -q "stratless profile"
           echo "✓ a clean clone builds and runs"
