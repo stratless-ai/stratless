@@ -1,19 +1,25 @@
 #!/usr/bin/env node
 /**
- * stratless — your coding assistant explains itself.
+ * stratless — build your AI a model of who you are, so it stops making you feel stupid.
  *
- *   stratless why <file>:<line>    the decision that made this line
- *   stratless stats                what your assistant did to you
+ *   stratless init      keep your history + turn on the after-session refresh
+ *   stratless profile   the model of you your assistant should load
+ *   stratless report    the same picture, written for you to read
+ *   stratless update    re-read what's new, rebuild the profile, and load it
+ *   stratless stop      turn it off — stop refreshing and unload the profile
+ *   stratless stats     raw counts — instant, free, no tokens
  *
  * Runs on your machine. Reads your own history. Nothing leaves.
- * Nothing is generated that isn't already in your repo.
  */
 import { loadEdits, claudeProjectDir, type Edit } from './transcript.js';
-import { why, type Answer } from './match.js';
-import { findAssistant, explain } from './explain.js';
-import { init as doInit, ARCHIVE } from './init.js';
+import { findAssistant } from './claude.js';
+import { init as doInit, ARCHIVE, stopRefresh } from './init.js';
 import { health } from './canary.js';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { loadExchanges, sessionCount } from './exchange.js';
+import { judgeAll } from './judge.js';
+import { synthesizeProfile, synthesizeReport, topTopics, type Corpus } from './synthesize.js';
+import { injectProfile, removeProfile } from './sink.js';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -27,56 +33,12 @@ const C = {
   bad: (s: string) => `\x1b[31m${s}\x1b[0m`,
 };
 
-const clip = (s: string, n: number) => {
-  const t = s.replace(/\s+/g, ' ').trim();
-  return t.length > n ? `${t.slice(0, n - 1)}…` : t;
-};
-
-function render(file: string, lineNo: number, a: Answer): void {
-  console.log(`\n  ${C.b(`${file}:${lineNo}`)}`);
-  if (a.line) console.log(`  ${C.dim(clip(a.line, 76))}\n`);
-
-  if (a.verdict === 'yours') {
-    console.log(`  ${C.ok('This one is yours.')} No assistant edit in the archive wrote it.`);
-    if (a.note) console.log(`  ${C.dim(a.note)}`);
-    console.log();
-    return;
-  }
-
-  if (a.verdict === 'lost') {
-    console.log(`  ${C.bad('The conversation that explains this line was deleted.')}`);
-    if (a.note) console.log(`  ${C.dim(a.note)}`);
-    console.log(`\n  ${C.dim('Claude Code deletes transcripts after 30 days. Run `stratless init` to stop it.')}\n`);
-    return;
-  }
-
-  const e = a.edit!;
-  const tag = a.verdict === 'matched' ? C.ok('✓ matched') : C.warn('~ likely');
-  console.log(`  ${tag} ${C.dim(`${Math.round(a.confidence * 100)}% · written ${e.date} · session ${e.session.slice(0, 8)}`)}\n`);
-
-  if (e.prompt) console.log(`  ${C.you('You said')}  ${clip(e.prompt, 72)}`);
-  if (e.said) console.log(`  ${C.it('It said')}   ${clip(e.said, 72)}`);
-
-  // Tier 1 — what it MEANS, in words you own. Borrowed from the assistant you already have.
-  // Silence is the correct output when it can't answer honestly.
-  const bin = findAssistant();
-  if (bin) {
-    const meaning = explain(e, a.line, bin);
-    if (meaning) console.log(`\n  ${C.b('So what')}   ${meaning}`);
-  }
-
-  if (a.blame) console.log(`\n  ${C.dim(`git: ${a.blame.sha} ${a.blame.date} — ${clip(a.blame.summary, 46)}`)}`);
-  if (a.note) console.log(`  ${C.warn('note')}: ${a.note}`);
-  console.log();
-}
-
 /**
  * If we can't read the log, SAY SO. Never fall through to a confident lie.
  *
- * stratless reads a format it does not own, and Claude Code will change it. When that happens
- * nothing crashes — we'd parse zero edits, match nothing, and tell every user "you wrote this line
- * yourself" with total confidence, forever, silently. `health()` catches exactly that: write-tool
- * calls visible in the log whose input we can no longer read. It refuses instead of guessing.
+ * stratless reads a format it does not own, and Claude Code will change it. `health()` catches
+ * exactly that — write-tool calls visible in the log whose input we can no longer read — and refuses
+ * instead of guessing. A tool that refuses is trustworthy; one that quietly starts lying is finished.
  */
 function guard(cwd: string, edits: Edit[]): boolean {
   const h = health(cwd, edits);
@@ -108,8 +70,175 @@ function stats(cwd: string): void {
   console.log(`\n    ${C.dim(`archive reaches back to ${first} — anything older was deleted by the 30-day cleanup.`)}\n`);
 }
 
+const STRATLESS = join(homedir(), '.stratless');
+
+/** Amortize default: a good first profile without chewing the whole backlog in one run. */
+const DEFAULT_JUDGE_LIMIT = 50;
+
+/**
+ * Per-run cap on FRESH judge calls (cache hits are always free). `--backfill` lifts it entirely;
+ * STRATLESS_JUDGE_LIMIT overrides it; otherwise a sane default keeps every run — and the after-session
+ * hook — cheap, and the backlog drains over sessions.
+ */
+const judgeLimit = (backfill: boolean): number | undefined => {
+  if (backfill) return undefined;
+  const env = Number(process.env.STRATLESS_JUDGE_LIMIT);
+  if (Number.isFinite(env) && env > 0) return env;
+  return DEFAULT_JUDGE_LIMIT;
+};
+
+/**
+ * The profiler — read the whole corpus, learn who you are, say it back.
+ *
+ * `profile` renders the AI's copy (what loads into its context); `report` renders yours. Same
+ * pipeline underneath — judge every exchange once (cached forever), synthesize the pile once.
+ */
+function profiler(kind: 'profile' | 'report', backfill: boolean): void {
+  const bin = findAssistant();
+  if (!bin) {
+    console.error(`\n  ${C.bad('stratless needs your assistant to read your history.')}`);
+    console.error(`  ${C.dim('It borrows the `claude` you already have — no API key, nothing new to install.')}`);
+    console.error(`  ${C.dim('Install Claude Code, then run this again.')}\n`);
+    process.exit(1);
+  }
+
+  const exchanges = loadExchanges();
+  if (!exchanges.length) {
+    console.log(`\n  No conversations found yet.`);
+    console.log(`  ${C.dim('Talk to Claude Code a few times, run `stratless init`, then try this again.')}\n`);
+    return;
+  }
+
+  const sessions = sessionCount(exchanges);
+  process.stderr.write(`\n  ${C.dim(`reading ${exchanges.length.toLocaleString()} exchanges across ${sessions} sessions…`)}\n`);
+  const run = judgeAll([...exchanges].reverse(), bin, {
+    limit: judgeLimit(backfill),
+    onProgress: (done, total) => process.stderr.write(`\r  ${C.dim(`judging ${done}/${total} new…`)}   `),
+  });
+  process.stderr.write(`\r${' '.repeat(44)}\r`);
+
+  if (!run.judgments.length) {
+    console.error(`\n  ${C.bad('Could not read a single exchange.')} ${C.dim('Is `claude -p` working? Try:  claude -p hello')}\n`);
+    process.exit(1);
+  }
+
+  const corpus: Corpus = {
+    sessions,
+    exchanges: run.judgments.length,
+    topics: topTopics(run.judgments),
+    from: exchanges[0].ts.slice(0, 10),
+    to: exchanges[exchanges.length - 1].ts.slice(0, 10),
+  };
+
+  const text =
+    kind === 'profile'
+      ? synthesizeProfile(run.judgments, corpus, bin)
+      : synthesizeReport(run.judgments, corpus, bin);
+
+  if (!text) {
+    console.error(`\n  ${C.bad(`Could not build your ${kind}.`)} ${C.dim('The assistant returned nothing — silence beats a guess.')}\n`);
+    process.exit(1);
+  }
+
+  mkdirSync(STRATLESS, { recursive: true });
+  const file = join(STRATLESS, `${kind}.txt`);
+  writeFileSync(file, `${text}\n`);
+
+  const header = kind === 'profile' ? "WHO YOU'RE WORKING WITH" : 'YOUR PATTERN — what stratless sees';
+  console.log(`\n  ${C.b(header)}   ${C.dim(`(stratless · ${sessions} sessions · ${run.judgments.length} exchanges)`)}\n`);
+  console.log(
+    text
+      .split('\n')
+      .map((l) => `  ${l}`)
+      .join('\n'),
+  );
+  const spend = run.fresh
+    ? `${run.fresh} new read${run.fresh === 1 ? '' : 's'}, ${run.cached} from cache`
+    : `all ${run.cached} from cache`;
+  const more = run.deferred ? C.dim(` · ${run.deferred} left for next run`) : '';
+  console.log(`\n  ${C.dim(`${spend} · saved to ${file}`)}${more}\n`);
+}
+
+/**
+ * UPDATE — the after-session refresh: read what's new, rebuild the profile, and LOAD it.
+ *
+ * This is what the silent Stop hook runs. Same pipeline as `profile`, then it writes the profile into
+ * the assistant's own instructions file (the load step) so the next session starts already knowing you.
+ */
+function update(backfill: boolean): void {
+  const bin = findAssistant();
+  if (!bin) {
+    console.error(`\n  ${C.bad('stratless needs your assistant to read your history.')}`);
+    console.error(`  ${C.dim('It borrows the `claude` you already have. Install Claude Code, then try again.')}\n`);
+    process.exit(1);
+  }
+
+  const exchanges = loadExchanges();
+  if (!exchanges.length) {
+    console.log(`\n  No conversations found yet.\n  ${C.dim('Talk to Claude Code a few times, run `stratless init`, then try this.')}\n`);
+    return;
+  }
+
+  const sessions = sessionCount(exchanges);
+  process.stderr.write(`\n  ${C.dim(`reading ${exchanges.length.toLocaleString()} exchanges across ${sessions} sessions…`)}\n`);
+  const run = judgeAll([...exchanges].reverse(), bin, {
+    limit: judgeLimit(backfill),
+    onProgress: (done, total) => process.stderr.write(`\r  ${C.dim(`judging ${done}/${total} new…`)}   `),
+  });
+  process.stderr.write(`\r${' '.repeat(44)}\r`);
+
+  if (!run.judgments.length) {
+    console.error(`\n  ${C.bad('Could not read a single exchange.')} ${C.dim('Is `claude -p` working?')}\n`);
+    process.exit(1);
+  }
+
+  const corpus: Corpus = {
+    sessions,
+    exchanges: run.judgments.length,
+    topics: topTopics(run.judgments),
+    from: exchanges[0].ts.slice(0, 10),
+    to: exchanges[exchanges.length - 1].ts.slice(0, 10),
+  };
+  const text = synthesizeProfile(run.judgments, corpus, bin);
+  if (!text) {
+    console.error(`\n  ${C.bad('Could not build your profile.')} ${C.dim('The assistant returned nothing — silence beats a guess.')}\n`);
+    process.exit(1);
+  }
+
+  mkdirSync(STRATLESS, { recursive: true });
+  writeFileSync(join(STRATLESS, 'profile.txt'), `${text}\n`);
+  const { humanMd, claudeMd } = injectProfile(text);
+
+  const spend = run.fresh ? `${run.fresh} new, ${run.cached} from cache` : `all ${run.cached} from cache`;
+  const more = run.deferred ? ` · ${run.deferred} left for next run` : '';
+  console.log(`\n  ${C.ok('profile refreshed and loaded')}  ${C.dim(`(${spend}${more})`)}`);
+  console.log(`  ${C.dim(`wrote ${humanMd}`)}`);
+  console.log(`  ${C.dim(`pointed ${claudeMd} at it (via @import)`)}\n`);
+}
+
+/**
+ * STOP — the off switch. Removes the after-session refresh hook. Your history, archive, and profile
+ * stay exactly as they are; only the automatic updates stop. Being able to shut it up is half of why a
+ * tool that reads everything earns trust.
+ */
+function stop(): void {
+  const hookRemoved = stopRefresh();
+  const unloaded = removeProfile();
+  if (!hookRemoved && !unloaded) {
+    console.log(`\n  ${C.dim('nothing to stop — no refresh hook, no loaded profile.')}\n`);
+    return;
+  }
+  console.log(`\n  ${C.ok('stratless is off.')}`);
+  if (hookRemoved) console.log(`  ${C.dim('· after-session refresh removed')}`);
+  if (unloaded) console.log(`  ${C.dim('· profile unloaded from your CLAUDE.md')}`);
+  console.log(`  ${C.dim('Your ~/.claude/HUMAN.md is left as-is — delete it yourself if you want it gone.')}`);
+  console.log(`  ${C.dim('Run `stratless init` to turn everything back on.')}\n`);
+}
+
 function main(): void {
-  const [cmd, arg] = process.argv.slice(2);
+  const args = process.argv.slice(2);
+  const cmd = args[0];
+  const backfill = args.includes('--backfill') || args.includes('--all');
   const cwd = process.cwd();
 
   if (cmd === 'init') {
@@ -118,52 +247,35 @@ function main(): void {
     console.log(`    reaper           ${C.dim(String(r.before))} → ${C.b(`${r.after} days`)}`);
     console.log(`    archived         ${C.b(String(r.copied))} transcripts${r.skipped ? C.dim(` (${r.skipped} already current)`) : ''}`);
     console.log(`    kept at          ${C.dim(ARCHIVE)}`);
-    console.log(`\n  ${C.dim('Claude Code deletes transcripts after 30 days — per file, even in a project')}`);
-    console.log(`  ${C.dim('you use daily. Anything already gone is gone. Everything from here is kept.')}\n`);
-    console.log(`  ${C.dim('Next:')} stratless stats\n`);
+    console.log(`    after-session    ${r.hookInstalled ? C.b('refresh installed') : C.dim('refresh already on')}`);
+    console.log(`\n  ${C.dim('Claude Code deletes transcripts after 30 days — per file, even in a project you')}`);
+    console.log(`  ${C.dim('use daily. Anything already gone is gone. Everything from here is kept.')}\n`);
+    console.log(`  ${C.dim('Next:')} stratless profile\n`);
     return;
   }
 
-
   if (!cmd || cmd === 'help' || cmd === '--help') {
     console.log(`
-  ${C.b('stratless')} — your coding assistant explains itself
+  ${C.b('stratless')} — build your AI a model of who you are
 
-    ${C.b('stratless init')}                ${C.dim('stop the 30-day reaper. archive everything.')}
-    ${C.b('stratless why <file>:<line>')}   the decision that made this line
-    ${C.b('stratless stats')}               what your assistant did to you
+    ${C.b('stratless init')}       ${C.dim('keep your history + turn on the after-session refresh')}
+    ${C.b('stratless profile')}    ${C.dim('the model of you your assistant should load')}
+    ${C.b('stratless report')}     ${C.dim('the same picture, written for you to read')}
+    ${C.b('stratless update')}     ${C.dim('re-read what is new, rebuild the profile, and load it')}
+    ${C.b('stratless stop')}       ${C.dim('turn it off — stop refreshing and unload the profile')}
+    ${C.b('stratless stats')}      ${C.dim('raw counts — instant, free, no tokens')}
 
+  ${C.dim('add --backfill to profile/update to read your whole history at once (else it amortizes).')}
   ${C.dim('Runs on your machine. Reads your own history. Nothing leaves.')}
 `);
     return;
   }
 
   if (cmd === 'stats') return stats(cwd);
-
-  if (cmd === 'why') {
-    if (!arg) {
-      console.error('  usage: stratless why <file>:<line>');
-      process.exit(1);
-    }
-    const m = /^(.*):(\d+)$/.exec(arg);
-    if (!m) {
-      console.error(`  usage: stratless why <file>:<line>   (got "${arg}")`);
-      process.exit(1);
-    }
-    const [, file, n] = m;
-    if (!existsSync(file)) {
-      console.error(`  no such file: ${file}`);
-      process.exit(1);
-    }
-    const edits = loadEdits(cwd);
-    if (!guard(cwd, edits)) process.exit(1);
-    if (!edits.length) {
-      console.error(`\n  No history for this project.\n  ${C.dim(`Looked in: ${claudeProjectDir(cwd)}`)}\n`);
-      process.exit(1);
-    }
-    render(file, Number(n), why(file, Number(n), edits, cwd));
-    return;
-  }
+  if (cmd === 'profile') return profiler('profile', backfill);
+  if (cmd === 'report') return profiler('report', backfill);
+  if (cmd === 'update') return update(backfill);
+  if (cmd === 'stop') return stop();
 
   console.error(`  unknown command: ${cmd}`);
   process.exit(1);

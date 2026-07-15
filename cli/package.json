@@ -1,7 +1,7 @@
 {
   "name": "stratless",
-  "version": "0.1.0",
-  "description": "Your coding assistant explains itself. Ask why any line of your code is the way it is.",
+  "version": "0.2.0",
+  "description": "Give your AI coding assistant a model of who you are — read from your own history — so it stops making you feel stupid. Local, private, no account.",
   "type": "module",
   "bin": {
     "stratless": "dist/index.js"
@@ -34,9 +34,10 @@
     "claude-code",
     "cursor",
     "ai",
-    "codebase",
-    "provenance",
-    "git-blame"
+    "personalization",
+    "human-context",
+    "memory",
+    "agents-md"
   ],
   "license": "MIT",
   "devDependencies": {

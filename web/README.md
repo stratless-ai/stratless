@@ -2,8 +2,9 @@
 
 **stratless.com** — the front door.
 
-The site for [stratless](https://github.com/stratless-ai/stratless-cli), a local CLI that reads your
-coding assistant's own history and tells you what it decided for you.
+The site for [stratless](https://github.com/stratless-ai/stratless), a local tool that reads your
+AI coding assistant's own history and builds it a living model of who you are — so it stops talking
+over your head, or under it.
 
 ## Run it
 

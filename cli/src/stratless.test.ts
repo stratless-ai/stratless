@@ -6,24 +6,20 @@
  * come back. A confidently-wrong answer, screenshotted by one stranger, ends this product.
  */
 import { strict as assert } from 'node:assert';
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, before, after } from 'node:test';
 
-import { parseSession, type Edit } from './transcript.js';
-import { why } from './match.js';
+import { parseSession } from './transcript.js';
+import { parseExchanges } from './exchange.js';
+import { injectProfile, removeProfile } from './sink.js';
 
 let dir: string;
-let repo: string;
 
-/** A throwaway git repo + a transcript that wrote into it. */
+/** A throwaway dir for fixtures. */
 before(() => {
   dir = mkdtempSync(join(tmpdir(), 'stratless-test-'));
-  repo = join(dir, 'repo');
-  mkdirSync(repo, { recursive: true });
-  execFileSync('git', ['init', '-q'], { cwd: repo });
 });
 after(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -99,47 +95,158 @@ test('subagent turns are not the human conversation', () => {
   assert.equal(parseSession(p).length, 0);
 });
 
-// ── match: the verdicts ───────────────────────────────────────────────────────────────────
+// ── exchanges: the profiler's evidence ──────────────────────────────────────────────────────
+//
+// The profile is only ever as honest as the pairs it reads. Every test here pins a way the parser
+// could quietly manufacture or drop evidence — each of which becomes a wrong claim about a person.
 
-const edit = (file: string, body: string, over: Partial<Edit> = {}): Edit => ({
-  file,
-  date: '2026-07-01',
-  ts: '2026-07-01T10:00:05Z',
-  body,
-  prompt: 'make login work',
-  said: 'Using a 30-day session.',
-  session: 'abc12345',
-  ...over,
+const u = (text: string, ts = '2026-07-01T10:00:00Z') =>
+  JSON.stringify({ type: 'user', message: { content: text }, timestamp: ts });
+const a = (text: string, ts = '2026-07-01T10:00:05Z') =>
+  JSON.stringify({ type: 'assistant', timestamp: ts, message: { content: [{ type: 'text', text }] } });
+
+test('each real human message is the reaction to one turn AND the prompt for the next', () => {
+  const p = writeTranscript(
+    'chain.jsonl',
+    [
+      u('how do i deploy'),
+      a('Push to main and it builds.'),
+      u('wait what does that mean for us'),
+      a('Every commit goes live the moment you push.'),
+      u('ok got it'),
+    ].join('\n'),
+  );
+  const ex = parseExchanges(p);
+  assert.equal(ex.length, 2, 'two closed turns — the dangling last human message is not a third');
+  assert.equal(ex[0].prompt, 'how do i deploy');
+  assert.equal(ex[0].said, 'Push to main and it builds.');
+  assert.equal(ex[0].reaction, 'wait what does that mean for us', 'the reaction carries the signal');
+  assert.equal(ex[1].prompt, 'wait what does that mean for us', 'that same message opens the next turn');
 });
 
-test('a BLANK line must never match — it once scored 100% on nothing', () => {
-  const f = join(repo, 'blank.ts');
-  writeFileSync(f, 'const SESSION_TTL_MS = 2592000000;\n\nexport function go() {}\n');
-  const a = why('blank.ts', 2, [edit(f, 'const SESSION_TTL_MS = 2592000000;')], repo);
-  assert.notEqual(a.verdict, 'matched', 'a blank line can never be a confident match');
-  if (a.edit) assert.ok(a.note, 'if it answers about a blank line at all, it MUST say it widened');
+test('a turn where the assistant only ran tools is NOT an exchange — there is no understanding to judge', () => {
+  const p = writeTranscript(
+    'toolonly.jsonl',
+    [
+      u('rename the file'),
+      JSON.stringify({
+        type: 'assistant',
+        timestamp: '2026-07-01T10:00:05Z',
+        message: { content: [{ type: 'tool_use', name: 'Edit', input: { file_path: '/x/a.ts', new_string: 'x' } }] },
+      }),
+      u('did it work?'),
+    ].join('\n'),
+  );
+  assert.equal(parseExchanges(p).length, 0, 'no assistant words = nothing transferred = judge nothing');
 });
 
-test('`export const X = 48_000` is traceable — a filter once silently ate every constant', () => {
-  const f = join(repo, 'win.ts');
-  writeFileSync(f, 'export const CLASSIFY_WINDOW = 48_000;\nexport const OTHER = 1;\n');
-  const a = why('win.ts', 1, [edit(f, 'export const CLASSIFY_WINDOW = 48_000;\nexport const OTHER = 1;')], repo);
-  assert.ok(a.edit, 'constants and thresholds are exactly the consequential lines');
-  assert.ok(a.confidence > 0.5);
+test('a tool_result is not the human reacting, and assistant text accumulates across it', () => {
+  const p = writeTranscript(
+    'toolresult.jsonl',
+    [
+      u('fix the bug'),
+      a('Looking now.'),
+      JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: 'ok' }] } }),
+      a('Fixed it — off-by-one in the loop.'),
+      u('nice'),
+    ].join('\n'),
+  );
+  const ex = parseExchanges(p);
+  assert.equal(ex.length, 1, 'the tool_result must not split the turn into two');
+  assert.equal(ex[0].reaction, 'nice');
+  assert.ok(ex[0].said.includes('Looking now') && ex[0].said.includes('off-by-one'), 'both assistant texts survive');
 });
 
-test('a line the assistant never wrote is YOURS — never a confident guess', () => {
-  const f = join(repo, 'mine.ts');
-  writeFileSync(f, 'export function handWrittenByAHuman(x: number) { return x * 2; }\n');
-  const a = why('mine.ts', 1, [edit(join(repo, 'elsewhere.ts'), 'const UNRELATED = 1;')], repo);
-  assert.equal(a.verdict, 'yours');
-  assert.equal(a.confidence, 0);
-  assert.equal(a.edit, undefined);
+test('subagent turns are not the human conversation', () => {
+  const p = writeTranscript(
+    'sidechain.jsonl',
+    [
+      u('do the thing'),
+      JSON.stringify({
+        type: 'assistant',
+        isSidechain: true,
+        timestamp: '2026-07-01T10:00:05Z',
+        message: { content: [{ type: 'text', text: 'subagent chatter' }] },
+      }),
+      u('done?'),
+    ].join('\n'),
+  );
+  assert.equal(parseExchanges(p).length, 0, 'a sidechain turn is not the person talking');
 });
 
-test('an out-of-range line throws — it does not invent an answer', () => {
-  const f = join(repo, 'short.ts');
-  writeFileSync(f, 'const A = 1;\n');
-  assert.throws(() => why('short.ts', 999, [], repo), /999/);
+// ── sink: the load step ─────────────────────────────────────────────────────────────────────
+//
+// The load writes the profile to the canonical HUMAN.md and points CLAUDE.md at it with an @import.
+// It owns ONLY the text between its two markers in CLAUDE.md — a wrong upsert would silently eat
+// someone's real instructions — and it must never inline the profile back into CLAUDE.md.
+
+test("injectProfile writes HUMAN.md and points CLAUDE.md at it, leaving the person's content untouched", () => {
+  const humanMd = join(dir, 'HUMAN.md');
+  const claudeMd = join(dir, 'CLAUDE.md');
+  writeFileSync(claudeMd, '# My own notes\nkeep this line\n');
+
+  injectProfile('first profile', humanMd, claudeMd);
+
+  assert.ok(readFileSync(humanMd, 'utf8').includes('first profile'), 'the profile lands in HUMAN.md');
+  const doc = readFileSync(claudeMd, 'utf8');
+  assert.ok(doc.includes('# My own notes') && doc.includes('keep this line'), "the person's content survives");
+  assert.ok(doc.includes('stratless:start'), 'our managed block is added');
+  assert.ok(/@\S*HUMAN\.md/.test(doc), 'CLAUDE.md points at HUMAN.md via @import');
+  assert.ok(!doc.includes('first profile'), 'the profile is NOT inlined into CLAUDE.md — it is a redirect');
+});
+
+test('re-running injectProfile rewrites HUMAN.md and keeps exactly one CLAUDE.md block', () => {
+  const humanMd = join(dir, 'HUMAN-2.md');
+  const claudeMd = join(dir, 'CLAUDE-2.md');
+  writeFileSync(claudeMd, '# mine\n');
+
+  injectProfile('v1', humanMd, claudeMd);
+  injectProfile('v2', humanMd, claudeMd);
+
+  const human = readFileSync(humanMd, 'utf8');
+  assert.ok(human.includes('v2') && !human.includes('v1'), 'HUMAN.md is replaced, not stacked');
+  const doc = readFileSync(claudeMd, 'utf8');
+  assert.ok(doc.includes('# mine'), 'their content still survives the update');
+  assert.equal(doc.match(/stratless:start/g)?.length, 1, 'exactly one managed block, ever');
+});
+
+test('injectProfile creates both files (and parent dirs) if absent', () => {
+  const humanMd = join(dir, 'nested', 'HUMAN.md');
+  const claudeMd = join(dir, 'nested', 'CLAUDE.md');
+  injectProfile('hello', humanMd, claudeMd);
+  assert.ok(readFileSync(humanMd, 'utf8').includes('hello'), 'HUMAN.md created');
+  assert.ok(/@\S*HUMAN\.md/.test(readFileSync(claudeMd, 'utf8')), 'CLAUDE.md created with the redirect');
+});
+
+// `stop` must be a true off-switch: unload the profile from CLAUDE.md, but never eat the person's own
+// content, and never touch HUMAN.md (their data is theirs to keep).
+
+test('removeProfile strips only our block and keeps the person\'s content', () => {
+  const humanMd = join(dir, 'HUMAN-rm.md');
+  const claudeMd = join(dir, 'CLAUDE-rm.md');
+  writeFileSync(claudeMd, '# mine\nkeep me\n');
+  injectProfile('a profile', humanMd, claudeMd);
+  assert.ok(readFileSync(claudeMd, 'utf8').includes('stratless:start'), 'precondition: block present');
+
+  assert.equal(removeProfile(claudeMd), true, 'reports the removal');
+  const doc = readFileSync(claudeMd, 'utf8');
+  assert.ok(doc.includes('# mine') && doc.includes('keep me'), 'the person\'s content survives');
+  assert.ok(!doc.includes('stratless:start') && !doc.includes('stratless:end'), 'the block is gone');
+});
+
+test('removeProfile leaves HUMAN.md untouched', () => {
+  const humanMd = join(dir, 'HUMAN-keep.md');
+  const claudeMd = join(dir, 'CLAUDE-keep.md');
+  injectProfile('keep this profile', humanMd, claudeMd);
+  removeProfile(claudeMd);
+  assert.ok(readFileSync(humanMd, 'utf8').includes('keep this profile'), 'HUMAN.md still holds the profile');
+});
+
+test('removeProfile is a safe no-op with no block (or no file)', () => {
+  const claudeMd = join(dir, 'CLAUDE-noblock.md');
+  writeFileSync(claudeMd, '# just mine\n');
+  assert.equal(removeProfile(claudeMd), false, 'nothing to remove');
+  assert.equal(readFileSync(claudeMd, 'utf8'), '# just mine\n', 'file left untouched');
+  assert.equal(removeProfile(join(dir, 'does-not-exist.md')), false, 'missing file is a no-op');
 });
 

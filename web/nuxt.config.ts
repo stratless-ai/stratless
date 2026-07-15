@@ -1,9 +1,23 @@
+import { readFileSync } from 'node:fs'
+
 const TITLE = 'stratless — your coding assistant explains itself'
 const DESC =
   'Your AI wrote your product. Ask it why. stratless reads your coding assistant’s own history and tells you what it decided for you — in plain English. Runs on your machine. No API key. Nothing leaves.'
 const URL = 'https://stratless.com'
 
+// The version shown on the site is the CLI's real version, read from cli/package.json at BUILD so it
+// can never drift from what `npx stratless` installs. Site + CLI flip together, so at deploy time
+// this equals the npm-published version. (It is currently ahead of npm during 0.2.0 development.)
+const VERSION = (
+  JSON.parse(readFileSync(new globalThis.URL('../cli/package.json', import.meta.url), 'utf8')) as {
+    version: string
+  }
+).version
+
 export default defineNuxtConfig({
+  runtimeConfig: {
+    public: { version: VERSION },
+  },
   // No modules. Not one. The docs renderer is 83 lines of markdown-it in lib/docs.ts, and the
   // language switcher is CSS-only. Every dependency here is a dependency you have to maintain
   // alone, forever, and this site is maintained by a solo builder with a CLI to ship.

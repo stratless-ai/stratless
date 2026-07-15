@@ -34,7 +34,7 @@ export interface Edit {
 const WRITE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
 /** Machine-injected prompts that aren't the human speaking. */
-function isRealPrompt(s: string): boolean {
+export function isRealPrompt(s: string): boolean {
   if (!s) return false;
   if (s.startsWith('<') || s.startsWith('[Request') || s.startsWith('Caveat:')) return false;
   if (s.includes('task-notification')) return false;
@@ -42,7 +42,7 @@ function isRealPrompt(s: string): boolean {
   return true;
 }
 
-function textOf(content: unknown): string {
+export function textOf(content: unknown): string {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
   return content
@@ -52,7 +52,7 @@ function textOf(content: unknown): string {
     .join(' ');
 }
 
-function hasToolResult(content: unknown): boolean {
+export function hasToolResult(content: unknown): boolean {
   return (
     Array.isArray(content) &&
     content.some((b) => typeof b === 'object' && b !== null && (b as { type?: string }).type === 'tool_result')

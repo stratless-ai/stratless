@@ -31,6 +31,39 @@ export interface InitResult {
   copied: number;
   skipped: number;
   oldest?: string;
+  /** did this run add the silent after-session refresh hook (vs it already being present)? */
+  hookInstalled: boolean;
+}
+
+/**
+ * Install the silent after-session refresh: a Claude Code Stop hook that runs `stratless update` in
+ * the background (prints nothing; rebuilds and reloads the profile). Idempotent — never adds a
+ * duplicate. Returns true only when it actually added the hook.
+ */
+function installStopHook(settings: any): boolean {
+  const command = 'stratless update >/dev/null 2>&1 &';
+  settings.hooks ??= {};
+  settings.hooks.Stop ??= [];
+  if (JSON.stringify(settings.hooks.Stop).includes('stratless update')) return false;
+  settings.hooks.Stop.push({ hooks: [{ type: 'command', command }] });
+  return true;
+}
+
+/**
+ * Turn the after-session refresh OFF — remove our Stop hook. Leaves the reaper, the archive, and the
+ * profile untouched: the off switch stops the *automatic* updates, nothing else. Returns whether a
+ * hook was actually there to remove.
+ */
+export function stopRefresh(): boolean {
+  if (!existsSync(SETTINGS)) return false;
+  const settings = JSON.parse(readFileSync(SETTINGS, 'utf8'));
+  const stop: unknown = settings?.hooks?.Stop;
+  if (!Array.isArray(stop)) return false;
+  const kept = stop.filter((g) => !JSON.stringify(g).includes('stratless update'));
+  if (kept.length === stop.length) return false;
+  settings.hooks.Stop = kept;
+  writeFileSync(SETTINGS, `${JSON.stringify(settings, null, 2)}\n`);
+  return true;
 }
 
 /** Every transcript, at any depth (subagent transcripts live in nested folders). */
@@ -49,6 +82,7 @@ export function init(): InitResult {
   const settings = existsSync(SETTINGS) ? JSON.parse(readFileSync(SETTINGS, 'utf8')) : {};
   const before: number | 'default (30)' = settings.cleanupPeriodDays ?? 'default (30)';
   settings.cleanupPeriodDays = KEEP_DAYS;
+  const hookInstalled = installStopHook(settings);
   mkdirSync(join(HOME, '.claude'), { recursive: true });
   writeFileSync(SETTINGS, `${JSON.stringify(settings, null, 2)}\n`);
 
@@ -73,5 +107,5 @@ export function init(): InitResult {
     if (!oldest || m < oldest) oldest = m;
   }
 
-  return { before, after: KEEP_DAYS, copied, skipped, oldest };
+  return { before, after: KEEP_DAYS, copied, skipped, oldest, hookInstalled };
 }

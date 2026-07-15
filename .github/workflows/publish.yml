@@ -1,31 +1,19 @@
 name: publish
 
-# Publishes `stratless` to npm. Fires ONLY on a `cli-v*` tag.
+# Publishes `stratless` to npm on a `cli-v*` tag (or a manual trust probe — see the publish step).
 #
-# ─── why this is its own file, and not a job in cli.yml ───────────────────────────────────────
-# cli.yml has a `paths:` filter. GitHub applies `paths:` to EVERY push matched by the trigger —
-# tag pushes included. A tag pointing at a commit already on main carries no file changes, so the
-# paths filter matches nothing and the job silently never runs. No error, no red X, just an empty
-# npm registry and an afternoon of confusion. This file has no paths filter, so it cannot happen.
+# Separate from cli.yml on purpose: cli.yml has a `paths:` filter, and GitHub applies paths filters to
+# tag pushes too — a tag on an existing commit carries no file changes, so the job would silently never
+# run. This file has no paths filter, so that can't happen.
 #
-# ─── why the gates run again here ─────────────────────────────────────────────────────────────
-# It would be cheaper to depend on cli.yml's green run. But that run tested whatever was on main
-# at the time; this tag might point somewhere else entirely. A publish is the one thing you cannot
-# take back, so it re-earns its green on the exact commit being shipped.
+# The gates re-run here even though cli.yml already ran them: that run tested whatever was on main at the
+# time, but this tag may point elsewhere, and a publish can't be taken back — so it re-earns its green on
+# the exact commit being shipped.
 #
-# ─── why --provenance ─────────────────────────────────────────────────────────────────────────
-# stratless exists to say "this line came from that decision — here is the receipt". A stratless
-# tarball arriving on npm from an unknown laptop, unverifiable, would be the tool failing its own
-# test in public. --provenance makes npm mint a signed Sigstore attestation binding this tarball
-# to this repo, this commit, this run. npm shows "Built and signed on GitHub Actions"; anyone can
-# check it with `npm audit signatures`. It is also the only thing that will ever assert that what
-# is on npm equals what is on main.
-#
-# ─── after the first publish ──────────────────────────────────────────────────────────────────
-# NPM_TOKEN exists only because npm's Trusted Publishing must be configured on a package that
-# already exists — you cannot preconfigure a name nobody owns. Once stratless@0.1.0 is live:
-# configure Trusted Publishing on npmjs.com, delete the NPM_TOKEN secret, revoke the token.
-# Provenance keeps working automatically over OIDC. Zero long-lived npm credentials.
+# --provenance: stratless reads your private history and asks you to trust it; a tarball on npm that
+# couldn't be tied back to this source would ask for that trust blind. Provenance makes npm mint a signed
+# Sigstore attestation binding the tarball to this repo, commit, and run — anyone can verify with
+# `npm audit signatures` that what's on npm is what's on main.
 
 on:
   push:
@@ -52,25 +40,16 @@ jobs:
           cache: pnpm
           registry-url: https://registry.npmjs.org
 
-      # Trusted Publishing needs npm >= 11.5.1. Node 22 ships npm 10.x, which does not know OIDC
-      # exists — it will not fail loudly, it will PUT the tarball with NO credential and take
-      # npm's 404 (npm masks unauthorized publishes as 404 so it cannot be used to probe which
-      # package names are taken). The symptom is an E404 on a package you own, which reads like a
-      # registry problem and is actually a client that is eight months out of date.
+      # Trusted Publishing needs npm >= 11.5.1. Node 22 ships npm 10, which doesn't speak OIDC: it would
+      # publish with no credential and take npm's 404 — an E404 on a package you own that looks like a
+      # registry problem and is really an out-of-date client.
       - name: npm >= 11.5.1 (Trusted Publishing needs it; Node 22 ships npm 10)
         run: |
           npm install -g npm@latest
           echo "npm $(npm --version) · node $(node --version)"
 
-      # The tag and package.json are TWO PLACES holding ONE number, and they drift in silence.
-      # Tag cli-v0.2.0 against a package.json still reading 0.1.0 and npm either rejects it as a
-      # duplicate or ships the wrong version under the right name. Fail here instead, loudly.
-      #
-      # Skipped on workflow_dispatch, where the ref is a branch and there is no tag to compare.
-      # A manual run is how you PROVE the OIDC trust still works: it attempts to publish whatever
-      # version is on main, npm authenticates FIRST and rejects the duplicate SECOND, so an
-      # "E403 cannot publish over previously published versions" is a PASS — it means npm knew who
-      # we were. ENEEDAUTH/EOTP/401 would mean the trusted publisher is not wired up.
+      # Tag and package.json hold one number in two places and drift silently. Fail loudly here rather
+      # than ship the wrong version. Skipped on workflow_dispatch, where there is no tag.
       - name: the tag must equal the version
         if: startsWith(github.ref, 'refs/tags/')
         run: |
@@ -85,35 +64,20 @@ jobs:
       - run: pnpm --filter ./cli build
       - run: pnpm --filter ./cli test
 
-      # NO TOKEN. This publishes over npm Trusted Publishing (OIDC): GitHub mints a short-lived
-      # identity token proving to npm which repo, which workflow file and which commit is asking,
-      # and npm checks that against the trusted publisher configured on the package itself.
+      # No token. Publishes over npm Trusted Publishing (OIDC): GitHub mints a short-lived identity token
+      # proving which repo/workflow/commit is asking, and npm checks it against the trusted publisher
+      # configured on the package — no long-lived credential exists to leak.
       #
-      # There is no long-lived credential in existence to leak. The NPM_TOKEN that published 0.1.0
-      # had "Bypass 2FA" switched ON — it had to, or CI could never publish — which made it a
-      # credential that could push code to every machine that runs `npm i -g stratless`, with no
-      # second factor. It existed for eleven minutes and was revoked. Do not bring it back.
-      #
-      # Provenance is automatic under OIDC (npm signs without being asked); --provenance is kept
-      # only so a laptop publish, if anyone ever tries one, still signs.
+      # A workflow_dispatch run is a TRUST PROBE, not a release: it re-publishes the version already on
+      # the registry. npm authenticates first and checks for a duplicate second, so "cannot publish over
+      # the previously published versions" is the one error that proves the trust is intact — that is the
+      # pass. ENEEDAUTH / EOTP / E404 mean the trust is broken; those stay red.
       - name: npm publish (trusted publishing — OIDC, no token)
         working-directory: cli
         run: |
           set -o pipefail
           out=$(npm publish --provenance --access public 2>&1) && { echo "$out"; exit 0; }
           echo "$out"
-
-          # A MANUAL RUN IS A TRUST PROBE, NOT A RELEASE.
-          #
-          # It re-publishes the version already on the registry. npm authenticates FIRST and
-          # checks for a duplicate SECOND — so "cannot publish over the previously published
-          # versions" is the ONLY error that proves the OIDC trust is intact: npm knew who we
-          # were, found us to be the owner, and refused for the one harmless reason. That is a
-          # PASS, and it must be green, because a red X that means "fine, ignore it" is a lie
-          # you will either panic at or learn to ignore — and then miss the real one.
-          #
-          # Anything else — ENEEDAUTH, EOTP, E404 (npm masks unauthorized publishes as 404) —
-          # means the trust is BROKEN and you would only find out mid-release. Those stay red.
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] \
              && grep -q "cannot publish over the previously published versions" <<<"$out"; then
             echo "::notice::OIDC trust VERIFIED — npm authenticated us with no token, then refused the duplicate. This is the pass."
@@ -121,13 +85,8 @@ jobs:
           fi
           exit 1
 
-      # Prove it, from outside. A green publish step means npm accepted the tarball; it does not
-      # mean the world can install it, and it does not mean the signature is real.
-      #
-      # TAGS ONLY. On a manual trust probe there is no tag, so GITHUB_REF_NAME is "main" and this
-      # spends two minutes retrying `npm view stratless@main` before failing — a release check
-      # running during a probe, turning a passing probe red for a reason that has nothing to do
-      # with the thing being probed.
+      # Prove it from outside: a green publish means npm accepted the tarball, not that the world can
+      # install it. Tags only — on a trust probe there is no published tag to install.
       - name: a stranger installs it from the registry
         if: startsWith(github.ref, 'refs/tags/')
         run: |
@@ -138,6 +97,6 @@ jobs:
           done
           cd "$(mktemp -d)"
           npm install -g "stratless@${GITHUB_REF_NAME#cli-v}"
-          stratless --help | grep -q "stratless why"
+          stratless --help | grep -q "stratless profile"
           npm audit signatures --prefix "$(npm root -g)/.." || true
           echo "✓ installed from npm and ran"
