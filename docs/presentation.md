@@ -26,6 +26,15 @@ cleanly. So it isn't annoyance. It's a small betrayal, repeated every day.
 In the user's own words: **"i feel stupider."** The tool that promised to elevate you is quietly
 diminishing you.
 
+**The philosophy underneath — a game, not a test.** Why does it cut so deep? Because the tool is
+grading you on a *test* when the work is really a *game*. In a game, a wrong move is **information** —
+it shows you where the walls are, it teaches you the map; it makes you *more*. A test does the
+opposite math: a wrong move is subtracted from your score; it makes you *less*. Today's AI runs the
+test math — didn't get it? you're behind — so your confusion doesn't just puzzle you, it *indicts*
+you. stratless runs the game math: your wrong moves, your re-asks, your "what does this mean for us"
+become the **map** it reads to help you — information, never failure. (This is the *voice* and the
+*why*; the framework — The Person Layer — is the *what*. Keep them distinct.)
+
 *This is the keystone — the wound the whole product dresses.*
 
 ---

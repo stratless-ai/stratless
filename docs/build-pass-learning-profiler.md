@@ -171,6 +171,28 @@ cadence instead of the whole profile being rewritten every run:
 The fast layer moves; direction stays put. That's continuity *with* stability — the profile deepens
 without flip-flopping session to session.
 
+### Future signal source — the override-delta (2026-07-15, from the es-v2 review)
+
+Everything above reads ONE signal: the conversation — *(what you said → how you reacted)*. That
+captures *who you are* (meaning, altitude) but is weak on *how you build* (craft, style, which
+abstractions you accept). A second forensic signal fills exactly that gap: **the override-delta — what
+the agent wrote vs. what you kept or rewrote.** When the agent writes `const f = () =>` and you change
+it to `function f()`, you never *said* the preference — you *showed* it. It is the strongest possible
+signal for the **"how you work" layer** (§3d), the one conversation reaches least.
+
+It fits the architecture cleanly: it's *another trace already on disk*. `transcript.ts` already parses
+every agent edit (`Edit` / `Write` / `MultiEdit`); git records what survived. So "agent wrote X → you
+ended up with Y" is reconstructable **forensically, by diffing existing records** — never a live
+file-watching daemon (surveillance, which the posture forbids; the es-v2 proposal got this wrong). It's
+on-theme with "game, not test": your corrections *are* the map, and this reads them.
+
+**The catch — it's noisier.** Not every override is a preference (bug fix vs. style; a teammate's edit
+in a shared repo; a task change). The judge must separate craft-preference from bug/task and **refuse
+on ambiguity**; consistency across many overrides turns noise into signal (same trick as the miner, §3a).
+
+**Where it lands:** Phase 2+ — a *second Source dimension* feeding the how-you-work layer, built once
+dogfooding shows that layer is thin. Not the first checkpoint (0.2.0).
+
 ---
 
 ## 4. What this means for the code
