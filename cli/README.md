@@ -1,129 +1,82 @@
 # stratless
 
-**Your AI wrote your product. Ask it why.**
+**stratless builds your AI a living model of who you are — what you know, how you think, what
+you're building — so it stops making you feel stupid.**
 
-```
-$ stratless why src/lib/auth.ts:174
-
-  const payload = { p: 'console', acct: opts.acct, exp: Date.now() + …
-
-  ✓ matched  100% · written 2026-07-09
-
-  You said   "lets plan it out properly first and enter plan mode for this…"
-  It said    "Now I have the full GitHub flow. My plan for Layer 2: switch the sessio…"
-
-  So what    Console sessions expire after 30 minutes with no refresh, so anyone
-             testing the console during launch gets logged out mid-session and
-             has to re-authenticate.
-
-  git: 22a504fa 2026-07-09 — feat(api): accounts + Google login
-```
-
-Nobody decided 30 minutes. It got picked for you, on a Thursday, while you were thinking
-about something else. **Now you know.**
-
----
-
-## Install
+Your coding assistant has no idea who it's talking to. So it only has two registers: silence, or a
+wall of jargon. stratless gives it the missing third thing — a picture of *you*, read from the
+conversations you've already had — and hands it over before you say a word.
 
 ```
 npx stratless init
 ```
 
-No account. No API key. No cloud. It reads files that are already on your disk.
+No account. No API key. No cloud. It reads transcripts already on your disk and borrows the
+`claude` you already have to read them. **Nothing leaves your machine.**
 
 ---
 
-## What it does
+## What it builds
+
+Run `stratless profile` and it hands your assistant something like this:
 
 ```
-stratless init     stop the 30-day reaper · archive your history
-stratless stats    what your assistant has actually been doing
-stratless why      the decision that made this line
+WHO YOU'RE WORKING WITH                    (stratless · 84 sessions · 3,756 exchanges)
+
+Fluent builder, not a beginner — uses api / commit / schema / deploy casually, 900+×.
+Don't explain the stack. They ship.
+
+What stalls them is never the tech — it's MEANING. Their commonest move when stuck
+isn't "what is X" but "what does this mean for us?" Abstract explanation with no line
+to the product is noise. Attach the consequence or don't say it.
+
+Thinks out loud. Not giving orders — reasoning. Be a thinking partner. "ok" usually
+means "ok, and here's the next thing" — they're driving; keep up, don't stop and wait.
+
+Failure signal: "what does this mean" / "i feel stupider" / "cant keep up" / going
+quiet. Every time = you went abstract or long. Back up, get concrete.
 ```
 
-### `stratless stats`
+Not a rules sheet you wrote. A model of a person, reasoned from your real history — and it sharpens
+as that history grows.
+
+## The commands
 
 ```
-  Your assistant, in this project
-
-    lines it wrote            189,592
-    edits it made               6,348
-    files it touched            1,073
-    sessions                       80
-    days                           36
+stratless init       turn it on: keep your history, and start reading it
+stratless profile    the model of you your assistant should load
+stratless report     the same picture, written for you to read
+stratless stats      raw counts — instant, free, spends nothing
 ```
 
-You wrote none of that. You have never read most of it.
+`init` is the one thing you can't do later. Claude Code **deletes your transcripts after 30 days**,
+per file, so your history rots from the back even in a project you use every day. `init` stops that
+and copies everything somewhere safe. Everything else reads from there.
 
-### `stratless why <file>:<line>`
+## How it works — there's no trick
 
-Point at any line. Get the conversation that made it, in your own words, and what it
-costs you — in plain English.
+No model of ours. No server. No training. No inference bill.
 
-Four answers, and three of them are refusals:
+1. **Read.** Every session Claude Code has is already on your disk, in `~/.claude/projects`.
+   stratless walks each one into `(what the assistant said → how you reacted)` pairs.
+2. **Judge.** It hands each pair to the `claude` you already have (`claude -p`, on your own plan)
+   and asks one question: *did understanding transfer, and about what?* One line back, **cached
+   forever** — each exchange is read exactly once, ever.
+3. **Synthesize.** It reads the whole stack of those judgments and writes the profile above.
 
-| | |
-|---|---|
-| **✓ matched** | found the decision, and `git blame` agrees |
-| **~ likely** | found something, but the witnesses disagree — and it tells you how |
-| **yours** | no assistant edit wrote this. **You did.** |
-| **lost** | the conversation that explains this line was **deleted** |
-
----
-
-## There's no trick
-
-There's no model. No cloud. No training. No inference bill.
-
-**The conversation was on your disk the whole time.** Every assistant that can resume a
-chat has to store the chat — Claude Code keeps it in `~/.claude/projects`. Nobody reads it.
-
-stratless reads it. It finds the exact edit that wrote your line, pulls up the words *you*
-said at the time, and shows you the receipt. **Nothing is generated.** It's quoting.
-
-The one sentence that *is* generated — the *"So what"* — is written by **the assistant you
-already have** (`claude -p`), on your own plan, and grounded in your own diff. If it can't
-answer honestly, it says nothing at all.
-
-**Knowing how it works makes it better, not worse.**
-
----
-
-## Why `init` matters, today
-
-**Claude Code deletes your transcripts after 30 days.** Per *file* — so your history rots
-from the back even in a project you use every day.
-
-On the machine this was built on, everything before 9 June was **already gone**. Months of
-decisions. The reasoning behind code that is still running in production. Deleted on a timer
-nobody knew about.
-
-`stratless init` stops the reaper and copies everything somewhere safe. It takes two seconds
-and it is the only part of this you can't do later.
-
----
-
-## What it can't do
-
-- **Claude Code only, for now.** Cursor, Windsurf, Cline and Codex all keep local logs too —
-  readers for those are next.
-- **It can't explain code it never saw.** If you wrote the line, it says so. If the
-  transcript was reaped before you ran `init`, it says that too.
-- **A short, generic line can't be traced.** It'll widen to the surrounding block **and tell
-  you it did.** A lead, not a fact.
-
-It would rather refuse than guess. That's the whole point.
-
----
+It spends your own plan's tokens, never a separate bill. The first run reads your backlog once;
+after that it only ever reads what's new. If the assistant can't answer honestly, it says nothing —
+a confidently-wrong profile is the one failure that would end this, so silence always beats a guess.
 
 ## Privacy
 
-Everything runs on your machine. Your transcripts never leave it. There is no server, no
-account, no telemetry, and nothing to sign up for.
+Everything runs on your machine. **Your conversations, the judgments, and your profile never leave
+it** — not for telemetry, not for "aggregate insight," not ever. There is no server, no account,
+nothing to sign up for. The only network call is to your own assistant, on your own plan — the same
+place your code was already going.
 
-The only network call is the optional *"So what"* line, which goes through **your own
-assistant, on your own key or subscription** — the same place your code was already going.
+The profile is a plain text file. It's yours: load it into any other assistant, read it, or delete
+it.
 
 ---
 
