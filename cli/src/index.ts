@@ -19,9 +19,10 @@ import { loadExchanges, sessionCount } from './exchange.js';
 import { judgeAll } from './judge.js';
 import { synthesizeProfile, synthesizeReport, topTopics, type Corpus } from './synthesize.js';
 import { injectProfile, removeProfile } from './sink.js';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const C = {
   b: (s: string) => `\x1b[1m${s}\x1b[0m`,
@@ -72,16 +73,23 @@ function stats(cwd: string): void {
 
 const STRATLESS = join(homedir(), '.stratless');
 
-/** Amortize default: a good first profile without chewing the whole backlog in one run. */
+/**
+ * The profile is built from the most-recent WINDOW exchanges, never the whole backlog. A profile
+ * converges here — the older tail is diminishing returns and, by our own recency logic, stale — and
+ * bounding it keeps every run cheap and SAFE regardless of how deep a history goes. (An unbounded pass
+ * once judged 3,873 exchanges back-to-back and took a laptop down.)
+ */
+const JUDGE_WINDOW = 200;
+
+/** Amortize default: a good first profile without chewing the whole window in one run. */
 const DEFAULT_JUDGE_LIMIT = 50;
 
 /**
- * Per-run cap on FRESH judge calls (cache hits are always free). `--backfill` lifts it entirely;
- * STRATLESS_JUDGE_LIMIT overrides it; otherwise a sane default keeps every run — and the after-session
- * hook — cheap, and the backlog drains over sessions.
+ * Per-run cap on FRESH judge calls (cache hits are always free). STRATLESS_JUDGE_LIMIT overrides it;
+ * otherwise a sane default keeps every run — and the after-session hook — cheap, and the window drains
+ * over runs.
  */
-const judgeLimit = (backfill: boolean): number | undefined => {
-  if (backfill) return undefined;
+const judgeLimit = (): number => {
   const env = Number(process.env.STRATLESS_JUDGE_LIMIT);
   if (Number.isFinite(env) && env > 0) return env;
   return DEFAULT_JUDGE_LIMIT;
@@ -93,7 +101,7 @@ const judgeLimit = (backfill: boolean): number | undefined => {
  * `profile` renders the AI's copy (what loads into its context); `report` renders yours. Same
  * pipeline underneath — judge every exchange once (cached forever), synthesize the pile once.
  */
-function profiler(kind: 'profile' | 'report', backfill: boolean): void {
+function profiler(kind: 'profile' | 'report'): void {
   const bin = findAssistant();
   if (!bin) {
     console.error(`\n  ${C.bad('stratless needs your assistant to read your history.')}`);
@@ -109,10 +117,11 @@ function profiler(kind: 'profile' | 'report', backfill: boolean): void {
     return;
   }
 
-  const sessions = sessionCount(exchanges);
-  process.stderr.write(`\n  ${C.dim(`reading ${exchanges.length.toLocaleString()} exchanges across ${sessions} sessions…`)}\n`);
-  const run = judgeAll([...exchanges].reverse(), bin, {
-    limit: judgeLimit(backfill),
+  const window = exchanges.slice(-JUDGE_WINDOW);
+  const sessions = sessionCount(window);
+  process.stderr.write(`\n  ${C.dim(`reading ${window.length.toLocaleString()} recent exchanges across ${sessions} sessions…`)}\n`);
+  const run = judgeAll([...window].reverse(), bin, {
+    limit: judgeLimit(),
     onProgress: (done, total) => process.stderr.write(`\r  ${C.dim(`judging ${done}/${total} new…`)}   `),
   });
   process.stderr.write(`\r${' '.repeat(44)}\r`);
@@ -126,8 +135,8 @@ function profiler(kind: 'profile' | 'report', backfill: boolean): void {
     sessions,
     exchanges: run.judgments.length,
     topics: topTopics(run.judgments),
-    from: exchanges[0].ts.slice(0, 10),
-    to: exchanges[exchanges.length - 1].ts.slice(0, 10),
+    from: window[0].ts.slice(0, 10),
+    to: window[window.length - 1].ts.slice(0, 10),
   };
 
   const text =
@@ -165,7 +174,7 @@ function profiler(kind: 'profile' | 'report', backfill: boolean): void {
  * This is what the silent Stop hook runs. Same pipeline as `profile`, then it writes the profile into
  * the assistant's own instructions file (the load step) so the next session starts already knowing you.
  */
-function update(backfill: boolean): void {
+function update(): void {
   const bin = findAssistant();
   if (!bin) {
     console.error(`\n  ${C.bad('stratless needs your assistant to read your history.')}`);
@@ -179,10 +188,11 @@ function update(backfill: boolean): void {
     return;
   }
 
-  const sessions = sessionCount(exchanges);
-  process.stderr.write(`\n  ${C.dim(`reading ${exchanges.length.toLocaleString()} exchanges across ${sessions} sessions…`)}\n`);
-  const run = judgeAll([...exchanges].reverse(), bin, {
-    limit: judgeLimit(backfill),
+  const window = exchanges.slice(-JUDGE_WINDOW);
+  const sessions = sessionCount(window);
+  process.stderr.write(`\n  ${C.dim(`reading ${window.length.toLocaleString()} recent exchanges across ${sessions} sessions…`)}\n`);
+  const run = judgeAll([...window].reverse(), bin, {
+    limit: judgeLimit(),
     onProgress: (done, total) => process.stderr.write(`\r  ${C.dim(`judging ${done}/${total} new…`)}   `),
   });
   process.stderr.write(`\r${' '.repeat(44)}\r`);
@@ -196,8 +206,8 @@ function update(backfill: boolean): void {
     sessions,
     exchanges: run.judgments.length,
     topics: topTopics(run.judgments),
-    from: exchanges[0].ts.slice(0, 10),
-    to: exchanges[exchanges.length - 1].ts.slice(0, 10),
+    from: window[0].ts.slice(0, 10),
+    to: window[window.length - 1].ts.slice(0, 10),
   };
   const text = synthesizeProfile(run.judgments, corpus, bin);
   if (!text) {
@@ -235,11 +245,25 @@ function stop(): void {
   console.log(`  ${C.dim('Run `stratless init` to turn everything back on.')}\n`);
 }
 
+/** The installed version, read from the package.json that ships next to dist/. */
+function version(): string {
+  try {
+    const pkg = join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json');
+    return (JSON.parse(readFileSync(pkg, 'utf8')).version as string) ?? 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
 function main(): void {
   const args = process.argv.slice(2);
   const cmd = args[0];
-  const backfill = args.includes('--backfill') || args.includes('--all');
   const cwd = process.cwd();
+
+  if (cmd === '--version' || cmd === '-v' || cmd === 'version') {
+    console.log(`stratless ${version()}`);
+    return;
+  }
 
   if (cmd === 'init') {
     const r = doInit();
@@ -265,16 +289,15 @@ function main(): void {
     ${C.b('stratless stop')}       ${C.dim('turn it off — stop refreshing and unload the profile')}
     ${C.b('stratless stats')}      ${C.dim('raw counts — instant, free, no tokens')}
 
-  ${C.dim('add --backfill to profile/update to read your whole history at once (else it amortizes).')}
   ${C.dim('Runs on your machine. Reads your own history. Nothing leaves.')}
 `);
     return;
   }
 
   if (cmd === 'stats') return stats(cwd);
-  if (cmd === 'profile') return profiler('profile', backfill);
-  if (cmd === 'report') return profiler('report', backfill);
-  if (cmd === 'update') return update(backfill);
+  if (cmd === 'profile') return profiler('profile');
+  if (cmd === 'report') return profiler('report');
+  if (cmd === 'update') return update();
   if (cmd === 'stop') return stop();
 
   console.error(`  unknown command: ${cmd}`);
