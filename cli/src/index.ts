@@ -206,12 +206,13 @@ function update(backfill: boolean): void {
 
   mkdirSync(STRATLESS, { recursive: true });
   writeFileSync(join(STRATLESS, 'profile.txt'), `${text}\n`);
-  const target = injectProfile(text);
+  const { humanMd, claudeMd } = injectProfile(text);
 
   const spend = run.fresh ? `${run.fresh} new, ${run.cached} from cache` : `all ${run.cached} from cache`;
   const more = run.deferred ? ` · ${run.deferred} left for next run` : '';
   console.log(`\n  ${C.ok('profile refreshed and loaded')}  ${C.dim(`(${spend}${more})`)}`);
-  console.log(`  ${C.dim(`loaded into ${target}`)}\n`);
+  console.log(`  ${C.dim(`wrote ${humanMd}`)}`);
+  console.log(`  ${C.dim(`pointed ${claudeMd} at it (via @import)`)}\n`);
 }
 
 /**

@@ -176,33 +176,45 @@ test('subagent turns are not the human conversation', () => {
 
 // ── sink: the load step ─────────────────────────────────────────────────────────────────────
 //
-// The load must never clobber what the person wrote in their own CLAUDE.md. It owns ONLY the text
-// between its two markers — a wrong upsert would silently eat someone's real instructions.
+// The load writes the profile to the canonical HUMAN.md and points CLAUDE.md at it with an @import.
+// It owns ONLY the text between its two markers in CLAUDE.md — a wrong upsert would silently eat
+// someone's real instructions — and it must never inline the profile back into CLAUDE.md.
 
-test("injectProfile adds a managed block and leaves the person's own content untouched", () => {
-  const target = join(dir, 'CLAUDE.md');
-  writeFileSync(target, '# My own notes\nkeep this line\n');
+test("injectProfile writes HUMAN.md and points CLAUDE.md at it, leaving the person's content untouched", () => {
+  const humanMd = join(dir, 'HUMAN.md');
+  const claudeMd = join(dir, 'CLAUDE.md');
+  writeFileSync(claudeMd, '# My own notes\nkeep this line\n');
 
-  injectProfile('first profile', target);
-  const doc = readFileSync(target, 'utf8');
+  injectProfile('first profile', humanMd, claudeMd);
+
+  assert.ok(readFileSync(humanMd, 'utf8').includes('first profile'), 'the profile lands in HUMAN.md');
+  const doc = readFileSync(claudeMd, 'utf8');
   assert.ok(doc.includes('# My own notes') && doc.includes('keep this line'), "the person's content survives");
-  assert.ok(doc.includes('stratless:start') && doc.includes('first profile'), 'our block is added');
+  assert.ok(doc.includes('stratless:start'), 'our managed block is added');
+  assert.ok(/@\S*HUMAN\.md/.test(doc), 'CLAUDE.md points at HUMAN.md via @import');
+  assert.ok(!doc.includes('first profile'), 'the profile is NOT inlined into CLAUDE.md — it is a redirect');
 });
 
-test('re-running injectProfile replaces the block in place — never duplicates, never clobbers', () => {
-  const target = join(dir, 'CLAUDE-2.md');
-  writeFileSync(target, '# mine\n');
-  injectProfile('v1', target);
-  injectProfile('v2', target);
-  const doc = readFileSync(target, 'utf8');
+test('re-running injectProfile rewrites HUMAN.md and keeps exactly one CLAUDE.md block', () => {
+  const humanMd = join(dir, 'HUMAN-2.md');
+  const claudeMd = join(dir, 'CLAUDE-2.md');
+  writeFileSync(claudeMd, '# mine\n');
+
+  injectProfile('v1', humanMd, claudeMd);
+  injectProfile('v2', humanMd, claudeMd);
+
+  const human = readFileSync(humanMd, 'utf8');
+  assert.ok(human.includes('v2') && !human.includes('v1'), 'HUMAN.md is replaced, not stacked');
+  const doc = readFileSync(claudeMd, 'utf8');
   assert.ok(doc.includes('# mine'), 'their content still survives the update');
-  assert.ok(doc.includes('v2') && !doc.includes('v1'), 'the block is replaced, not stacked');
   assert.equal(doc.match(/stratless:start/g)?.length, 1, 'exactly one managed block, ever');
 });
 
-test('injectProfile creates the file (and parent dirs) if absent', () => {
-  const target = join(dir, 'nested', 'CLAUDE.md');
-  injectProfile('hello', target);
-  assert.ok(readFileSync(target, 'utf8').includes('hello'));
+test('injectProfile creates both files (and parent dirs) if absent', () => {
+  const humanMd = join(dir, 'nested', 'HUMAN.md');
+  const claudeMd = join(dir, 'nested', 'CLAUDE.md');
+  injectProfile('hello', humanMd, claudeMd);
+  assert.ok(readFileSync(humanMd, 'utf8').includes('hello'), 'HUMAN.md created');
+  assert.ok(/@\S*HUMAN\.md/.test(readFileSync(claudeMd, 'utf8')), 'CLAUDE.md created with the redirect');
 });
 

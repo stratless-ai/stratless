@@ -1,41 +1,82 @@
 /**
  * THE LOAD — put the profile where the assistant will read it.
  *
- * Claude Code auto-loads ~/.claude/CLAUDE.md into its context at the start of every session, so the
- * profile goes there — inside a delimited **managed block**. We only ever touch what's between our
- * markers; anything the person wrote themselves is left exactly as it was.
+ * The canonical artifact is HUMAN.md — one file that describes the person, the thing every tool loads
+ * to know who it's talking to. Claude Code can't be pointed at an arbitrary filename, but it DOES
+ * expand `@import` lines inside the CLAUDE.md it already auto-loads. So the load is two writes:
  *
- * `HUMAN.md` is the convention (build-pass §9); for Claude Code specifically the mechanism is a
- * CLAUDE.md block, because that is the file Claude Code actually reads. The privacy rule holds: this
- * file is visible to your assistant, never networked, never committed by us.
+ *   1. write the profile to ~/.claude/HUMAN.md         — the canonical artifact
+ *   2. put a one-line `@~/.claude/HUMAN.md` redirect    — inside a managed block in CLAUDE.md
+ *
+ * CLAUDE.md becomes a pointer, not a copy. Other tools (Gemini, Codex) point their own configurable
+ * filename at the same HUMAN.md — one source, many entry points (build-pass §9, the adapter seam).
+ *
+ * We only ever touch what's between our markers in CLAUDE.md; anything the person wrote themselves is
+ * left exactly as it was. HUMAN.md is written FIRST, so the import never points at a missing file. The
+ * privacy rule holds: these files are visible to your assistant, never networked, never committed by us.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 
 /** The global file Claude Code loads every session. Override with STRATLESS_CLAUDE_MD (tests). */
 export function claudeMdPath(): string {
   return process.env.STRATLESS_CLAUDE_MD || join(homedir(), '.claude', 'CLAUDE.md');
 }
 
+/** The canonical profile artifact — the file every tool ultimately reads. Override with STRATLESS_HUMAN_MD. */
+export function humanMdPath(): string {
+  return process.env.STRATLESS_HUMAN_MD || join(homedir(), '.claude', 'HUMAN.md');
+}
+
 const START = '<!-- stratless:start -->';
 const END = '<!-- stratless:end -->';
 
+/** The `@import` line Claude Code expands — home-relative when possible (portable), else absolute. */
+function importLine(humanPath: string): string {
+  const home = homedir();
+  if (humanPath === home || humanPath.startsWith(home + sep)) {
+    return `@~${humanPath.slice(home.length).split(sep).join('/')}`;
+  }
+  return `@${humanPath}`;
+}
+
+export interface Injected {
+  /** the canonical artifact we wrote the profile to */
+  humanMd: string;
+  /** the file we pointed at it */
+  claudeMd: string;
+}
+
 /**
- * Write the profile into the assistant's global instructions file as a managed block. Returns the
- * path written. Idempotent: re-running replaces our block in place and never disturbs the rest.
+ * Write the profile to HUMAN.md and point CLAUDE.md at it. Returns both paths. Idempotent: re-running
+ * rewrites HUMAN.md and replaces our CLAUDE.md block in place, never disturbing the rest.
  */
-export function injectProfile(text: string, target = claudeMdPath()): string {
-  const block = [
-    START,
+export function injectProfile(
+  text: string,
+  humanTarget: string = humanMdPath(),
+  claudeTarget: string = claudeMdPath(),
+): Injected {
+  // 1. The canonical artifact — written FIRST, so the redirect never points at a missing file.
+  const human = [
     '# Who you are working with',
     '# (managed by stratless — do not edit by hand; refreshed by `stratless update`)',
     '',
     text.trim(),
+    '',
+  ].join('\n');
+  mkdirSync(dirname(humanTarget), { recursive: true });
+  writeFileSync(humanTarget, human);
+
+  // 2. Point CLAUDE.md at it, inside our managed block — the person's own content is never touched.
+  const block = [
+    START,
+    '# Who you are working with — managed by stratless. Edit HUMAN.md, not here.',
+    importLine(humanTarget),
     END,
   ].join('\n');
 
-  let doc = existsSync(target) ? readFileSync(target, 'utf8') : '';
+  let doc = existsSync(claudeTarget) ? readFileSync(claudeTarget, 'utf8') : '';
   const s = doc.indexOf(START);
   const e = doc.indexOf(END);
   if (s !== -1 && e !== -1 && e > s) {
@@ -45,8 +86,8 @@ export function injectProfile(text: string, target = claudeMdPath()): string {
     // No block yet: append after their content (blank line between), or start the file.
     doc = doc.trim() ? `${doc.trimEnd()}\n\n${block}\n` : `${block}\n`;
   }
+  mkdirSync(dirname(claudeTarget), { recursive: true });
+  writeFileSync(claudeTarget, doc);
 
-  mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, doc);
-  return target;
+  return { humanMd: humanTarget, claudeMd: claudeTarget };
 }
