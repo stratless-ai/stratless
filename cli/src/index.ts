@@ -13,7 +13,10 @@ import { why, type Answer } from './match.js';
 import { findAssistant, explain } from './explain.js';
 import { init as doInit, ARCHIVE } from './init.js';
 import { health } from './canary.js';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { loadExchanges, sessionCount } from './exchange.js';
+import { judgeAll } from './judge.js';
+import { synthesizeProfile, synthesizeReport, topTopics, type Corpus } from './synthesize.js';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -108,6 +111,85 @@ function stats(cwd: string): void {
   console.log(`\n    ${C.dim(`archive reaches back to ${first} — anything older was deleted by the 30-day cleanup.`)}\n`);
 }
 
+const STRATLESS = join(homedir(), '.stratless');
+
+/**
+ * The profiler — read the whole corpus, learn who you are, say it back.
+ *
+ * `profile` renders the AI's copy (what loads into its context); `report` renders yours. Same
+ * pipeline underneath — judge every exchange once (§3.2, cached forever), synthesize the pile once
+ * (§3.3) — so running one after the other costs a single extra synthesis, never a re-read.
+ */
+function profiler(kind: 'profile' | 'report'): void {
+  const bin = findAssistant();
+  if (!bin) {
+    console.error(`\n  ${C.bad('stratless needs your assistant to read your history.')}`);
+    console.error(`  ${C.dim('It borrows the `claude` you already have — no API key, nothing new to install.')}`);
+    console.error(`  ${C.dim('Install Claude Code, then run this again.')}\n`);
+    process.exit(1);
+  }
+
+  const exchanges = loadExchanges();
+  if (!exchanges.length) {
+    console.log(`\n  No conversations found yet.`);
+    console.log(`  ${C.dim('Talk to Claude Code a few times, run `stratless init`, then try this again.')}\n`);
+    return;
+  }
+
+  const sessions = sessionCount(exchanges);
+  const cap = Number(process.env.STRATLESS_JUDGE_LIMIT);
+  const limit = Number.isFinite(cap) && cap > 0 ? cap : undefined;
+
+  // Progress goes to stderr so `stratless profile > file` keeps only the profile itself.
+  process.stderr.write(`\n  ${C.dim(`reading ${exchanges.length.toLocaleString()} exchanges across ${sessions} sessions…`)}\n`);
+  const run = judgeAll(exchanges, bin, {
+    limit,
+    onProgress: (done, total) => process.stderr.write(`\r  ${C.dim(`judging ${done}/${total} new…`)}   `),
+  });
+  process.stderr.write(`\r${' '.repeat(44)}\r`);
+
+  if (!run.judgments.length) {
+    console.error(`\n  ${C.bad('Could not read a single exchange.')} ${C.dim('Is `claude -p` working? Try:  claude -p hello')}\n`);
+    process.exit(1);
+  }
+
+  const corpus: Corpus = {
+    sessions,
+    exchanges: run.judgments.length,
+    topics: topTopics(run.judgments),
+    from: exchanges[0].ts.slice(0, 10),
+    to: exchanges[exchanges.length - 1].ts.slice(0, 10),
+  };
+
+  const text =
+    kind === 'profile'
+      ? synthesizeProfile(run.judgments, corpus, bin)
+      : synthesizeReport(run.judgments, corpus, bin);
+
+  if (!text) {
+    console.error(`\n  ${C.bad(`Could not build your ${kind}.`)} ${C.dim('The assistant returned nothing — silence beats a guess.')}\n`);
+    process.exit(1);
+  }
+
+  mkdirSync(STRATLESS, { recursive: true });
+  const file = join(STRATLESS, `${kind}.txt`);
+  writeFileSync(file, `${text}\n`);
+
+  const header = kind === 'profile' ? "WHO YOU'RE WORKING WITH" : 'YOUR PATTERN — what stratless sees';
+  console.log(`\n  ${C.b(header)}   ${C.dim(`(stratless · ${sessions} sessions · ${run.judgments.length} exchanges)`)}\n`);
+  console.log(
+    text
+      .split('\n')
+      .map((l) => `  ${l}`)
+      .join('\n'),
+  );
+  const spend = run.fresh
+    ? `${run.fresh} new read${run.fresh === 1 ? '' : 's'}, ${run.cached} from cache`
+    : `all ${run.cached} from cache`;
+  const more = run.deferred ? C.dim(` · ${run.deferred} left for next run`) : '';
+  console.log(`\n  ${C.dim(`${spend} · saved to ${file}`)}${more}\n`);
+}
+
 function main(): void {
   const [cmd, arg] = process.argv.slice(2);
   const cwd = process.cwd();
@@ -130,8 +212,10 @@ function main(): void {
   ${C.b('stratless')} — your coding assistant explains itself
 
     ${C.b('stratless init')}                ${C.dim('stop the 30-day reaper. archive everything.')}
-    ${C.b('stratless why <file>:<line>')}   the decision that made this line
-    ${C.b('stratless stats')}               what your assistant did to you
+    ${C.b('stratless profile')}             ${C.dim("the model of you your assistant should load")}
+    ${C.b('stratless report')}              ${C.dim('the same, written for you to read')}
+    ${C.b('stratless stats')}               ${C.dim('raw counts — instant, free, no tokens')}
+    ${C.b('stratless why <file>:<line>')}   ${C.dim('the decision that made this line')}
 
   ${C.dim('Runs on your machine. Reads your own history. Nothing leaves.')}
 `);
@@ -139,6 +223,8 @@ function main(): void {
   }
 
   if (cmd === 'stats') return stats(cwd);
+  if (cmd === 'profile') return profiler('profile');
+  if (cmd === 'report') return profiler('report');
 
   if (cmd === 'why') {
     if (!arg) {

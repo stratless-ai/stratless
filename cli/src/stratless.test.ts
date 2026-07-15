@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { test, before, after } from 'node:test';
 
 import { parseSession, type Edit } from './transcript.js';
+import { parseExchanges } from './exchange.js';
 import { why } from './match.js';
 
 let dir: string;
@@ -97,6 +98,85 @@ test('subagent turns are not the human conversation', () => {
     })}\n`,
   );
   assert.equal(parseSession(p).length, 0);
+});
+
+// ── exchanges: the profiler's evidence ──────────────────────────────────────────────────────
+//
+// The profile is only ever as honest as the pairs it reads. Every test here pins a way the parser
+// could quietly manufacture or drop evidence — each of which becomes a wrong claim about a person.
+
+const u = (text: string, ts = '2026-07-01T10:00:00Z') =>
+  JSON.stringify({ type: 'user', message: { content: text }, timestamp: ts });
+const a = (text: string, ts = '2026-07-01T10:00:05Z') =>
+  JSON.stringify({ type: 'assistant', timestamp: ts, message: { content: [{ type: 'text', text }] } });
+
+test('each real human message is the reaction to one turn AND the prompt for the next', () => {
+  const p = writeTranscript(
+    'chain.jsonl',
+    [
+      u('how do i deploy'),
+      a('Push to main and it builds.'),
+      u('wait what does that mean for us'),
+      a('Every commit goes live the moment you push.'),
+      u('ok got it'),
+    ].join('\n'),
+  );
+  const ex = parseExchanges(p);
+  assert.equal(ex.length, 2, 'two closed turns — the dangling last human message is not a third');
+  assert.equal(ex[0].prompt, 'how do i deploy');
+  assert.equal(ex[0].said, 'Push to main and it builds.');
+  assert.equal(ex[0].reaction, 'wait what does that mean for us', 'the reaction carries the signal');
+  assert.equal(ex[1].prompt, 'wait what does that mean for us', 'that same message opens the next turn');
+});
+
+test('a turn where the assistant only ran tools is NOT an exchange — there is no understanding to judge', () => {
+  const p = writeTranscript(
+    'toolonly.jsonl',
+    [
+      u('rename the file'),
+      JSON.stringify({
+        type: 'assistant',
+        timestamp: '2026-07-01T10:00:05Z',
+        message: { content: [{ type: 'tool_use', name: 'Edit', input: { file_path: '/x/a.ts', new_string: 'x' } }] },
+      }),
+      u('did it work?'),
+    ].join('\n'),
+  );
+  assert.equal(parseExchanges(p).length, 0, 'no assistant words = nothing transferred = judge nothing');
+});
+
+test('a tool_result is not the human reacting, and assistant text accumulates across it', () => {
+  const p = writeTranscript(
+    'toolresult.jsonl',
+    [
+      u('fix the bug'),
+      a('Looking now.'),
+      JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: 'ok' }] } }),
+      a('Fixed it — off-by-one in the loop.'),
+      u('nice'),
+    ].join('\n'),
+  );
+  const ex = parseExchanges(p);
+  assert.equal(ex.length, 1, 'the tool_result must not split the turn into two');
+  assert.equal(ex[0].reaction, 'nice');
+  assert.ok(ex[0].said.includes('Looking now') && ex[0].said.includes('off-by-one'), 'both assistant texts survive');
+});
+
+test('subagent turns are not the human conversation', () => {
+  const p = writeTranscript(
+    'sidechain.jsonl',
+    [
+      u('do the thing'),
+      JSON.stringify({
+        type: 'assistant',
+        isSidechain: true,
+        timestamp: '2026-07-01T10:00:05Z',
+        message: { content: [{ type: 'text', text: 'subagent chatter' }] },
+      }),
+      u('done?'),
+    ].join('\n'),
+  );
+  assert.equal(parseExchanges(p).length, 0, 'a sidechain turn is not the person talking');
 });
 
 // ── match: the verdicts ───────────────────────────────────────────────────────────────────
