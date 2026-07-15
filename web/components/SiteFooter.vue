@@ -3,6 +3,9 @@
 // out via definePageMeta({ footer: false }) and renders it itself inside the SeigaihaField band).
 // `bare` = the sea variant: transparent + borderless, so the waves run through it.
 withDefaults(defineProps<{ bare?: boolean }>(), { bare: false })
+
+// The CLI version, read from cli/package.json at build (see nuxt.config.ts).
+const version = useRuntimeConfig().public.version
 </script>
 
 <template>
@@ -16,7 +19,7 @@ withDefaults(defineProps<{ bare?: boolean }>(), { bare: false })
         <NuxtLink to="/terms">Terms</NuxtLink>
         <a href="mailto:sun@stratless.com">sun@stratless.com</a>
       </nav>
-      <p class="footer-copy">© 2026 stratless — runs on your machine. Nothing leaves.</p>
+      <p class="footer-copy">stratless v{{ version }} · © 2026 — runs on your machine. Nothing leaves.</p>
     </div>
   </footer>
 </template>
