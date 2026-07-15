@@ -47,7 +47,7 @@ stratless init       turn it on: keep your history, and start reading it
 stratless profile    the model of you your assistant should load
 stratless report     the same picture, written for you to read
 stratless update     re-read what's new, rebuild the profile, and load it into your assistant
-stratless stop       turn the after-session refresh back off
+stratless stop       turn it off — stop refreshing and unload the profile
 stratless stats      raw counts — instant, free, spends nothing
 ```
 

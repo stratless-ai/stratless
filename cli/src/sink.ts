@@ -91,3 +91,24 @@ export function injectProfile(
 
   return { humanMd: humanTarget, claudeMd: claudeTarget };
 }
+
+/**
+ * Unload the profile: strip our managed block from CLAUDE.md so the assistant stops loading it. Leaves
+ * HUMAN.md exactly where it is — it just stops being imported; the person's own data is theirs to keep
+ * or delete. Only ever touches what's between our markers; surrounding content is preserved and the
+ * whitespace closes up cleanly. Returns true iff a block was actually removed (safe no-op otherwise,
+ * including when the file doesn't exist).
+ */
+export function removeProfile(claudeTarget: string = claudeMdPath()): boolean {
+  if (!existsSync(claudeTarget)) return false;
+  const doc = readFileSync(claudeTarget, 'utf8');
+  const s = doc.indexOf(START);
+  const e = doc.indexOf(END);
+  if (s === -1 || e === -1 || e < s) return false;
+
+  const before = doc.slice(0, s).replace(/\s+$/, '');
+  const after = doc.slice(e + END.length).replace(/^\s+/, '').replace(/\s+$/, '');
+  const parts = [before, after].filter(Boolean);
+  writeFileSync(claudeTarget, parts.length ? `${parts.join('\n\n')}\n` : '');
+  return true;
+}

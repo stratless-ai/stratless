@@ -13,7 +13,7 @@ import { test, before, after } from 'node:test';
 
 import { parseSession } from './transcript.js';
 import { parseExchanges } from './exchange.js';
-import { injectProfile } from './sink.js';
+import { injectProfile, removeProfile } from './sink.js';
 
 let dir: string;
 
@@ -216,5 +216,37 @@ test('injectProfile creates both files (and parent dirs) if absent', () => {
   injectProfile('hello', humanMd, claudeMd);
   assert.ok(readFileSync(humanMd, 'utf8').includes('hello'), 'HUMAN.md created');
   assert.ok(/@\S*HUMAN\.md/.test(readFileSync(claudeMd, 'utf8')), 'CLAUDE.md created with the redirect');
+});
+
+// `stop` must be a true off-switch: unload the profile from CLAUDE.md, but never eat the person's own
+// content, and never touch HUMAN.md (their data is theirs to keep).
+
+test('removeProfile strips only our block and keeps the person\'s content', () => {
+  const humanMd = join(dir, 'HUMAN-rm.md');
+  const claudeMd = join(dir, 'CLAUDE-rm.md');
+  writeFileSync(claudeMd, '# mine\nkeep me\n');
+  injectProfile('a profile', humanMd, claudeMd);
+  assert.ok(readFileSync(claudeMd, 'utf8').includes('stratless:start'), 'precondition: block present');
+
+  assert.equal(removeProfile(claudeMd), true, 'reports the removal');
+  const doc = readFileSync(claudeMd, 'utf8');
+  assert.ok(doc.includes('# mine') && doc.includes('keep me'), 'the person\'s content survives');
+  assert.ok(!doc.includes('stratless:start') && !doc.includes('stratless:end'), 'the block is gone');
+});
+
+test('removeProfile leaves HUMAN.md untouched', () => {
+  const humanMd = join(dir, 'HUMAN-keep.md');
+  const claudeMd = join(dir, 'CLAUDE-keep.md');
+  injectProfile('keep this profile', humanMd, claudeMd);
+  removeProfile(claudeMd);
+  assert.ok(readFileSync(humanMd, 'utf8').includes('keep this profile'), 'HUMAN.md still holds the profile');
+});
+
+test('removeProfile is a safe no-op with no block (or no file)', () => {
+  const claudeMd = join(dir, 'CLAUDE-noblock.md');
+  writeFileSync(claudeMd, '# just mine\n');
+  assert.equal(removeProfile(claudeMd), false, 'nothing to remove');
+  assert.equal(readFileSync(claudeMd, 'utf8'), '# just mine\n', 'file left untouched');
+  assert.equal(removeProfile(join(dir, 'does-not-exist.md')), false, 'missing file is a no-op');
 });
 

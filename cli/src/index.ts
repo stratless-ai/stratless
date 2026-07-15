@@ -6,6 +6,7 @@
  *   stratless profile   the model of you your assistant should load
  *   stratless report    the same picture, written for you to read
  *   stratless update    re-read what's new, rebuild the profile, and load it
+ *   stratless stop      turn it off — stop refreshing and unload the profile
  *   stratless stats     raw counts — instant, free, no tokens
  *
  * Runs on your machine. Reads your own history. Nothing leaves.
@@ -17,7 +18,7 @@ import { health } from './canary.js';
 import { loadExchanges, sessionCount } from './exchange.js';
 import { judgeAll } from './judge.js';
 import { synthesizeProfile, synthesizeReport, topTopics, type Corpus } from './synthesize.js';
-import { injectProfile } from './sink.js';
+import { injectProfile, removeProfile } from './sink.js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -221,12 +222,17 @@ function update(backfill: boolean): void {
  * tool that reads everything earns trust.
  */
 function stop(): void {
-  if (stopRefresh()) {
-    console.log(`\n  ${C.ok('after-session refresh is off.')}`);
-    console.log(`  ${C.dim('Your history + profile are untouched. Run `stratless update` by hand, or `stratless init` to turn it back on.')}\n`);
-  } else {
-    console.log(`\n  ${C.dim('the after-session refresh was not on — nothing to stop.')}\n`);
+  const hookRemoved = stopRefresh();
+  const unloaded = removeProfile();
+  if (!hookRemoved && !unloaded) {
+    console.log(`\n  ${C.dim('nothing to stop — no refresh hook, no loaded profile.')}\n`);
+    return;
   }
+  console.log(`\n  ${C.ok('stratless is off.')}`);
+  if (hookRemoved) console.log(`  ${C.dim('· after-session refresh removed')}`);
+  if (unloaded) console.log(`  ${C.dim('· profile unloaded from your CLAUDE.md')}`);
+  console.log(`  ${C.dim('Your ~/.claude/HUMAN.md is left as-is — delete it yourself if you want it gone.')}`);
+  console.log(`  ${C.dim('Run `stratless init` to turn everything back on.')}\n`);
 }
 
 function main(): void {
@@ -256,7 +262,7 @@ function main(): void {
     ${C.b('stratless profile')}    ${C.dim('the model of you your assistant should load')}
     ${C.b('stratless report')}     ${C.dim('the same picture, written for you to read')}
     ${C.b('stratless update')}     ${C.dim('re-read what is new, rebuild the profile, and load it')}
-    ${C.b('stratless stop')}       ${C.dim('turn the after-session refresh back off')}
+    ${C.b('stratless stop')}       ${C.dim('turn it off — stop refreshing and unload the profile')}
     ${C.b('stratless stats')}      ${C.dim('raw counts — instant, free, no tokens')}
 
   ${C.dim('add --backfill to profile/update to read your whole history at once (else it amortizes).')}
