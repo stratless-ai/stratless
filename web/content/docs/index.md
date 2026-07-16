@@ -28,6 +28,7 @@ stratless init       keep your history safe (add --auto for background refresh)
 stratless profile    see the model of you (profile looks; update loads)
 stratless report     the same picture, written for you to read
 stratless update     judge what's new; rebuild + load the profile when due (--now: always)
+stratless patterns   the evidence behind your profile: every claim with its receipts
 stratless stop       turn it off, and unload the profile
 stratless status     stratless's own state: on or off, and what it has cost
 stratless stats      raw counts, instant, free, no tokens
