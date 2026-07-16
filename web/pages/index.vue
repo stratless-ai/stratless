@@ -302,7 +302,7 @@ h1 {
   font-family: var(--font-read);
   font-size: 0.9rem;
   line-height: 1.6;
-  margin: 0;
+  margin: 0.666rem;
 }
 .cta-row {
   display: flex;
