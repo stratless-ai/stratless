@@ -15,10 +15,27 @@ import { parseSession } from './transcript.js';
 import { parseExchanges, loadRecentExchanges } from './exchange.js';
 import { injectProfile, removeProfile, ensureLoaded } from './sink.js';
 import { readState, writeState, synthesisDue } from './state.js';
+import {
+  aggregate,
+  computeTrend,
+  computeStability,
+  loadPatterns,
+  savePatterns,
+  parseMineOutput,
+  parseAuditOutput,
+} from './miner.js';
 import { readUsage, recordUsage } from './usage.js';
 import { parseJsonResult } from './claude.js';
-import { hasSignal } from './synthesize.js';
-import { cachedCount, judgeInput } from './judge.js';
+import { hasSignal, inventedNumbers, renderPatternSheet } from './synthesize.js';
+import {
+  cachedCount,
+  judgeInput,
+  parseJudgeOutput,
+  currentJudgment,
+  fitAperture,
+  PIPELINE_V,
+  type Verdict,
+} from './judge.js';
 import { installStopHook, readSettings } from './init.js';
 
 let dir: string;
@@ -187,29 +204,175 @@ test('subagent turns are not the human conversation', () => {
 test('a long assistant turn keeps its TAIL — the reaction pairs with the end of what was said', () => {
   const p = writeTranscript(
     'longsaid.jsonl',
-    [u('explain the whole design'), a(`THE-OPENING ${'y'.repeat(4100)} THE-CONCLUSION`), u('got it')].join('\n'),
+    [u('explain the whole design'), a(`THE-OPENING ${'y'.repeat(8300)} THE-CONCLUSION`), u('got it')].join('\n'),
   );
   const ex = parseExchanges(p);
   assert.equal(ex.length, 1);
   assert.ok(ex[0].said.includes('THE-CONCLUSION'), 'the end survives the cap');
   assert.ok(!ex[0].said.includes('THE-OPENING'), 'the head is what gets cut');
-  assert.ok(ex[0].said.length <= 4000, 'the cap itself still holds');
+  assert.ok(ex[0].said.length <= 8000, 'the 0.3.0 identity cap holds (8k, raised inside the v2 bump)');
 });
 
-test('the judge reads the TAIL of a long turn, with the cut marked', () => {
+test('the judge reads HEAD and TAIL of a long turn — the plan and the conclusion — with the cut marked', () => {
   const ex = {
     prompt: 'why a queue?',
-    said: `PREAMBLE ${'x'.repeat(2000)} CONCLUSION`,
+    said: `THE-PLAN ${'x'.repeat(4000)} THE-CONCLUSION`,
     reaction: 'ok makes sense',
     ts: '2026-07-01T10:00:00Z',
     session: 's',
     hash: 'h',
   };
   const input = judgeInput(ex);
-  assert.ok(input.includes('CONCLUSION'), 'the conclusion the person reacted to survives');
-  assert.ok(!input.includes('PREAMBLE'), 'the preamble is what gets cut');
-  assert.ok(input.includes('…'), 'truncation is marked so the model knows it reads mid-text');
-  assert.ok(input.includes('why a queue?'), 'the prompt keeps its head');
+  assert.ok(input.includes('THE-CONCLUSION'), 'the conclusion the person reacted to survives (tail 80%)');
+  assert.ok(input.includes('THE-PLAN'), 'what it set out to do survives too (head 20%)');
+  assert.ok(input.includes('…'), 'the middle cut is marked so the model knows it reads elided text');
+  assert.ok(!input.includes('x'.repeat(3000)), 'the middle is what gets cut');
+  assert.ok(input.includes('why a queue?'), 'a short prompt passes through whole');
+});
+
+test('fitAperture sizes the view from the user\'s own window — p90 × 1.2, clamped', () => {
+  assert.deepEqual(fitAperture([]), { prompt: 800, said: 1500, reaction: 800 }, 'no window = the 0.2.4 floors');
+
+  const ex = (prompt: string, said: string, reaction: string) => ({ prompt, said, reaction, ts: '', session: 's', hash: 'h' });
+  const terse = Array.from({ length: 20 }, () => ex('short ask', 'a'.repeat(2000), 'ok'));
+  const t = fitAperture(terse);
+  assert.equal(t.prompt, 800, 'floors hold for terse fields — never smaller than the 0.2.4 views');
+  assert.equal(t.said, 2400, 'p90(2000) × 1.2 = 2400 — the view grows to fit the user');
+  assert.equal(t.reaction, 800, 'reaction floor holds');
+
+  const paster = Array.from({ length: 20 }, () => ex('p'.repeat(7000), 's'.repeat(7000), 'ok'));
+  const pf = fitAperture(paster);
+  assert.equal(pf.prompt, 2400, 'the ceiling clamps a log-paster — worst case stays publishable');
+  assert.equal(pf.said, 3500, 'said ceiling holds too');
+});
+
+// ── the miner's code half: THE MODEL NAMES, THE CODE COUNTS ───────────────────────────────────
+//
+// Everything numeric or temporal on a Pattern comes from aggregate() and only from there — the
+// model never touches a number it could hallucinate. Receipts are Law 2 made a field: evidence
+// that doesn't resolve to a real judgment is dropped where receipts are born.
+
+test('computeTrend: rising, fading, steady, and gone-quiet — all from dates, in code', () => {
+  const now = new Date('2026-07-16T12:00:00Z');
+  const d = (daysAgo: number) => new Date(now.getTime() - daysAgo * 86_400_000).toISOString();
+  assert.equal(computeTrend([d(1), d(3), d(5), d(40)], now), 'rising', '3 recent vs 1 prior = rising');
+  assert.equal(computeTrend([d(40), d(45), d(50)], now), 'fading', 'all prior, none recent = fading');
+  assert.equal(computeTrend([d(2), d(35)], now), 'steady', '1 vs 1 = steady, not noise');
+  assert.equal(computeTrend([d(100), d(120)], now), 'fading', 'nothing in 56 days = fading by definition');
+  assert.equal(computeTrend([], now), 'steady', 'no dates = degenerate steady');
+});
+
+test('computeStability: which clock a pattern lives on', () => {
+  assert.equal(computeStability({ from: '2026-07-10', to: '2026-07-15' }, 'steady'), 'volatile', 'two weeks = volatile');
+  assert.equal(computeStability({ from: '2026-05-01', to: '2026-07-15' }, 'steady'), 'bedrock', 'two months + not fading = lean on it');
+  assert.equal(computeStability({ from: '2026-05-01', to: '2026-07-15' }, 'fading'), 'slow', 'a fading pattern is never bedrock');
+  assert.equal(computeStability({ from: '2026-06-20', to: '2026-07-15' }, 'steady'), 'slow', 'in between = slow');
+});
+
+test('aggregate: the code computes every number; admission splits patterns from candidates', () => {
+  const now = new Date('2026-07-16T12:00:00Z');
+  const pile = new Map<string, ReturnType<typeof j2>>();
+  const day = (n: number) => new Date(now.getTime() - n * 86_400_000).toISOString();
+  for (let i = 0; i < 8; i++) pile.set(`h${i}`, { ...j2('partial'), hash: `h${i}`, ts: day(i * 5) });
+
+  const { patterns, candidates } = aggregate(
+    [
+      {
+        statement: 'accepts the reasoning verbally then pivots to implementation',
+        kind: 'think',
+        receipts: ['h0', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'h7', 'PHANTOM'],
+      },
+      { statement: 'a two-receipt anecdote', kind: 'work', receipts: ['h0', 'h1'] },
+      { statement: 'fits no kind at all', kind: 'quantum-vibes', receipts: ['h0', 'h1', 'h2', 'h3', 'h4'] },
+    ],
+    pile,
+    now,
+  );
+
+  assert.equal(patterns.length, 2, 'admitted: the 8-receipt pattern and the 5-receipt unsorted one');
+  const main = patterns.find((p) => p.kind === 'think');
+  assert.ok(main, 'the think pattern was admitted');
+  assert.equal(main.count, 8, 'count = resolving receipts — the PHANTOM was dropped at the source');
+  assert.ok(!main.receipts.includes('PHANTOM'), 'phantom evidence never survives (receipts-lint at birth)');
+  assert.equal(main.window.from, day(35).slice(0, 10), 'window from the earliest receipt, in code');
+  assert.equal(main.confidence, 'moderate', '8 receipts = moderate');
+  assert.equal(patterns.find((p) => p.statement === 'fits no kind at all')?.kind, 'unsorted', 'unknown kind is never forced — unsorted');
+  assert.equal(candidates.length, 1, 'the anecdote is a candidate, not a pattern');
+  assert.equal(candidates[0].count, 2, 'below MIN_RECEIPTS — never reaches the writer');
+});
+
+test('parseMineOutput: the model cannot mint evidence — hashes outside the offered batch are dropped', () => {
+  const offered = new Set(['h1', 'h2', 'h3']);
+  const out = parseMineOutput(
+    `Sure! Here is the analysis:
+{"patterns":[
+  {"id":"accepts-then-pivots","kind":"think","new_receipts":["h1","h2","PHANTOM","h2"]},
+  {"id":"NEW brand new thing","statement":"redirects to cost whenever infra comes up","kind":"triggers","new_receipts":["h3"]},
+  {"id":"","kind":"work","new_receipts":["h1"]},
+  "garbage entry"
+]}`,
+    offered,
+  );
+  assert.ok(out, 'prose around nested JSON still parses (greedy match)');
+  assert.equal(out.length, 2, 'the empty-id and garbage entries are dropped');
+  assert.deepEqual(out[0].newReceipts, ['h1', 'h2'], 'phantom dropped, duplicate deduped');
+  assert.equal(out[1].id, 'new-brand-new-thing', 'proposed ids are slugified in code');
+  assert.equal(out[1].statement, 'redirects to cost whenever infra comes up');
+  assert.equal(parseMineOutput('no json here at all', offered), undefined, 'unparseable = refuse the whole pass');
+});
+
+test('parseAuditOutput: the auditor may only remove what it explicitly rejected', () => {
+  const offered = new Set(['h1', 'h2', 'h3']);
+  const v = parseAuditOutput('{"keep":["h1"],"evict":["h2","OUTSIDER"]}', offered);
+  assert.ok(v, 'well-formed audit parses');
+  assert.ok(v.evict.has('h2'), 'an explicit eviction lands');
+  assert.ok(!v.evict.has('OUTSIDER'), 'a hash outside the offered set is ignored');
+  assert.ok(!v.evict.has('h3'), 'a hash the model forgot to mention is KEPT — sloppiness never destroys evidence');
+  assert.equal(parseAuditOutput('no json', offered), undefined, 'unparseable = refuse; receipts stay unaudited');
+  const both = parseAuditOutput('{"keep":["h1"],"evict":["h1"]}', offered);
+  assert.ok(both?.evict.has('h1'), 'listed in both = evicted — uncertain means evict');
+});
+
+test('loadPatterns: missing, corrupt, or version-mismatched store reads as empty — rebuilt from the pile', () => {
+  const f = join(dir, 'patterns.json');
+  assert.deepEqual(loadPatterns(f).patterns, [], 'missing = empty');
+  writeFileSync(f, 'garbage {');
+  assert.deepEqual(loadPatterns(f).patterns, [], 'corrupt = empty, never a throw');
+  writeFileSync(f, JSON.stringify({ v: 999, patterns: [{ id: 'x' }] }));
+  assert.deepEqual(loadPatterns(f).patterns, [], 'a foreign MINER_V = re-mine; the judgment pile is the permanent layer');
+  savePatterns({ v: 1, patterns: [], candidates: [], assignments: { abc: ['p1'] }, audited: {} }, f);
+  assert.deepEqual(loadPatterns(f).assignments, { abc: ['p1'] }, 'a current store round-trips');
+});
+
+// ── the promise layer: a wrong frequency is a lie wearing precision ───────────────────────────
+
+test('inventedNumbers: every numeral in the output must already exist in the input', () => {
+  const input = 'CORPUS: 8 sessions · 190 judged\n[think · 24x · 2026-06-09 → 2026-07-16 · fading] pivots';
+  assert.deepEqual(inventedNumbers('seen 24 times since June, across 8 sessions', input), [], 'sheet numbers pass');
+  assert.deepEqual(inventedNumbers('roughly 40 times', input), ['40'], 'a rounded/invented count is caught');
+  assert.deepEqual(inventedNumbers('by 2026 standards, 16 of them', input), [], 'date components count as shown');
+  assert.deepEqual(inventedNumbers('no numbers at all here', input), [], 'prose without numerals always passes');
+});
+
+test('renderPatternSheet shows the model exactly the numbers the lint will allow', () => {
+  const sheet = renderPatternSheet([
+    {
+      id: 'accepts-then-pivots',
+      statement: 'accepts the reasoning verbally then pivots to implementation',
+      kind: 'think',
+      count: 24,
+      window: { from: '2026-06-09', to: '2026-07-16' },
+      trend: 'fading',
+      stability: 'slow',
+      receipts: [],
+      confidence: 'strong',
+      audit: { kept: 22, evicted: 2, at: '2026-07-16T12:00:00Z' },
+    },
+  ]);
+  assert.ok(sheet.includes('24x'), 'the count is shown');
+  assert.ok(sheet.includes('audited 22/24'), 'the audit tally is shown as kept/total');
+  assert.ok(sheet.includes('fading'), 'the trend rides along');
+  assert.deepEqual(inventedNumbers('24 times, 22 of 24 audited, since 2026-06-09', sheet), [], 'sheet and lint agree by construction');
 });
 
 // ── sink: the load step ─────────────────────────────────────────────────────────────────────
@@ -452,13 +615,50 @@ test('recordUsage tolerates missing fields — a JSON payload without usage stil
   assert.equal(t.costUsd, 0);
 });
 
+const j2 = (verdict: Verdict, topic = 'a topic', behavior = 'what they did') => ({
+  hash: 'x',
+  ts: '2026-07-01T10:00:00Z',
+  session: 's',
+  v: PIPELINE_V,
+  verdict,
+  topic,
+  behavior,
+  line: `${verdict} — ${topic} — ${behavior}`,
+});
+
 test('`none` judgments carry no signal and never reach the writer', () => {
-  const j = (line: string) => ({ hash: 'x', ts: '2026-07-01T10:00:00Z', session: 's', line });
-  assert.equal(hasSignal(j('none — cost logistics — asked about pricing')), false, 'a none line is filtered');
-  assert.equal(hasSignal(j('None — a thank-you — said thanks')), false, 'case-insensitive');
-  assert.equal(hasSignal(j('transferred — the deploy step — moved on immediately')), true);
-  assert.equal(hasSignal(j('no — JWT expiry — re-asked the same question')), true, '`no` IS signal — it did not land');
-  assert.equal(hasSignal(j('partial — queues — accepted but pivoted')), true);
+  assert.equal(hasSignal(j2('none')), false, 'a none verdict is filtered — read from the field, not the line');
+  assert.equal(hasSignal(j2('transferred')), true);
+  assert.equal(hasSignal(j2('no')), true, '`no` IS signal — it did not land');
+  assert.equal(hasSignal(j2('partial')), true);
+});
+
+// ── judgment v2: strict FORM guaranteed in code, free VOCABULARY in the fields ─────────────────
+
+test('parseJudgeOutput: valid JSON parses into validated fields', () => {
+  const p = parseJudgeOutput('{"verdict":"partial","topic":"the deploy step","behavior":"accepted but pivoted to cost"}');
+  assert.ok(p, 'well-formed output parses');
+  assert.equal(p.verdict, 'partial');
+  assert.equal(p.topic, 'the deploy step');
+  assert.equal(p.behavior, 'accepted but pivoted to cost');
+});
+
+test('parseJudgeOutput: tolerates prose around the JSON, refuses bad form — silence over guess', () => {
+  assert.ok(
+    parseJudgeOutput('Here is my judgment: {"verdict":"no","topic":"JWT expiry","behavior":"re-asked"} hope that helps'),
+    'the first {...} block wins even when the model chats',
+  );
+  assert.equal(parseJudgeOutput('{"verdict":"maybe","topic":"x","behavior":"y"}'), undefined, 'unknown verdict = refuse');
+  assert.equal(parseJudgeOutput('{"verdict":"no","topic":"x"}'), undefined, 'missing behavior = refuse');
+  assert.equal(parseJudgeOutput('transferred — an old v1 line — moved on'), undefined, 'v1 line format = refuse, re-judge');
+  const none = parseJudgeOutput('{"verdict":"none","topic":"","behavior":"said thanks and committed"}');
+  assert.ok(none && none.topic === 'no signal', 'a none verdict may carry an empty topic — defaulted, never refused');
+});
+
+test('a v1 cache entry is stale — currentJudgment gates the pipeline version', () => {
+  assert.equal(currentJudgment({ hash: 'x', ts: 't', session: 's', line: 'transferred — a — b' }), false, 'v1 entry (no v, no fields) re-judges under the budget');
+  assert.equal(currentJudgment(undefined), false, 'missing entry is not current');
+  assert.equal(currentJudgment(j2('partial')), true, 'a current-version entry is served free');
 });
 
 test('cachedCount counts judgments, and reads missing or corrupt as zero', () => {

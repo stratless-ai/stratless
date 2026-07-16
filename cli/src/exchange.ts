@@ -34,11 +34,14 @@ export interface Exchange {
   hash: string;
 }
 
-/** One exchange never needs more than this to judge; the cap keeps every claude -p call cheap.
+/** The parse-time cap per field — the IDENTITY layer: capped text is what gets hashed, so this
+ *  number may only ever change inside a deliberate pipeline-version bump (0.3.0 raised it 4,000 →
+ *  8,000 while v2 was re-judging everything anyway — free churn, and the 21% of long turns keep
+ *  more real tail). Cost is unaffected: the judge's VIEW (judge.ts) bounds what a call pays for.
  *  Direction matters: prompt and reaction keep their HEAD (the ask leads, and both measure p99
  *  under 600 chars anyway), but `said` keeps its TAIL — the reaction answers the END of the
- *  assistant's turn, and 21% of real turns overflow this cap (measured 2026-07-16). */
-const CAP = 4000;
+ *  assistant's turn (measured 2026-07-16). */
+const CAP = 8000;
 
 function hashOf(prompt: string, said: string, reaction: string): string {
   return createHash('sha256').update(`${prompt}\0${said}\0${reaction}`).digest('hex').slice(0, 16);
