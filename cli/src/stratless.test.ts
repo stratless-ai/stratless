@@ -6,16 +6,17 @@
  * come back. A confidently-wrong answer, screenshotted by one stranger, ends this product.
  */
 import { strict as assert } from 'node:assert';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, before, after } from 'node:test';
 
 import { parseSession } from './transcript.js';
-import { parseExchanges } from './exchange.js';
+import { parseExchanges, loadRecentExchanges } from './exchange.js';
 import { injectProfile, removeProfile } from './sink.js';
 import { readUsage, recordUsage } from './usage.js';
 import { cachedCount } from './judge.js';
+import { installStopHook } from './init.js';
 
 let dir: string;
 
@@ -291,5 +292,62 @@ test('cachedCount counts judgments, and reads missing or corrupt as zero', () =>
   assert.equal(cachedCount(f), 3, 'one per cached exchange');
   writeFileSync(f, 'broken {');
   assert.equal(cachedCount(f), 0, 'a corrupt cache never throws');
+});
+
+// ── the recent-window loader: it must NOT read the whole history ──────────────────────────────
+//
+// 0.2.2 hung machines because the load read+parsed the ENTIRE archive (gigabytes) into memory before
+// keeping only the last 200. `loadRecentExchanges` reads newest transcripts first and stops. These pin
+// both halves: it returns the correct recent window, AND it stops early instead of touching the corpus.
+
+test('loadRecentExchanges returns the newest `want` exchanges, oldest-first, windowed', () => {
+  const rdir = mkdtempSync(join(tmpdir(), 'stratless-recent-'));
+  const session = (name: string, tag: string, ts: string, mtime: number) => {
+    const p = join(rdir, name);
+    writeFileSync(p, `${[u(`ask ${tag}`, ts), a(`answer ${tag}`, ts), u(`react ${tag}`, ts)].join('\n')}\n`);
+    utimesSync(p, mtime, mtime); // control the newest-first (mtime) order
+  };
+  session('s1.jsonl', 'one', '2026-07-01T10:00:00Z', 1000);
+  session('s2.jsonl', 'two', '2026-07-02T10:00:00Z', 2000);
+  session('s3.jsonl', 'three', '2026-07-03T10:00:00Z', 3000);
+  session('s4.jsonl', 'four', '2026-07-04T10:00:00Z', 4000);
+
+  const got = loadRecentExchanges(2, [rdir]);
+  assert.equal(got.length, 2, 'windowed to `want`, not the whole archive');
+  assert.equal(got[0].reaction, 'react three', 'oldest of the window comes first');
+  assert.equal(got[1].reaction, 'react four', 'newest last');
+  assert.ok(!got.some((e) => e.reaction === 'react one'), 'the older sessions are dropped');
+  rmSync(rdir, { recursive: true, force: true });
+});
+
+test('loadRecentExchanges STOPS at the recent window — it never opens the archive tail', () => {
+  const rdir = mkdtempSync(join(tmpdir(), 'stratless-stop-'));
+  const session = (name: string, tag: string, mtime: number) => {
+    const p = join(rdir, name);
+    writeFileSync(p, `${[u(`ask ${tag}`), a(`answer ${tag}`), u(`react ${tag}`)].join('\n')}\n`);
+    utimesSync(p, mtime, mtime);
+  };
+  session('new1.jsonl', 'new1', 9000); // newest by mtime — these fill the window
+  session('new2.jsonl', 'new2', 8000);
+  // OLD by mtime but with a FUTURE ts: a whole-archive read would pull it in; because the loader
+  // stops at the recent window (margin 0 here), it never even opens this file.
+  const old = join(rdir, 'ancient.jsonl');
+  writeFileSync(old, `${[u('ask sneaky', '2099-01-01T00:00:00Z'), a('answer sneaky', '2099-01-01T00:00:00Z'), u('react sneaky', '2099-01-01T00:00:00Z')].join('\n')}\n`);
+  utimesSync(old, 1, 1); // oldest mtime
+
+  const got = loadRecentExchanges(2, [rdir], { fileMargin: 0 });
+  assert.equal(got.length, 2);
+  assert.ok(!got.some((e) => e.reaction === 'react sneaky'), 'stopped at the window — the old-mtime file was never read');
+  rmSync(rdir, { recursive: true, force: true });
+});
+
+// ── the after-session hook is OPT-IN: `init` must not silently arm it (0.2.2 hung machines this way) ──
+
+test('installStopHook adds the refresh once, idempotently, in the form `status`/`stop` detect', () => {
+  const settings: { hooks?: { Stop?: unknown[] } } = {};
+  assert.equal(installStopHook(settings), true, 'first call installs it');
+  assert.ok(JSON.stringify(settings.hooks?.Stop).includes('stratless update'), 'the hook runs `stratless update`');
+  assert.equal(installStopHook(settings), false, 'second call is a no-op — never a duplicate');
+  assert.equal(settings.hooks?.Stop?.length, 1, 'exactly one Stop group, ever');
 });
 

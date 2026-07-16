@@ -16,7 +16,7 @@ import { loadEdits, claudeProjectDir, type Edit } from './transcript.js';
 import { findAssistant } from './claude.js';
 import { init as doInit, ARCHIVE, stopRefresh } from './init.js';
 import { health } from './canary.js';
-import { loadExchanges, sessionCount } from './exchange.js';
+import { loadRecentExchanges, sessionCount } from './exchange.js';
 import { judgeAll, cachedCount } from './judge.js';
 import { synthesizeProfile, synthesizeReport, topTopics, type Corpus } from './synthesize.js';
 import { injectProfile, removeProfile, humanMdPath, claudeMdPath } from './sink.js';
@@ -112,14 +112,13 @@ function profiler(kind: 'profile' | 'report'): void {
     process.exit(1);
   }
 
-  const exchanges = loadExchanges();
-  if (!exchanges.length) {
+  const window = loadRecentExchanges(JUDGE_WINDOW);
+  if (!window.length) {
     console.log(`\n  No conversations found yet.`);
     console.log(`  ${C.dim('Talk to Claude Code a few times, run `stratless init`, then try this again.')}\n`);
     return;
   }
 
-  const window = exchanges.slice(-JUDGE_WINDOW);
   const sessions = sessionCount(window);
   process.stderr.write(`\n  ${C.dim(`reading ${window.length.toLocaleString()} recent exchanges across ${sessions} sessions…`)}\n`);
   const run = judgeAll([...window].reverse(), bin, {
@@ -184,13 +183,12 @@ function update(): void {
     process.exit(1);
   }
 
-  const exchanges = loadExchanges();
-  if (!exchanges.length) {
+  const window = loadRecentExchanges(JUDGE_WINDOW);
+  if (!window.length) {
     console.log(`\n  No conversations found yet.\n  ${C.dim('Talk to Claude Code a few times, run `stratless init`, then try this.')}\n`);
     return;
   }
 
-  const window = exchanges.slice(-JUDGE_WINDOW);
   const sessions = sessionCount(window);
   process.stderr.write(`\n  ${C.dim(`reading ${window.length.toLocaleString()} recent exchanges across ${sessions} sessions…`)}\n`);
   const run = judgeAll([...window].reverse(), bin, {
@@ -321,14 +319,22 @@ function main(): void {
   }
 
   if (cmd === 'init') {
-    const r = doInit();
-    console.log(`\n  ${C.ok('stratless is watching your history.')}\n`);
+    const auto = args.includes('--auto');
+    const r = doInit({ auto });
+    console.log(`\n  ${C.ok('stratless is keeping your history.')}\n`);
     console.log(`    reaper           ${C.dim(String(r.before))} → ${C.b(`${r.after} days`)}`);
     console.log(`    archived         ${C.b(String(r.copied))} transcripts${r.skipped ? C.dim(` (${r.skipped} already current)`) : ''}`);
     console.log(`    kept at          ${C.dim(ARCHIVE)}`);
-    console.log(`    after-session    ${r.hookInstalled ? C.b('refresh installed') : C.dim('refresh already on')}`);
+    console.log(`    after-session    ${auto ? C.b('auto-refresh ON') : C.dim('auto-refresh off')}`);
     console.log(`\n  ${C.dim('Claude Code deletes transcripts after 30 days — per file, even in a project you')}`);
     console.log(`  ${C.dim('use daily. Anything already gone is gone. Everything from here is kept.')}\n`);
+    console.log(
+      `  ${C.dim(
+        auto
+          ? 'Auto-refresh rebuilds your profile in the background after each session. Turn it off with: stratless stop'
+          : 'Auto-refresh is off. Turn on background updates any time with: stratless init --auto',
+      )}\n`,
+    );
     console.log(`  ${C.dim('Next:')} stratless profile\n`);
     return;
   }
@@ -337,7 +343,7 @@ function main(): void {
     console.log(`
   ${C.b('stratless')} — build your AI a model of who you are
 
-    ${C.b('stratless init')}       ${C.dim('keep your history + turn on the after-session refresh')}
+    ${C.b('stratless init')}       ${C.dim('keep your history safe (add --auto for background refresh)')}
     ${C.b('stratless profile')}    ${C.dim('the model of you your assistant should load')}
     ${C.b('stratless report')}     ${C.dim('the same picture, written for you to read')}
     ${C.b('stratless update')}     ${C.dim('re-read what is new, rebuild the profile, and load it')}
