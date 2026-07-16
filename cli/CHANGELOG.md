@@ -4,7 +4,22 @@ All notable changes to `stratless` are recorded here — written by hand, for th
 not scraped from commits. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and each version matches its `cli-v*` git tag.
 
-## [Unreleased]
+## [0.2.2] — 2026-07-16
+
+### Added
+- **`stratless status`** — stratless's own state at a glance: whether the after-session refresh is on,
+  whether your profile is loaded, how many exchanges have been judged, when it last refreshed, and the
+  running total it has spent on your borrowed `claude`. It reads locally and spends nothing. (`stats`
+  still counts your *assistant's* activity in a project; `status` is about stratless itself.)
+
+### Changed
+- **The generated profile is now em-dash-free at the source** — the synthesis prompt avoids em and en
+  dashes, and a deterministic pass strips any that slip through, so HUMAN.md stops carrying the one
+  punctuation mark that reads as machine-written.
+
+### Fixed
+- Housekeeping: bumped `pnpm/action-setup` off its deprecated Node 20 runner in CI, and removed a stale
+  workflow comment and a couple of stray files.
 
 ## [0.2.1] — 2026-07-15
 

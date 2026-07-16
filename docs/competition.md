@@ -73,16 +73,59 @@ agents follow them too literally and mostly re-surface what they could already r
 The question nobody has answered: who owns a portable profile of *the human* the agent works with?
 The honest read: **sparsely populated — early and unconsolidated, not empty, not crowded.**
 
-**Self-report files** (you describe yourself):
+*Expanded 2026-07-16 with a fresh scan of the GitHub "personal context" repo field (2,347 repos; the
+notable ten read at source). The two most direct competitors below — me.md and Creed — were absent or
+weak at the first writing and are now the ones to watch.*
+
+**The two serious 2026 direct competitors.** Near-mirror-images of each other, and neither is where we are:
+
+- **me.md** (memd-app/me.md · ~15★ · MIT · local-first, in-browser) — positions on **verification**:
+  *"verified personal context — interview yourself, verify every insight, carry your context anywhere."*
+  An AI interviews you; each extracted **insight** carries a confidence score, an evidence count, and a
+  `verified / unverified / rejected` status; nothing enters the profile without your sign-off. It even
+  runs three real psychometric instruments (Big Five, RIASEC, Schwartz values). But consumption is a
+  **read-only local MCP server** off a manual DB export — rich verification, almost no distribution. No
+  product, no account, no pricing; a research-grade experiment by one strong engineer.
+- **Creed** (connorhpbrn/creed · creed.md · ~80★ · MIT · Next.js + Supabase, **server/account-based**) —
+  positions on **portability + ownership**: *"one file across every agent… plain Markdown you own."* Ten
+  markdown sections; agents read it and **propose narrowly-scoped edits you approve**. Its moat is
+  **distribution**: it is its own OAuth 2.1 server fronting a hosted MCP endpoint, one-click connect for
+  ~10 clients (Claude Code, Codex, Cursor, ChatGPT, Devin…), plus a CLI and GitHub sync. A real business
+  — **$0 / $12-mo / $129-mo** (team). Its "quality scoring" grades *how context is written, never whether
+  it's true* (its own rubric) — an eloquent lie scores 95.
+
+**Self-report files / templates** (you describe yourself):
 - **human.md** ($15, human-md.com) — closest name-match. A 15-minute interview → a "personal operating
   manual." But *wellness*-framed (triggers, recovery), not dev-workflow, and no adoption numbers.
-- **personal-context-portfolio** (~440★) — an open MIT template, ten markdown files you fill in by hand.
-  Most traction of any open person-file — but a template, not a living thing (1 commit).
+- **personal-context-portfolio** (~441★, **303 forks**) — an open MIT template, ten markdown files you
+  fill in by hand. Most traction of any open person-file, and the fork count proves the appetite — but a
+  template, not a living thing (1 commit).
 - **USER.md** — an informal convention inside a couple of agent frameworks. Framework-local, not a standard.
 
-**The unclaimed niche — and it's exactly ours:** every one of these does one of two things — *ask you to
-describe yourself*, or *passively remember what you said*. **Nobody is doing earned, judged profiling
-from actual behaviour.** Signal over self-report. That's the whitespace.
+### The three capture models — the sharpest way to see the field
+
+Strip everything else away and every person-layer product differs on one axis: **how the profile gets
+made.** There are exactly three answers, and stratless is alone on its own:
+
+| Model | How context is captured | Who leads it | Core promise |
+|-------|-------------------------|--------------|--------------|
+| **Declared** | you author it; agents propose edits you approve | **Creed** | portable + owned |
+| **Interviewed** | an AI elicits it; you verify each insight | **me.md** | verified / true |
+| **Observed** | it reads your real behaviour; you do nothing | **stratless** | it meets you where you are |
+
+Declared and Interviewed both still make *the human* do the work of being understood — write yourself
+down, or sit for the interview. **Observed is the only model that asks nothing and reads the person off
+their actual behaviour.** That is the §1 axis flip, now sharpened against named rivals.
+
+**The unclaimed niche — verification × distribution, and it's exactly ours.** me.md *verifies* but can't
+*distribute* (read-only local export). Creed *distributes* beautifully but verifies *nothing true* (it
+grades prose craft). **Nobody both verifies a claim and serves it frictionlessly to every agent.** And
+here is the reframe that matters: stratless's mechanism — judging whether understanding actually
+*transferred*, recording nothing on a weak signal, refusing the confident guess — is a **stronger**
+verification story than me.md's self-report-then-confirm. Ours is **verified by behaviour, not by
+self-report.** So the play is to plant a flag on *verified-by-behaviour* (beating me.md at its own noun)
+while staying zero-effort (beating Creed on effort) and local-first (beating Creed on ownership). Signal
+over self-report, said out loud.
 
 ---
 
@@ -182,6 +225,58 @@ ownership, honesty). That divergence is the blue ocean. And it splits the grid i
 the user write their own profile, we are back in the red ocean — and **Create + Raise are where we
 invest**: deepen the earned profiling and the portability, never chase the industry's competed factors.
 
+---
+
+## 9. The distribution lesson — and why we probably skip MCP
+
+*Added 2026-07-16, from Creed's "Works with your stack" grid — 14 client logos under "Connect Creed once,
+then every AI you talk to knows you instantly." It's the sharpest artifact in the field, and there's a
+trap folded into it.*
+
+**What the grid actually proves.** Creed did not build fourteen integrations. Every logo — ChatGPT,
+Cursor, Devin, Codex, v0, Custom — connects through the *same* hosted MCP server over OAuth. They
+implemented **one** thing (an MCP endpoint) and the ecosystem handed them the grid for free, and it grows
+on its own as new MCP clients ship. **MCP is the distribution primitive: one server → N clients.** The
+proof it's about friction, not capability: me.md *also* ships an MCP server, but it's read-only local
+stdio behind a manual DB export — so it draws two logos, not fourteen. Creed made connecting one click.
+Two lessons bank cleanly: **(a)** the market demand for "one profile, every agent" is now validated by a
+funded competitor, and **(b)** activation friction, not integration count, decides the grid.
+
+**Why we probably don't need MCP at all.** Creed needs MCP because of a choice it made: its context lives
+in a **cloud database, away from the agent** — so it has to travel, and MCP/OAuth is the wire. stratless
+made the opposite choice. Our context is a **local file on the same machine as the agent**, and every
+tool in our marquee — Claude Code, Cursor, Codex, Aider, Copilot, Zed, Windsurf, Cline, Gemini CLI — already
+loads a local **context file** natively (`CLAUDE.md`, `AGENTS.md`, `.cursor/rules`, copilot-instructions).
+Our distribution primitive is **the file convention, not a protocol.** We reach the same grid by writing
+the file each tool already reads — no server, no OAuth, no account. **Not needing MCP is §5's moat
+restated as distribution:** Creed buys reach with your data; we keep the data and pay a little per-tool
+write plumbing instead.
+
+And the two things MCP would buy, we either don't need or actively reject:
+- **Query** (fetch just the relevant slice on demand) — irrelevant to us. HUMAN.md is one small briefing
+  loaded whole at session start; there is nothing to query.
+- **Agent write-back** (Creed's `propose_creed_update` — agents author edits) — this is the *declared*
+  model we exist to refuse. Our profile is **observed/earned**, never authored by the agent. We don't
+  want the write surface MCP exists to provide.
+
+**The one real gap, and the better play.** The file convention covers **100% of our marquee** (all local
+coding agents) but *not* cloud chat surfaces — ChatGPT-web, Grok — which can't read a local file. Those
+are in Creed's grid because they're Creed's audience (founders, writers, parents); they are **not ours**
+(developers inside coding tools). If we ever want them, or the paid **team** layer (§6), a served
+endpoint is the right tool *there* — scoped to the shared layer, never the local core. But the winning
+move is upstream of MCP entirely: **converge on a standard person-file** (`HUMAN.md` → the `USER.md`
+convention, riding the `AGENTS.md` standard's road, per §5.5). A tool that loads the standard file needs
+*zero* integration with us — that is a **stronger** "connect once" than MCP, because there is nothing to
+connect. Note the seam economics too: the tool we *write* HUMAN.md into is the same tool we *read*
+transcripts from, so one adapter (see `adapter-seam-spec.md`) does double duty — capture and distribution
+on a single integration.
+
+**The net.** Steal Creed's *framing*, refuse its *architecture*. Adopt "connect once, every agent knows
+you" and the credibility grid — then add the words Creed structurally cannot say: **it never leaves your
+machine, and it's earned from how you actually work, not a form you filled in.** Creed proved the demand
+and proved the ceiling of serving a hosted, unverified, declared file. We take the demand; we skip the
+server.
+
 ## Sources
 
 **AGENTS.md / red ocean:** [agents.md](https://agents.md/) ·
@@ -195,5 +290,11 @@ invest**: deepen the earned profiling and the portability, never chase the indus
 
 **Person layer / blue ocean:** [human.md](https://human-md.com/) ·
 [personal-context-portfolio](https://github.com/nlwhittemore/personal-context-portfolio) ·
+[me.md (memd-app)](https://github.com/memd-app/me.md) ·
+[Creed](https://creed.md) · [Creed repo](https://github.com/connorhpbrn/creed) ·
 [USER.md convention (Stanza)](https://www.stanza.dev/courses/openclaw-personalization/agent-persona/openclaw-personalization-user-md) ·
 [Claude/ChatGPT/Gemini memory compared](https://lumichats.com/blog/chatgpt-memory-vs-claude-memory-vs-gemini-personal-intelligence-2026-which-ai-actually-knows-you)
+
+**Adjacent repos scanned 2026-07-16:** [OpenContext (project-context, not person)](https://github.com/0xranx/OpenContext) ·
+[alive](https://github.com/alivecontext/alive) · [memcrate](https://github.com/memcrate/memcrate) ·
+[contextrot](https://github.com/Priyanshu-byte-coder/contextrot)

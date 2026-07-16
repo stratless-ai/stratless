@@ -14,6 +14,8 @@ import { test, before, after } from 'node:test';
 import { parseSession } from './transcript.js';
 import { parseExchanges } from './exchange.js';
 import { injectProfile, removeProfile } from './sink.js';
+import { readUsage, recordUsage } from './usage.js';
+import { cachedCount } from './judge.js';
 
 let dir: string;
 
@@ -248,5 +250,46 @@ test('removeProfile is a safe no-op with no block (or no file)', () => {
   assert.equal(removeProfile(claudeMd), false, 'nothing to remove');
   assert.equal(readFileSync(claudeMd, 'utf8'), '# just mine\n', 'file left untouched');
   assert.equal(removeProfile(join(dir, 'does-not-exist.md')), false, 'missing file is a no-op');
+});
+
+// ── usage + status: the "least wasteful" claim must be checkable ──────────────────────────────
+//
+// `status` shows what the borrowed `claude` has cost. If the tally lied — over-counted, or crashed
+// on a corrupt file mid-judge — the one number that backs the whole "least wasteful" pitch is worse
+// than useless. Recording must accumulate honestly and must NEVER throw into a judge call.
+
+test('recordUsage accumulates calls, cost, and tokens; a missing file reads as zero', () => {
+  const f = join(dir, 'usage.json');
+  assert.deepEqual(readUsage(f), { calls: 0, costUsd: 0, inputTokens: 0, outputTokens: 0 }, 'missing = zero');
+  recordUsage({ costUsd: 0.01, inputTokens: 100, outputTokens: 20 }, f);
+  recordUsage({ costUsd: 0.02, inputTokens: 50, outputTokens: 10 }, f);
+  const t = readUsage(f);
+  assert.equal(t.calls, 2, 'one increment per call');
+  assert.ok(Math.abs(t.costUsd - 0.03) < 1e-9, 'cost sums');
+  assert.equal(t.inputTokens, 150);
+  assert.equal(t.outputTokens, 30);
+});
+
+test('readUsage on a corrupt file reads as zero and never throws', () => {
+  const f = join(dir, 'usage-corrupt.json');
+  writeFileSync(f, 'not json {');
+  assert.deepEqual(readUsage(f), { calls: 0, costUsd: 0, inputTokens: 0, outputTokens: 0 });
+});
+
+test('recordUsage tolerates missing fields — a JSON payload without usage still counts the call', () => {
+  const f = join(dir, 'usage-partial.json');
+  recordUsage({}, f); // e.g. plain-text fallback: we know a call happened, nothing else
+  const t = readUsage(f);
+  assert.equal(t.calls, 1);
+  assert.equal(t.costUsd, 0);
+});
+
+test('cachedCount counts judgments, and reads missing or corrupt as zero', () => {
+  const f = join(dir, 'judgments.json');
+  assert.equal(cachedCount(f), 0, 'no cache yet');
+  writeFileSync(f, JSON.stringify({ a: {}, b: {}, c: {} }));
+  assert.equal(cachedCount(f), 3, 'one per cached exchange');
+  writeFileSync(f, 'broken {');
+  assert.equal(cachedCount(f), 0, 'a corrupt cache never throws');
 });
 
