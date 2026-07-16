@@ -4,6 +4,56 @@ All notable changes to `stratless` are recorded here — written by hand, for th
 not scraped from commits. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and each version matches its `cli-v*` git tag.
 
+## [0.2.4] — 2026-07-16
+
+### Changed
+- **`update` now rebuilds the profile only when it's due — the cost release.** The synthesis is the
+  expensive read (~32 judge calls' worth, measured on real usage); it used to run after every
+  session, even for a handful of new exchanges. Sessions now accumulate: the profile rebuilds after
+  **25 new judgments** (`STRATLESS_SYNTH_EVERY` overrides), when it's over a week stale and anything
+  new arrived, when no profile exists yet, or on **`stratless update --now`**. A skipped rebuild
+  still judges what's new and still guarantees the profile stays loaded — the skip is invisible,
+  only the cost is missing.
+- **The profile is written by Sonnet, pinned — same deliberate read, ~4–6x cheaper.** Synthesis used
+  to ride whatever your default model is; a frontier default spent ~$0.62 API-equivalent per rebuild
+  (thinking billed at frontier rates), which was ~80% of everything stratless spent. Sonnet thinks
+  just as hard about who you are for ~$0.10–0.15. `STRATLESS_SYNTH_MODEL` brings your default back
+  if you want it.
+- **The judge now reads the END of a long assistant turn — the part you actually reacted to.** Long
+  turns were cut from the head, so the judge read the opening preamble and then your reaction to a
+  conclusion it never saw. Measured on real history: 83% of turns were longer than the judge's view.
+  Already-judged exchanges are not re-read; only the truncated ones re-judge, gradually, in the
+  background budget.
+- **Reactions that carry no signal (`none` — logistics, a thank-you) no longer reach the writer.**
+  They stay cached like everything else; they just stop diluting the profile.
+- **`profile` now says where the load stands.** The split is deliberate — `profile` and `report`
+  *look*, `update` *loads* — but `profile` used to end in silence, leaving the impression the
+  printed profile was live. It now closes with the honest state: `not loaded yet — load it into
+  your assistant: stratless update`, or the loaded path and how to refresh it.
+- **Every printed next-step now works in your shell.** Run stratless via `npx` and the hints say
+  `npx stratless profile`; run it installed and they stay bare. (Following `npx stratless init`
+  with the suggested `stratless profile` used to hit `command not found`.)
+- **`stop` points back the right way.** Its parting hint now names what actually reverses it
+  (`stratless update` to reload, `stratless init --auto` for background refresh) — plain `init`
+  no longer arms the refresh since 0.2.3, and `status` said the same stale thing.
+
+### Fixed
+- **The usage meter no longer under-reports by ~2,000x.** It recorded only plain input tokens and
+  dropped the cache tokens where the real consumption lives (~17–24k tokens of Claude Code harness
+  overhead per borrowed call) — the ledger showed 484 input tokens where reality was over a million.
+  `status` now reports real tokens first (a subscription spends quota, not dollars), the
+  API-equivalent cost clearly labelled, and the judging / profile-build split. Existing tallies
+  survive the upgrade untouched.
+- **A hand-edited `~/.claude/settings.json` no longer crashes `init`.** Malformed JSON (the classic
+  trailing comma) used to become a raw stack trace — and could not be distinguished from a file worth
+  overwriting. `init` now refuses with a clear message and touches nothing; `stop` treats it as
+  "nothing to remove".
+- **`init --auto` warns when the background refresh can't actually run** — the hook calls the bare
+  `stratless`, which an npx-only install doesn't put on your PATH. It now says so and names the fix
+  instead of failing silently every session.
+- The "report this" links printed when stratless refuses on format drift pointed at the repo's old
+  name and led to a 404. They point at the real repository now.
+
 ## [0.2.3] — 2026-07-16
 
 ### Fixed

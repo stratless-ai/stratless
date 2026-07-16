@@ -2,10 +2,10 @@
 /**
  * stratless — build your AI a model of who you are, so it stops making you feel stupid.
  *
- *   stratless init      keep your history + turn on the after-session refresh
- *   stratless profile   the model of you your assistant should load
+ *   stratless init      keep your history (add --auto for the after-session refresh)
+ *   stratless profile   see the model of you (profile LOOKS; update LOADS)
  *   stratless report    the same picture, written for you to read
- *   stratless update    re-read what's new, rebuild the profile, and load it
+ *   stratless update    judge what's new; rebuild + load the profile when due (--now: always)
  *   stratless stop      turn it off — stop refreshing and unload the profile
  *   stratless status    stratless's own state: on or off, and what it has cost
  *   stratless stats     your assistant's activity in a project, in raw counts
@@ -13,13 +13,14 @@
  * Runs on your machine. Reads your own history. Nothing leaves.
  */
 import { loadEdits, claudeProjectDir, type Edit } from './transcript.js';
-import { findAssistant } from './claude.js';
-import { init as doInit, ARCHIVE, stopRefresh } from './init.js';
+import { findAssistant, onPath } from './claude.js';
+import { init as doInit, ARCHIVE, stopRefresh, type InitResult } from './init.js';
 import { health } from './canary.js';
 import { loadRecentExchanges, sessionCount } from './exchange.js';
 import { judgeAll, cachedCount } from './judge.js';
-import { synthesizeProfile, synthesizeReport, topTopics, type Corpus } from './synthesize.js';
-import { injectProfile, removeProfile, humanMdPath, claudeMdPath } from './sink.js';
+import { synthesizeProfile, synthesizeReport, topTopics, hasSignal, type Corpus } from './synthesize.js';
+import { injectProfile, removeProfile, ensureLoaded, humanMdPath, claudeMdPath } from './sink.js';
+import { readState, writeState, synthesisDue, SYNTH_EVERY } from './state.js';
 import { readUsage } from './usage.js';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -35,6 +36,16 @@ const C = {
   warn: (s: string) => `\x1b[33m${s}\x1b[0m`,
   bad: (s: string) => `\x1b[31m${s}\x1b[0m`,
 };
+
+/**
+ * Ran via `npx stratless …`? Then the bare `stratless` is NOT on the person's PATH, and every hint
+ * we print as `stratless foo` would come back `command not found` — the single most common way a
+ * first run dies. Detect it and make every printed next-step copy-pasteable as-is.
+ */
+const viaNpx = (): boolean => (process.argv[1] ?? '').includes('_npx') || process.env.npm_command === 'exec';
+
+/** A command hint that actually runs in the shell the person has. */
+const hint = (cmd: string): string => (viaNpx() ? `npx ${cmd}` : cmd);
 
 /**
  * If we can't read the log, SAY SO. Never fall through to a confident lie.
@@ -98,10 +109,38 @@ const judgeLimit = (): number => {
 };
 
 /**
+ * The synthesis gate: rebuild the profile only after this many fresh judgments accumulate (or on the
+ * backstop / `--now` — see update()). STRATLESS_SYNTH_EVERY overrides it.
+ */
+const synthEvery = (): number => {
+  const env = Number(process.env.STRATLESS_SYNTH_EVERY);
+  if (Number.isFinite(env) && env > 0) return env;
+  return SYNTH_EVERY;
+};
+
+/**
+ * Is the profile actually loaded? HUMAN.md exists AND CLAUDE.md carries our redirect block. The one
+ * honest definition, shared by `status` and `profile`'s footer.
+ */
+function profileLoaded(): boolean {
+  try {
+    return (
+      existsSync(humanMdPath()) &&
+      existsSync(claudeMdPath()) &&
+      readFileSync(claudeMdPath(), 'utf8').includes('<!-- stratless:start -->')
+    );
+  } catch {
+    return false; // treat unreadable as not-loaded
+  }
+}
+
+/**
  * The profiler — read the whole corpus, learn who you are, say it back.
  *
- * `profile` renders the AI's copy (what loads into its context); `report` renders yours. Same
- * pipeline underneath — judge every exchange once (cached forever), synthesize the pile once.
+ * `profile` and `report` LOOK, `update` ACTS: these render the picture (the AI's copy and yours),
+ * and only `update` loads it. A command that prints must not quietly rewrite the assistant's
+ * config — so `profile` ends by saying, honestly, whether a profile is loaded and how to load one.
+ * Same pipeline underneath — judge every exchange once (cached forever), synthesize the pile once.
  */
 function profiler(kind: 'profile' | 'report'): void {
   const bin = findAssistant();
@@ -115,7 +154,7 @@ function profiler(kind: 'profile' | 'report'): void {
   const window = loadRecentExchanges(JUDGE_WINDOW);
   if (!window.length) {
     console.log(`\n  No conversations found yet.`);
-    console.log(`  ${C.dim('Talk to Claude Code a few times, run `stratless init`, then try this again.')}\n`);
+    console.log(`  ${C.dim(`Talk to Claude Code a few times, run \`${hint('stratless init')}\`, then try this again.`)}\n`);
     return;
   }
 
@@ -132,18 +171,21 @@ function profiler(kind: 'profile' | 'report'): void {
     process.exit(1);
   }
 
+  // Only judgments that carry signal reach the writer — a `none` line is, by definition, nothing
+  // to reason from. The corpus counts what the writer actually sees, so the numbers stay honest.
+  const signal = run.judgments.filter(hasSignal);
   const corpus: Corpus = {
     sessions,
-    exchanges: run.judgments.length,
-    topics: topTopics(run.judgments),
+    exchanges: signal.length,
+    topics: topTopics(signal),
     from: window[0].ts.slice(0, 10),
     to: window[window.length - 1].ts.slice(0, 10),
   };
 
   const text =
     kind === 'profile'
-      ? synthesizeProfile(run.judgments, corpus, bin)
-      : synthesizeReport(run.judgments, corpus, bin);
+      ? synthesizeProfile(signal, corpus, bin)
+      : synthesizeReport(signal, corpus, bin);
 
   if (!text) {
     console.error(`\n  ${C.bad(`Could not build your ${kind}.`)} ${C.dim('The assistant returned nothing — silence beats a guess.')}\n`);
@@ -155,7 +197,7 @@ function profiler(kind: 'profile' | 'report'): void {
   writeFileSync(file, `${text}\n`);
 
   const header = kind === 'profile' ? "WHO YOU'RE WORKING WITH" : 'YOUR PATTERN — what stratless sees';
-  console.log(`\n  ${C.b(header)}   ${C.dim(`(stratless · ${sessions} sessions · ${run.judgments.length} exchanges)`)}\n`);
+  console.log(`\n  ${C.b(header)}   ${C.dim(`(stratless · ${sessions} sessions · ${signal.length} exchanges)`)}\n`);
   console.log(
     text
       .split('\n')
@@ -166,16 +208,33 @@ function profiler(kind: 'profile' | 'report'): void {
     ? `${run.fresh} new read${run.fresh === 1 ? '' : 's'}, ${run.cached} from cache`
     : `all ${run.cached} from cache`;
   const more = run.deferred ? C.dim(` · ${run.deferred} left for next run`) : '';
-  console.log(`\n  ${C.dim(`${spend} · saved to ${file}`)}${more}\n`);
+  console.log(`\n  ${C.dim(`${spend} · saved to ${file}`)}${more}`);
+
+  // `profile` looks, `update` acts — so end by saying, honestly, where the load stands.
+  if (kind === 'profile') {
+    console.log(
+      profileLoaded()
+        ? `  ${C.dim(`loaded: ${humanMdPath()} · refresh it with \`${hint('stratless update')}\``)}\n`
+        : `  ${C.it('not loaded yet')} ${C.dim('· load it into your assistant:')} ${C.b(hint('stratless update'))}\n`,
+    );
+  } else {
+    console.log('');
+  }
 }
 
 /**
- * UPDATE — the after-session refresh: read what's new, rebuild the profile, and LOAD it.
+ * UPDATE — the after-session refresh: read what's new, and rebuild + LOAD the profile when it's DUE.
  *
- * This is what the silent Stop hook runs. Same pipeline as `profile`, then it writes the profile into
- * the assistant's own instructions file (the load step) so the next session starts already knowing you.
+ * This is what the silent Stop hook runs, so it must be cheap by default. Judging a session's new
+ * exchanges costs cents; the SYNTHESIS is the expensive read (~32 judge calls' worth — measured,
+ * 2026-07-16), so it is gated: sessions accumulate judgments, the profile consumes them in batches.
+ * Due = enough new evidence (synthEvery) · a stale profile with anything new at all (the backstop)
+ * · no profile on disk yet · the cache was reset · or `--now`. A gated skip still guarantees an
+ * existing profile is loaded (covers `update` after `stop`) — the skip is invisible, only the cost
+ * is missing.
  */
-function update(): void {
+function update(rest: string[]): void {
+  const force = rest.includes('--now');
   const bin = findAssistant();
   if (!bin) {
     console.error(`\n  ${C.bad('stratless needs your assistant to read your history.')}`);
@@ -185,7 +244,7 @@ function update(): void {
 
   const window = loadRecentExchanges(JUDGE_WINDOW);
   if (!window.length) {
-    console.log(`\n  No conversations found yet.\n  ${C.dim('Talk to Claude Code a few times, run `stratless init`, then try this.')}\n`);
+    console.log(`\n  No conversations found yet.\n  ${C.dim(`Talk to Claude Code a few times, run \`${hint('stratless init')}\`, then try this.`)}\n`);
     return;
   }
 
@@ -202,14 +261,31 @@ function update(): void {
     process.exit(1);
   }
 
+  // THE GATE — decide before spending the expensive read. cachedCount() runs after judging, so this
+  // session's fresh judgments count toward the gate. `--now`, a missing HUMAN.md, or a due verdict
+  // (K reached / backstop / cache reset / first build) all open it; otherwise the cheap path.
+  const state = readState();
+  const gate = synthesisDue(state, cachedCount(), new Date(), { every: synthEvery() });
+  const noProfile = !existsSync(humanMdPath());
+  if (!force && !noProfile && !gate.due) {
+    const ensured = ensureLoaded();
+    const judged = run.fresh ? `judged ${run.fresh} new` : 'nothing new to judge';
+    console.log(`\n  ${C.ok('profile is fresh enough')}  ${C.dim(`(${judged} · ${gate.newSince}/${synthEvery()} toward the next build)`)}`);
+    if (ensured) console.log(`  ${C.dim(`loaded: ${humanMdPath()}`)}`);
+    console.log(`  ${C.dim(`rebuild now with \`${hint('stratless update --now')}\``)}\n`);
+    return;
+  }
+
+  // Same signal filter as `profile` — `none` lines never reach the writer (see profiler()).
+  const signal = run.judgments.filter(hasSignal);
   const corpus: Corpus = {
     sessions,
-    exchanges: run.judgments.length,
-    topics: topTopics(run.judgments),
+    exchanges: signal.length,
+    topics: topTopics(signal),
     from: window[0].ts.slice(0, 10),
     to: window[window.length - 1].ts.slice(0, 10),
   };
-  const text = synthesizeProfile(run.judgments, corpus, bin);
+  const text = synthesizeProfile(signal, corpus, bin);
   if (!text) {
     console.error(`\n  ${C.bad('Could not build your profile.')} ${C.dim('The assistant returned nothing — silence beats a guess.')}\n`);
     process.exit(1);
@@ -218,10 +294,12 @@ function update(): void {
   mkdirSync(STRATLESS, { recursive: true });
   writeFileSync(join(STRATLESS, 'profile.txt'), `${text}\n`);
   const { humanMd, claudeMd } = injectProfile(text);
+  writeState({ lastSynthesisAt: new Date().toISOString(), judgmentsAtLastSynthesis: cachedCount() });
 
+  const why = force ? 'forced with --now' : noProfile ? 'first load' : gate.reason;
   const spend = run.fresh ? `${run.fresh} new, ${run.cached} from cache` : `all ${run.cached} from cache`;
   const more = run.deferred ? ` · ${run.deferred} left for next run` : '';
-  console.log(`\n  ${C.ok('profile refreshed and loaded')}  ${C.dim(`(${spend}${more})`)}`);
+  console.log(`\n  ${C.ok('profile refreshed and loaded')}  ${C.dim(`(${why} · ${spend}${more})`)}`);
   console.log(`  ${C.dim(`wrote ${humanMd}`)}`);
   console.log(`  ${C.dim(`pointed ${claudeMd} at it (via @import)`)}\n`);
 }
@@ -242,7 +320,7 @@ function stop(): void {
   if (hookRemoved) console.log(`  ${C.dim('· after-session refresh removed')}`);
   if (unloaded) console.log(`  ${C.dim('· profile unloaded from your CLAUDE.md')}`);
   console.log(`  ${C.dim('Your ~/.claude/HUMAN.md is left as-is — delete it yourself if you want it gone.')}`);
-  console.log(`  ${C.dim('Run `stratless init` to turn everything back on.')}\n`);
+  console.log(`  ${C.dim(`Run \`${hint('stratless update')}\` to load it again, \`${hint('stratless init --auto')}\` for background refresh.`)}\n`);
 }
 
 /**
@@ -263,17 +341,10 @@ function status(): void {
     /* an unreadable settings file reads as off, never a crash */
   }
 
-  // 2. Is the profile actually loaded? HUMAN.md exists AND CLAUDE.md carries our redirect block.
+  // 2. Is the profile actually loaded? One definition, shared with `profile`'s footer.
   const human = humanMdPath();
-  const claude = claudeMdPath();
   const humanExists = existsSync(human);
-  let redirected = false;
-  try {
-    redirected = existsSync(claude) && readFileSync(claude, 'utf8').includes('<!-- stratless:start -->');
-  } catch {
-    /* treat unreadable as not-loaded */
-  }
-  const loaded = humanExists && redirected;
+  const loaded = profileLoaded();
 
   // 3. When was it last refreshed? HUMAN.md's mtime is the honest answer.
   let last = 'never';
@@ -285,16 +356,27 @@ function status(): void {
 
   const judged = cachedCount();
   const u = readUsage();
-  const cost = `$${u.costUsd.toFixed(2)}`;
-  const onOwn = `across ${u.calls.toLocaleString()} read${u.calls === 1 ? '' : 's'}, on your own claude`;
+  // Tokens are the honest unit — a subscription spends quota, not dollars — and the cache tokens
+  // (the ~17–24k harness overhead every borrowed call carries) ARE the consumption, so they count.
+  // The dollar figure is the API-equivalent, labelled as exactly that.
+  const tokens = u.inputTokens + u.outputTokens + u.cacheCreationTokens + u.cacheReadTokens;
+  const fmtTok = (t: number): string =>
+    t >= 1e6 ? `${(t / 1e6).toFixed(1)}M` : t >= 1000 ? `${Math.round(t / 1000)}k` : String(t);
+  const spend = `${fmtTok(tokens)} tokens across ${u.calls.toLocaleString()} read${u.calls === 1 ? '' : 's'}`;
+  const api = `≈ $${u.costUsd.toFixed(2)} at API rates, on your own claude`;
+  const FEATURE_LABEL: Record<string, string> = { judge: 'judging', synthesis: 'profile builds' };
+  const byFeature = Object.entries(u.byFeature)
+    .map(([f, t]) => `${FEATURE_LABEL[f] ?? f} $${t.costUsd.toFixed(2)} (${t.calls.toLocaleString()})`)
+    .join(' · ');
 
   console.log(`\n  ${C.b('stratless status')}\n`);
   console.log(`    after-session refresh   ${refresh ? C.ok('on') : C.dim('off')}`);
   console.log(`    profile loaded          ${loaded ? C.ok('yes') : C.dim('no')}${humanExists ? `  ${C.dim(human)}` : ''}`);
   console.log(`    exchanges judged        ${C.b(judged.toLocaleString())}`);
   console.log(`    last refresh            ${C.dim(last)}`);
-  console.log(`    spent so far            ${C.b(cost)}  ${C.dim(onOwn)}`);
-  if (!refresh) console.log(`\n  ${C.dim('Run `stratless init` to turn the after-session refresh on.')}`);
+  console.log(`    spent so far            ${C.b(spend)}  ${C.dim(api)}`);
+  if (byFeature) console.log(`                            ${C.dim(byFeature)}`);
+  if (!refresh) console.log(`\n  ${C.dim(`Run \`${hint('stratless init --auto')}\` to turn the after-session refresh on.`)}`);
   console.log('');
 }
 
@@ -320,7 +402,15 @@ function main(): void {
 
   if (cmd === 'init') {
     const auto = args.includes('--auto');
-    const r = doInit({ auto });
+    let r: InitResult;
+    try {
+      r = doInit({ auto });
+    } catch (err) {
+      // Refuse, don't clobber — say what's wrong (a malformed settings.json) and stop cleanly.
+      console.error(`\n  ${C.bad('stratless could not update your settings.')}`);
+      console.error(`  ${C.dim(String(err instanceof Error ? err.message : err).split('\n').join('\n  '))}\n`);
+      process.exit(1);
+    }
     console.log(`\n  ${C.ok('stratless is keeping your history.')}\n`);
     console.log(`    reaper           ${C.dim(String(r.before))} → ${C.b(`${r.after} days`)}`);
     console.log(`    archived         ${C.b(String(r.copied))} transcripts${r.skipped ? C.dim(` (${r.skipped} already current)`) : ''}`);
@@ -331,11 +421,17 @@ function main(): void {
     console.log(
       `  ${C.dim(
         auto
-          ? 'Auto-refresh rebuilds your profile in the background after each session. Turn it off with: stratless stop'
-          : 'Auto-refresh is off. Turn on background updates any time with: stratless init --auto',
+          ? `Auto-refresh rebuilds your profile in the background after each session. Turn it off with: ${hint('stratless stop')}`
+          : `Auto-refresh is off. Turn on background updates any time with: ${hint('stratless init --auto')}`,
       )}\n`,
     );
-    console.log(`  ${C.dim('Next:')} stratless profile\n`);
+    if (auto && !onPath('stratless')) {
+      // The hook we just installed runs the bare `stratless` — from an npx-only install it will
+      // fail silently on every session. Never arm a background job without saying it can't run yet.
+      console.log(`  ${C.warn('heads up:')} ${C.dim('the background refresh runs `stratless update`, but `stratless` is not on')}`);
+      console.log(`  ${C.dim('your PATH yet. Install it properly or the refresh will silently do nothing:')} ${C.b('npm install -g stratless')}\n`);
+    }
+    console.log(`  ${C.dim('Next:')} ${hint('stratless profile')}\n`);
     return;
   }
 
@@ -344,9 +440,9 @@ function main(): void {
   ${C.b('stratless')} — build your AI a model of who you are
 
     ${C.b('stratless init')}       ${C.dim('keep your history safe (add --auto for background refresh)')}
-    ${C.b('stratless profile')}    ${C.dim('the model of you your assistant should load')}
+    ${C.b('stratless profile')}    ${C.dim('see the model of you (load it with `stratless update`)')}
     ${C.b('stratless report')}     ${C.dim('the same picture, written for you to read')}
-    ${C.b('stratless update')}     ${C.dim('re-read what is new, rebuild the profile, and load it')}
+    ${C.b('stratless update')}     ${C.dim('judge what is new; rebuild + load the profile when due (--now: always)')}
     ${C.b('stratless stop')}       ${C.dim('turn it off — stop refreshing and unload the profile')}
     ${C.b('stratless status')}     ${C.dim("stratless's own state: on or off, and what it has cost")}
     ${C.b('stratless stats')}      ${C.dim("your assistant's activity in a project: raw counts, free")}
@@ -360,7 +456,7 @@ function main(): void {
   if (cmd === 'status') return status();
   if (cmd === 'profile') return profiler('profile');
   if (cmd === 'report') return profiler('report');
-  if (cmd === 'update') return update();
+  if (cmd === 'update') return update(args.slice(1));
   if (cmd === 'stop') return stop();
 
   console.error(`  unknown command: ${cmd}`);

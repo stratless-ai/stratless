@@ -1,0 +1,34 @@
+# A bug report we can act on: version, OS, what happened. Low-friction on purpose —
+# stratless has no telemetry, so reports like this are the only way we learn something broke.
+name: Bug report
+description: Something stratless did wrong, or didn't do
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: stratless version
+      description: "`stratless --version` (or `npx stratless --version`)"
+      placeholder: "0.2.3"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: "macOS 15 / Ubuntu 24.04 / Windows 11 (WSL)"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: The command you ran and what it printed, pasted as-is. Redact anything personal — your transcripts and your profile are yours; don't post them.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: false

@@ -20,6 +20,26 @@
 import { runClaude } from './claude.js';
 import type { Judgment } from './judge.js';
 
+/**
+ * The synthesis model. Reading the shape of a person is subtle work, so it does not ride the tiny
+ * judge model — but 0.2.4 measured what "run on the user's default" really means: a frontier default
+ * spent $0.62 per synthesis (~5k thinking tokens at frontier rates for a 250-word profile), about 32
+ * judge calls' worth and ~80% of all spend. Sonnet with thinking reads just as deliberately at
+ * ~$0.10–0.15. Pinned, so the cost is predictable and publishable (token-economics §5);
+ * STRATLESS_SYNTH_MODEL overrides it for anyone who wants their default back. An unrecognised alias
+ * is safe — runClaude falls back to the default model rather than failing.
+ */
+const synthModel = (): string => process.env.STRATLESS_SYNTH_MODEL || 'sonnet';
+
+/**
+ * Judgments that carry signal. A `none` verdict is, by the judge's own definition, a reaction that
+ * says nothing about understanding (pure logistics, a thank-you) — so it never reaches the writer.
+ * It stays cached forever like everything else: filtered at synthesis time, never re-judged.
+ */
+export function hasSignal(j: Judgment): boolean {
+  return !/^\s*none\b/i.test(j.line);
+}
+
 /** Free, raw counts that ground the synthesis so it can cite real frequencies. */
 export interface Corpus {
   sessions: number;
@@ -128,7 +148,7 @@ function deDash(s: string): string {
 export function synthesizeProfile(judgments: Judgment[], corpus: Corpus, bin: string): string | undefined {
   if (!judgments.length) return undefined;
   const input = `${PROFILE_PROMPT}\n\nCORPUS: ${ground(corpus)}\n\n${recencyBlocks(judgments)}`;
-  const out = runClaude(bin, input);
+  const out = runClaude(bin, input, synthModel(), 'synthesis');
   return out ? deDash(out) : undefined;
 }
 
@@ -136,7 +156,7 @@ export function synthesizeProfile(judgments: Judgment[], corpus: Corpus, bin: st
 export function synthesizeReport(judgments: Judgment[], corpus: Corpus, bin: string): string | undefined {
   if (!judgments.length) return undefined;
   const input = `${REPORT_PROMPT}\n\nCORPUS: ${ground(corpus)}\n\n${recencyBlocks(judgments)}`;
-  const out = runClaude(bin, input);
+  const out = runClaude(bin, input, synthModel(), 'synthesis');
   return out ? deDash(out) : undefined;
 }
 

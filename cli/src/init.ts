@@ -50,13 +50,29 @@ export function installStopHook(settings: any): boolean {
 }
 
 /**
+ * Read + parse a settings.json. A hand-edited file with a trailing comma must never become an
+ * uncaught stack trace (the worst first impression a trust-first tool can make) — and it must never
+ * be silently overwritten either. Callers decide: `init` refuses, `stopRefresh` treats it as off.
+ */
+export function readSettings(path: string): { ok: boolean; settings: any } {
+  if (!existsSync(path)) return { ok: true, settings: {} };
+  try {
+    return { ok: true, settings: JSON.parse(readFileSync(path, 'utf8')) };
+  } catch {
+    return { ok: false, settings: undefined };
+  }
+}
+
+/**
  * Turn the after-session refresh OFF — remove our Stop hook. Leaves the reaper, the archive, and the
  * profile untouched: the off switch stops the *automatic* updates, nothing else. Returns whether a
  * hook was actually there to remove.
  */
 export function stopRefresh(): boolean {
   if (!existsSync(SETTINGS)) return false;
-  const settings = JSON.parse(readFileSync(SETTINGS, 'utf8'));
+  const read = readSettings(SETTINGS);
+  if (!read.ok) return false; // an unreadable settings file has no hook we can remove
+  const settings = read.settings;
   const stop: unknown = settings?.hooks?.Stop;
   if (!Array.isArray(stop)) return false;
   const kept = stop.filter((g) => !JSON.stringify(g).includes('stratless update'));
@@ -79,7 +95,15 @@ function allTranscripts(dir: string, out: string[] = []): string[] {
 
 export function init(opts: { auto?: boolean } = {}): InitResult {
   // 1. stop the reaper
-  const settings = existsSync(SETTINGS) ? JSON.parse(readFileSync(SETTINGS, 'utf8')) : {};
+  const read = readSettings(SETTINGS);
+  if (!read.ok) {
+    // Refuse, don't clobber: overwriting a file we couldn't read would destroy whatever the person
+    // had in it. Say what's wrong and stop.
+    throw new Error(
+      `your ~/.claude/settings.json is not valid JSON, and stratless will not overwrite a file it cannot read.\nFix it (or move it aside), then run init again.`,
+    );
+  }
+  const settings = read.settings;
   const before: number | 'default (30)' = settings.cleanupPeriodDays ?? 'default (30)';
   settings.cleanupPeriodDays = KEEP_DAYS;
   // The after-session auto-refresh is OPT-IN (`init --auto`). A tool that reads everything must not
