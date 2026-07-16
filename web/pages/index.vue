@@ -4,7 +4,7 @@ import { samples } from '~/lib/samples'
 // The footer renders inside the SeigaihaField band below (the sea footer) — the layout stands down.
 definePageMeta({ footer: false })
 
-const GITHUB = 'https://github.com/stratless-ai/stratless-cli'
+const GITHUB = 'https://github.com/stratless-ai/stratless'
 
 // The two person-layer file-cards open as real documents (rendered from web/content/samples).
 const openFile = ref<string | null>(null)
@@ -12,6 +12,21 @@ const activeSample = computed(() => (openFile.value ? (samples[openFile.value] ?
 
 // The CLI version, read from cli/package.json at build (see nuxt.config.ts) — never hand-typed.
 const version = useRuntimeConfig().public.version
+
+// Where HUMAN.md is headed. Claude Code is live; the rest are the roadmap. `logo` is a local monochrome
+// mark in /public/logos (from simple-icons, recolored via CSS mask); null = no clean official mark, so
+// it shows as a text wordmark (Codex — OpenAI has no distinct Codex mark; Aider — only a filtered wordmark).
+const brands = [
+  { name: 'Claude Code', logo: 'claudecode' },
+  { name: 'Gemini CLI', logo: 'googlegemini' },
+  { name: 'Codex CLI', logo: 'openai' },
+  { name: 'Cline', logo: 'cline' },
+  { name: 'GitHub Copilot', logo: 'githubcopilot' },
+  { name: 'Aider', logo: null },
+  { name: 'Cursor', logo: 'cursor' },
+  { name: 'Zed', logo: 'zedindustries' },
+  { name: 'Windsurf', logo: 'windsurf' },
+]
 
 // The JSON-LD lived in nuxt.config's global head, so it asserted `url: stratless.com` on /privacy,
 // /terms and all seven docs pages. It describes THE HOMEPAGE. It belongs here.
@@ -27,7 +42,7 @@ useHead({
         applicationCategory: 'DeveloperApplication',
         operatingSystem: 'macOS, Linux, Windows',
         description:
-          "Reads your coding assistant's own history and tells you what it decided for you — in plain English. Runs on your machine. No API key.",
+          'Reads your coding-assistant sessions and writes a HUMAN.md your AI loads every session, so it stops talking over your head. Runs locally, nothing leaves your machine.',
         url: 'https://stratless.com',
         sameAs: [GITHUB],
         license: 'https://opensource.org/licenses/MIT',
@@ -56,7 +71,7 @@ useHead({
       <p class="eyebrow">Open source · runs on your machine</p>
       <h1>Your AI knows your code.<br />It doesn't know you.</h1>
       <p class="lede">
-        stratless reads your chats and teaches your AI who you are — so it stops talking over your
+        stratless reads your chats and teaches your AI who you are, <br />so it stops talking over your
         head or under it.
       </p>
 
@@ -67,18 +82,24 @@ useHead({
         </div>
         <pre class="term-body"><code><span class="t-arrow">➜</span>  <span class="t-path">~/my-app</span> <span class="t-c">stratless profile</span>
 
-<span class="t-d"># who you are working with — loaded into your assistant every session</span>
+<span class="t-d"># who you are working with, loaded into your assistant every session</span>
+
+You're talking to a solo founder building stratless, a
+human-profiler: a CLI that reads your coding-assistant
+transcripts, judges them, and writes a <span class="t-b">HUMAN.md</span> the
+assistant loads at session start to know who it is talking to.
 
 They are not fluent in the tech, and the tech is never what
-stalls them — <span class="t-b">altitude is</span>. Concrete, nameable architecture
-lands; abstract strategy framings get redirected.
-
-On implementation they give short orders — <span class="t-you">"go," "ok," "commit"</span>
-— and rely on you for the how.
+stalls them. <span class="t-b">Altitude is.</span> Concrete, nameable architecture
+lands; abstract strategy framings get redirected. On
+implementation they give short orders, <span class="t-you">"go," "ok," "commit,"</span>
+and rely on you for the how.
 
 <span class="t-b">Failure signal</span>  go abstract or long and they don't argue,
-they redirect. That pivot means you left ground level:
-<span class="t-b">drop the frame, give the next move.</span>
+they redirect: to a concrete task, to "just summarize the
+blockers," to correcting one fact and moving on. That pivot
+means you left ground level. <span class="t-b">Drop the frame, give the next move.</span>
+And they gate real decisions on verification.
 
 <span class="t-ok">↳ loaded</span>  <span class="t-d">your assistant now talks to a person, not a blank.</span>
 
@@ -96,7 +117,7 @@ they redirect. That pivot means you left ground level:
         <Btn href="#install" primary>Install</Btn>
         <Btn :href="GITHUB" target="_blank" rel="noopener">Read the source</Btn>
       </div>
-      <p class="free-note cursor">MIT. No account, no API key, no cloud. 900 lines you can audit in an afternoon.</p>
+      <p class="free-note cursor">MIT. No account, no API key, no cloud. ~1,500 lines you can audit in an afternoon.</p>
     </div>
   </section>
 
@@ -106,10 +127,10 @@ they redirect. That pivot means you left ground level:
       <p class="eyebrow">The person layer</p>
       <h2>Every repo has an AGENTS.md.<br />None has a HUMAN.md.</h2>
       <p>
-        <code>AGENTS.md</code> tells your AI about your <strong>code</strong> — your stack, your
-        conventions, this repo. Everyone has one. Nothing tells it about <strong>you</strong> — what
+        <code>AGENTS.md</code> tells your AI about your <strong>code</strong>: your stack, your
+        conventions, this repo. Everyone has one. Nothing tells it about <strong>you</strong>, what
         you know, how you think, what you're really after. That file is empty.
-        <strong>stratless writes it</strong> — <code>HUMAN.md</code> — and your assistant loads it
+        <strong>stratless writes it</strong> (<code>HUMAN.md</code>), and your assistant loads it
         every session.
       </p>
     </div>
@@ -135,7 +156,7 @@ they redirect. That pivot means you left ground level:
           <span class="fi-tag">you</span>
         </button>
       </div>
-      <p class="quiet center files-note">Real files — click to open. <code>HUMAN.md</code> is stratless's actual profile of its own maker.</p>
+      <p class="quiet center files-note">Real files. Click to open. <code>HUMAN.md</code> is stratless's actual profile of its own maker.</p>
     </div>
   </section>
 
@@ -143,21 +164,23 @@ they redirect. That pivot means you left ground level:
   <section id="install" class="section install">
     <div class="container">
       <p class="eyebrow center">One command</p>
-      <div class="cmd"><code>npx stratless init</code></div>
+      <div class="install-lead">
+        <div class="cmd"><code>npx stratless init</code></div>
+        <p class="cmd-note"><code>init</code> stops Claude Code's 30-day reaper and archives your history first. Whatever's already gone is gone.</p>
+      </div>
       <p class="cmd-meta center">v{{ version }} · MIT · <a :href="`${GITHUB}/releases`" target="_blank" rel="noopener">changelog ↗</a></p>
-      <p class="quiet center cmd-note"><code>init</code> stops Claude Code's 30-day reaper and archives your history first — whatever's already gone is gone.</p>
       <div class="three">
         <div class="card">
           <code class="k">stratless profile</code>
-          <p>The briefing <strong>your AI</strong> reads — what you know, how you think, what you're building. Loads at the start of every session.</p>
+          <p>The briefing <strong>your AI</strong> reads: what you know, how you think, what you're building. Loads at the start of every session.</p>
         </div>
         <div class="card">
-          <code class="k">stratless report</code>
-          <p>The mirror <strong>you</strong> read — where the AI talked over your head, where you went quiet, and how it's trending. In plain English.</p>
+          <code class="k">stratless update</code>
+          <p>Re-read what's new, rebuild your profile, and load it now, without waiting for a session to end.</p>
         </div>
         <div class="card">
           <code class="k">stratless stop</code>
-          <p>Turn it off, or exclude a project, anytime. Nothing ever leaves your machine — being able to shut it up is half of why you can trust it.</p>
+          <p>Turn it off anytime. Nothing ever leaves your machine, and being able to shut it up is half of why you can trust it.</p>
         </div>
       </div>
     </div>
@@ -170,27 +193,47 @@ they redirect. That pivot means you left ground level:
       <h2>The conversation was on your disk the whole time.</h2>
       <p>
         There's no model. No cloud. No training. No inference bill. Every assistant that can resume
-        a chat has to store the chat — Claude Code keeps yours in <code>~/.claude/projects</code>.
+        a chat has to store the chat, and Claude Code keeps yours in <code>~/.claude/projects</code>.
         <strong>Nobody reads it.</strong>
       </p>
       <p>
-        stratless reads it. It finds the exact edit that wrote your line, pulls up the words
-        <em>you</em> said at the time, and shows you the receipt. <strong>Nothing is generated.</strong>
-        It's quoting.
+        stratless reads it. It walks each session into pairs, what the assistant said and how you
+        reacted, and asks the <code>claude</code> you already have one question: did that land? Your
+        <em>"wait, what does this mean"</em> is a wall. Your <em>"ok, next"</em> is a clear.
+        <strong>It reads the reaction, not the answer.</strong>
       </p>
       <p>
-        The one sentence that <em>is</em> generated — the <em>“So what”</em> — is written by the
-        assistant you already have, on your own plan, grounded in your own diff. If it can't answer
-        honestly, <strong>it says nothing at all.</strong>
+        Thousands of those become your <code>HUMAN.md</code>, written by the assistant you already
+        have, on your own plan. If a reaction carries no honest signal, it records nothing.
+        <strong>A confident guess is the one thing that would end this.</strong>
       </p>
 
       <div class="verdicts">
-        <div><code class="v-ok">✓ matched</code><span>found the decision, and <code>git blame</code> agrees</span></div>
-        <div><code class="v-mid">~ likely</code><span>found something, but the witnesses disagree — and it tells you how</span></div>
-        <div><code class="v-you">yours</code><span>no assistant edit wrote this. <strong>You did.</strong></span></div>
-        <div><code class="v-bad">lost</code><span>the conversation that explains this line was <strong>deleted</strong></span></div>
+        <div><code class="v-ok">cleared</code><span>it landed, you moved on</span></div>
+        <div><code class="v-mid">partial</code><span>half landed, you circled back</span></div>
+        <div><code class="v-bad">stuck</code><span>it didn't; you pushed back or went quiet</span></div>
+        <div><code class="v-you">none</code><span>no signal, pure logistics</span></div>
       </div>
-      <p class="quiet">Four answers. Three of them are refusals. It would rather say nothing than guess.</p>
+      <p class="quiet">Four verdicts. The one it learns from most is <code>stuck</code>.</p>
+    </div>
+  </section>
+
+  <!-- THE ROADMAP — a monochrome marquee of where HUMAN.md is headed. Built on Claude Code. -->
+  <section class="section roadmap">
+    <div class="container narrow">
+      <p class="eyebrow center">Built on Claude Code</p>
+      <h2 class="rm-h">One file. Every assistant that reads it gets to know you.</h2>
+    </div>
+    <div class="marquee" aria-hidden="true">
+      <div class="marquee-track">
+        <span v-for="(b, i) in [...brands, ...brands]" :key="i" class="brand">
+          <span v-if="b.logo" class="brand-logo" :style="{ '--m': `url(/logos/${b.logo}.svg)` }" />
+          <span class="brand-name">{{ b.name }}</span>
+        </span>
+      </div>
+    </div>
+    <div class="container narrow">
+      <p class="quiet center rm-note">Live on Claude Code today. Aider, Gemini, Codex, Cline, Copilot and more, coming.</p>
     </div>
   </section>
 
@@ -316,12 +359,26 @@ h1 {
 .term-body {
   margin: 0;
   padding: 1.15rem 1.25rem 1.4rem;
-  overflow-x: auto;
+  /* A fixed-height shell you scroll inside — the profile is longer than the window, like real output. */
+  max-height: 19rem;
+  overflow: auto;
+  overscroll-behavior: contain;
   font-family: var(--font-mono);
   font-size: 0.79rem;
   line-height: 1.7;
   color: #e6e2d6;
   -webkit-font-smoothing: antialiased;
+}
+.term-body::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+.term-body::-webkit-scrollbar-thumb {
+  background: #4a473f;
+  border-radius: 5px;
+}
+.term-body::-webkit-scrollbar-track {
+  background: transparent;
 }
 .term-body code {
   background: none;
@@ -355,8 +412,17 @@ h1 {
      UNDER it. DocsShell sets the same on its headings for exactly this reason. */
   scroll-margin-top: 80px;
 }
+.install-lead {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.4rem;
+  flex-wrap: wrap;
+  margin: 0 auto 0.9rem;
+  max-width: 42rem;
+}
 .cmd {
-  margin: 0 auto 2.6rem;
+  margin: 0;
   width: fit-content;
   border: 1.5px solid var(--ink);
   border-radius: 8px;
@@ -384,7 +450,7 @@ h1 {
 .card .k {
   font-family: var(--font-mono);
   font-weight: 700;
-  font-size: 0.9rem;
+  font-size: 0.8rem;
   background: none;
   padding: 0;
 }
@@ -396,7 +462,7 @@ h1 {
   color: var(--ink-2);
 }
 .cmd-meta {
-  margin: -1.9rem auto 0;
+  margin: 0 auto 2.8rem;
   font-family: var(--font-mono);
   font-size: 0.78rem;
   color: var(--mid);
@@ -410,8 +476,12 @@ h1 {
   color: var(--accent-deep);
 }
 .cmd-note {
-  margin: 0.7rem auto 2.6rem;
-  max-width: 34rem;
+  margin: 0;
+  max-width: 15rem;
+  text-align: left;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: var(--mid);
 }
 
 /* ── the person layer ── */
@@ -562,5 +632,85 @@ h1 {
   font-size: 0.85rem;
   color: var(--mid);
   margin: 0;
+}
+
+/* ── the roadmap marquee ── */
+.roadmap .narrow {
+  text-align: center;
+}
+.rm-h {
+  font-size: clamp(1.4rem, 3vw, 2rem);
+  line-height: 1.25;
+  margin: 0.4rem 0 0;
+}
+.marquee {
+  margin: 2.4rem 0 1.6rem;
+  overflow: hidden;
+  /* fade both edges so logos slide in and out instead of clipping hard */
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+}
+.marquee-track {
+  display: flex;
+  width: max-content;
+  /* the brand list is rendered twice; each .brand carries its own right margin (NOT a flex gap), so
+     the two halves are identical and translateX(-50%) lands exactly on a repeat. A flex `gap` leaves
+     a half-gap at the midpoint, which makes the loop visibly jump. */
+  animation: marquee 42s linear infinite;
+}
+.marquee:hover .marquee-track {
+  animation-play-state: paused;
+}
+@keyframes marquee {
+  to {
+    transform: translateX(-50%);
+  }
+}
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  /* padding (not margin) for inter-brand spacing: padding always counts in the track's max-content
+     width, so both halves measure identical and the -50% loop is exact. A trailing flex margin can be
+     dropped from the measured width, which drifts the loop. */
+  padding-right: 3rem;
+  color: var(--ink-2);
+  opacity: 0.68;
+  white-space: nowrap;
+}
+.brand-logo {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  /* recolor any logo to one ink tone: paint a solid block, punch the logo shape out of it */
+  background: currentColor;
+  -webkit-mask: var(--m) center / contain no-repeat;
+  mask: var(--m) center / contain no-repeat;
+}
+.brand-name {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.rm-note code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+@media (prefers-reduced-motion: reduce) {
+  .marquee {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+  .marquee-track {
+    animation: none;
+    width: auto;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.9rem 1.8rem;
+  }
+  .marquee-track .brand {
+    padding-right: 0;
+  }
 }
 </style>

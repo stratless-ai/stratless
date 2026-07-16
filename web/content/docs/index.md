@@ -4,10 +4,9 @@ title: Install
 
 # stratless
 
-**Your AI wrote your product. Ask it why.**
+**Your AI has no idea who it's talking to.** So it explains everything at one altitude: over your head, or under it.
 
-stratless reads your coding assistant's own conversation history — the one it keeps on your disk
-and **deletes after 30 days** — and links any line of your code back to the decision that made it.
+stratless reads your coding assistant's own session history, the conversations it already keeps on your disk, and judges whether understanding actually transferred in each exchange. From that it writes a **HUMAN.md**: a short profile of how you work, what you know, and where you get stuck. Your assistant loads it at the start of every session, so it meets you at your level.
 
 It runs on your machine. There is no account, no API key, no cloud, and no server.
 
@@ -19,24 +18,24 @@ npx stratless init
 
 That does two things, and the second one is urgent:
 
-1. **Stops the reaper.** Claude Code deletes your transcripts after 30 days — *per file*, so your
-   history rots from the back even in a project you use every day.
-2. **Archives everything it can still reach.** Whatever has already aged out is gone. This is the
-   only part of stratless you cannot do later.
+1. **Turns it on.** From here, stratless keeps your history and refreshes your profile in the background after each session.
+2. **Stops the reaper.** Claude Code deletes your transcripts after 30 days, per file, so your history rots from the back even in a project you open every day. `init` stops that and archives everything it can still reach. Whatever has already aged out is gone. This is the only part of stratless you cannot do later.
 
-## The three commands
+## The commands
 
 ```
-stratless init     stop the 30-day reaper · archive your history
-stratless stats    what your assistant has actually been doing
-stratless why      the decision that made this line
+stratless init       keep your history, turn on the after-session refresh
+stratless profile    the model of you your assistant loads
+stratless report     the same picture, written for you to read
+stratless update     re-read what's new, rebuild the profile, and load it
+stratless stop       turn it off, and unload the profile
+stratless stats      raw counts, instant, free, no tokens
 ```
+
+Full reference on the [Commands](/docs/commands) page.
 
 ## Requirements
 
 - **Node 18+**
-- **Claude Code** — it's the only assistant supported today. Cursor, Windsurf, Cline and Codex all
-  keep local logs too, and readers for those are next.
-- **No API key.** If you want the plain-English *"So what"* line, stratless borrows the assistant
-  you already have (`claude -p`), on your own subscription. If you don't have one, it degrades to
-  showing you the quoted history and says nothing it can't back up.
+- **Claude Code**, the only assistant supported today. Others roll out one batch at a time. See [Assistants](/docs/assistants).
+- **No API key.** stratless borrows the assistant you already have (`claude -p`) to read your history, on your own subscription. Nothing new to install, and no separate bill.

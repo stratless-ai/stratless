@@ -156,6 +156,32 @@ paid one. They point the same direction.
 
 ---
 
+## 8. The Four Actions grid (the value curve)
+
+The blue ocean is not a slogan; it is a value curve that diverges from the industry. Mapped to Blue
+Ocean's **Eliminate / Reduce / Raise / Create**:
+
+- **Eliminate** (what the industry assumes, gone entirely): the server, cloud, and account; data
+  collection and telemetry (the refusal *is* the moat, not a feature); *you* authoring your own context
+  (prompt engineering, rules files, filling in a profile) — stratless reads you instead; its own
+  inference bill (it borrows your `claude`).
+- **Reduce** (well below standard): code size and opacity (~1,500 auditable lines, not 50,000);
+  dependencies (zero runtime); setup and decisions (one command, then automatic); feature breadth (a
+  handful of commands that do one thing).
+- **Create** (nobody offers it): the person layer (HUMAN.md); earned, judged profiling *from behaviour*
+  (not self-report, not passive memory); a portable, owned, inspectable person-artifact that rides
+  across tools; the AI-adapts-to-you axis.
+- **Raise** (well above standard): trust and auditability; honesty (silence over a confident wrong
+  answer); privacy (local, nothing leaves); personalization depth (a behavioural model, not stored
+  facts); ownership (read, edit, delete, port the artifact).
+
+**The read.** stratless scores near-zero on what the industry competes on (features, cloud,
+data-leverage, owning a model) and far above on what it ignores (trust, personalization-to-*you*,
+ownership, honesty). That divergence is the blue ocean. And it splits the grid into two jobs:
+**Eliminate + Reduce are guardrails** — the day we add a server, collect data, bloat the code, or make
+the user write their own profile, we are back in the red ocean — and **Create + Raise are where we
+invest**: deepen the earned profiling and the portability, never chase the industry's competed factors.
+
 ## Sources
 
 **AGENTS.md / red ocean:** [agents.md](https://agents.md/) ·
