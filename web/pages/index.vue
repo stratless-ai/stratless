@@ -10,8 +10,9 @@ const GITHUB = 'https://github.com/stratless-ai/stratless'
 const openFile = ref<string | null>(null)
 const activeSample = computed(() => (openFile.value ? (samples[openFile.value] ?? null) : null))
 
-// The CLI version, read from cli/package.json at build (see nuxt.config.ts) — never hand-typed.
+// The CLI version + line count, read/computed from cli/ at build (see nuxt.config.ts) — never hand-typed.
 const version = useRuntimeConfig().public.version
+const cliLines = useRuntimeConfig().public.cliLines
 
 // Where HUMAN.md is headed. Claude Code is live; the rest are the roadmap. `logo` is a local monochrome
 // mark in /public/logos (from simple-icons, recolored via CSS mask); null = no clean official mark, so
@@ -118,7 +119,7 @@ And they gate real decisions on verification.
         <Btn href="#install" primary>Install</Btn>
         <Btn :href="GITHUB" target="_blank" rel="noopener">Read the source</Btn>
       </div>
-      <p class="free-note cursor">MIT. No account, no API key, no cloud. ~1,500 lines you can audit in an afternoon.</p>
+      <p class="free-note cursor">MIT. No account, no API key, no cloud. ~{{ cliLines }} lines you can audit in an afternoon.</p>
     </div>
   </section>
 
@@ -177,7 +178,7 @@ And they gate real decisions on verification.
         </div>
         <div class="card">
           <code class="k">stratless update</code>
-          <p>Re-read what's new, rebuild your profile, and load it now, without waiting for a session to end.</p>
+          <p>Judges what's new and rebuilds your profile once enough has changed, so it never spends on a rebuild that would say the same thing. <code>--now</code> skips the wait.</p>
         </div>
         <div class="card">
           <code class="k">stratless stop</code>
@@ -193,7 +194,7 @@ And they gate real decisions on verification.
       <p class="eyebrow">There's no trick</p>
       <h2>The conversation was on your disk the whole time.</h2>
       <p>
-        There's no model. No cloud. No training. No inference bill. Every assistant that can resume
+        There's no model. No cloud. No training. No separate bill. Every assistant that can resume
         a chat has to store the chat, and Claude Code keeps yours in <code>~/.claude/projects</code>.
         <strong>Nobody reads it.</strong>
       </p>

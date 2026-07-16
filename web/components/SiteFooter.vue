@@ -19,7 +19,7 @@ const version = useRuntimeConfig().public.version
         <NuxtLink to="/terms">Terms</NuxtLink>
         <a href="mailto:sun@stratless.com">sun@stratless.com</a>
       </nav>
-      <p class="footer-copy">stratless v{{ version }} · © 2026 — runs on your machine. Nothing leaves.</p>
+      <p class="footer-copy">stratless v{{ version }} · © 2026 · runs on your machine. Nothing leaves.</p>
     </div>
   </footer>
 </template>

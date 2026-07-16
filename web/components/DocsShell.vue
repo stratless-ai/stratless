@@ -62,12 +62,15 @@ watch(current, () => nextTick(buildToc))
 
 // Each doc page needs its OWN og:url, description and canonical. They all used to inherit the
 // homepage's, so sharing /docs/why previewed as the homepage.
-const strip = (html: string) =>
-  html
+const strip = (html: string) => {
+  const text = html
+    .replace(/<pre[\s\S]*?<\/pre>/g, ' ') // code blocks make garbage previews (the command list, sliced mid-word)
     .replace(/<[^>]+>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 180)
+  // cut at a word boundary, never mid-word
+  return text.length <= 180 ? text : `${text.slice(0, 180).replace(/\s+\S*$/, '')}…`
+}
 
 useSeo({
   title: current.value?.title ?? 'Docs',

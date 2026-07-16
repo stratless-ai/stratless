@@ -19,7 +19,7 @@ npx stratless init
 That does two things, and the first one is urgent:
 
 1. **Stops the reaper.** Claude Code deletes your transcripts after 30 days, per file, so your history rots from the back even in a project you open every day. `init` stops that and archives everything it can still reach. Whatever has already aged out is gone. This is the only part of stratless you cannot do later.
-2. **Turns it on.** From here, stratless keeps your history. Add `--auto` and it also refreshes your profile in the background after each session; plain `init` arms nothing you didn't ask for.
+2. **Turns it on.** From here, stratless keeps your history. Add `--auto` and it also judges what's new in the background after each session, rebuilding your profile once enough has changed; plain `init` arms nothing you didn't ask for.
 
 ## The commands
 
@@ -27,7 +27,7 @@ That does two things, and the first one is urgent:
 stratless init       keep your history safe (add --auto for background refresh)
 stratless profile    see the model of you (profile looks; update loads)
 stratless report     the same picture, written for you to read
-stratless update     re-read what's new, rebuild the profile, and load it
+stratless update     judge what's new; rebuild + load the profile when due (--now: always)
 stratless stop       turn it off, and unload the profile
 stratless status     stratless's own state: on or off, and what it has cost
 stratless stats      raw counts, instant, free, no tokens

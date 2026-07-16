@@ -25,10 +25,10 @@ export function useSeo(opts: { title: string; description: string; path: string 
     link: [{ rel: 'canonical', href: url }],
     meta: [
       { name: 'description', content: opts.description },
-      { property: 'og:title', content: opts.title },
+      { property: 'og:title', content: `${opts.title} — stratless` }, // branded, like <title>
       { property: 'og:description', content: opts.description },
       { property: 'og:url', content: url },
-      { name: 'twitter:title', content: opts.title },
+      { name: 'twitter:title', content: `${opts.title} — stratless` },
       { name: 'twitter:description', content: opts.description },
     ],
   })

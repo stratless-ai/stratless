@@ -1,5 +1,9 @@
 import MarkdownIt from 'markdown-it'
 
+// Injected by the `vite.define` in nuxt.config.ts — the CLI line count, computed at build so the
+// docs' trust claim can never go stale by hand. Markdown carries it as a %CLI_LINES% token.
+declare const __CLI_LINES__: string
+
 /**
  * The docs renderer. Runs ONCE at module load (not per component mount), so the generated HTML is
  * identical on the server and the client → clean hydration.
@@ -51,7 +55,7 @@ function buildDocs(): Record<string, Doc> {
       .map((seg) => seg.replace(/^\d+\./, ''))
       .join('/')
       .replace(/\/?index$/, '')
-    out[`/docs${p ? `/${p}` : ''}`] = { title, html: md.render(body) }
+    out[`/docs${p ? `/${p}` : ''}`] = { title, html: md.render(body.replaceAll('%CLI_LINES%', __CLI_LINES__)) }
   }
   return out
 }

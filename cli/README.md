@@ -25,20 +25,21 @@ Run `stratless profile` and it shows you the model it has built, the one `stratl
 to your assistant:
 
 ```
-WHO YOU'RE WORKING WITH                    (stratless · 84 sessions · 3,756 exchanges)
+WHO YOU'RE WORKING WITH                        (stratless · read from your own history)
 
-Fluent builder, not a beginner. Uses api / commit / schema / deploy casually, 900+×.
-Don't explain the stack. They ship.
+You're talking to a solo founder building stratless, a human-profiler: a CLI
+that reads your coding-assistant transcripts, judges them, and writes a
+HUMAN.md the assistant loads at session start to know who it is talking to.
 
-What stalls them is never the tech. It's MEANING. Their commonest move when stuck
-isn't "what is X" but "what does this mean for us?" Abstract explanation with no line
-to the product is noise. Attach the consequence or don't say it.
+They are not fluent in the tech, and the tech is never what stalls them.
+Altitude is. Concrete, nameable architecture lands; abstract strategy
+framings get redirected. On implementation they give short orders, "go,"
+"ok," "commit," and rely on you for the how.
 
-Thinks out loud. Not giving orders, reasoning. Be a thinking partner. "ok" usually
-means "ok, and here's the next thing" (they're driving; keep up, don't stop and wait).
-
-Failure signal: "what does this mean" / "i feel stupider" / "cant keep up" / going
-quiet. Every time = you went abstract or long. Back up, get concrete.
+Failure signal: go abstract or long and they don't argue, they redirect: to
+a concrete task, to "just summarize the blockers," to correcting one fact
+and moving on. That pivot means you left ground level. Drop the frame, give
+the next move. And they gate real decisions on verification.
 ```
 
 Not a rules sheet you wrote. A model of a person, reasoned from your real history, and it sharpens
@@ -54,7 +55,7 @@ prefixing every command below with `npx `. Both work.
 stratless init       turn it on: keep your history, and start reading it
 stratless profile    see the model of you (profile looks; update loads)
 stratless report     the same picture, written for you to read
-stratless update     re-read what's new, rebuild the profile, and load it into your assistant
+stratless update     judge what's new; rebuild + load the profile when due (--now: always)
 stratless stop       turn it off: stop refreshing and unload the profile
 stratless status     stratless's own state: on or off, and what it has cost
 stratless stats      raw counts about your assistant in a project, instant and free
@@ -68,13 +69,13 @@ and copies everything somewhere safe. Everything else reads from there.
 
 ## How it works, there's no trick
 
-No model of ours. No server. No training. No inference bill.
+No model of ours. No server. No training. No separate bill.
 
 1. **Read.** Every session Claude Code has is already on your disk, in `~/.claude/projects`.
    stratless walks each one into `(what the assistant said → how you reacted)` pairs.
 2. **Judge.** It hands each pair to the `claude` you already have (`claude -p`, on your own plan)
-   and asks one question: *did understanding transfer, and about what?* One line back, **cached
-   forever**, so each exchange is read exactly once, ever.
+   and asks one question: *did understanding transfer, and about what?* One line back, **cached**,
+   so each exchange is read once.
 3. **Synthesize.** It reads the whole stack of those judgments and writes the profile above.
 4. **Load.** `stratless update` writes the profile to `~/.claude/HUMAN.md` and points your assistant's
    own config at it, so your next session starts already knowing you. Run it again any time to refresh,

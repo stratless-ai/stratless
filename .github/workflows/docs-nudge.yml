@@ -1,0 +1,42 @@
+name: docs nudge
+
+# House rule (AGENTS.md): docs move with the code. The 0.2.4 release shipped a new meter and a
+# synthesis gate while the site kept documenting the old behavior — on a product whose moat is
+# cost honesty. This is the soft guard: a PR that changes cli/src/ but touches neither the site
+# docs nor the npm README gets ONE bot comment. It never blocks — refactors are real; a human
+# decides whether the docs needed to move.
+
+on:
+  pull_request:
+    paths: ['cli/src/**']
+
+permissions:
+  pull-requests: write
+
+jobs:
+  nudge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with: { fetch-depth: 0 }
+      - name: comment when cli changed but the docs did not
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          git fetch -q origin "${{ github.base_ref }}"
+          changed="$(git diff --name-only "origin/${{ github.base_ref }}"...HEAD)"
+          echo "$changed"
+          if echo "$changed" | grep -qE '^(web/content/docs/|cli/README\.md)'; then
+            echo "docs moved too — nothing to say."
+            exit 0
+          fi
+          marker="<!-- docs-nudge -->"
+          if gh pr view "$PR" --json comments --jq '.comments[].body' | grep -qF "$marker"; then
+            echo "already nudged this PR."
+            exit 0
+          fi
+          gh pr comment "$PR" --body "$marker
+          **Docs nudge:** this PR changes \`cli/src/\` but touches neither \`web/content/docs/\` nor \`cli/README.md\`. House rule: if behavior changed, the docs move in the same PR. If this is a pure refactor with no surface change, ignore me — I only comment once."
+          echo "nudged."
