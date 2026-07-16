@@ -28,7 +28,7 @@ jobs:
     name: verify · sign · publish
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write # create the GitHub Release (the CHANGELOG mirror step below); npm needs no repo perms
       id-token: write # mint the provenance attestation
     steps:
       - uses: actions/checkout@v6
@@ -100,3 +100,42 @@ jobs:
           stratless --help | grep -q "stratless profile"
           npm audit signatures --prefix "$(npm root -g)/.." || true
           echo "✓ installed from npm and ran"
+
+      # The GitHub Release mirrors the CHANGELOG — created HERE so a version can never again ship on
+      # npm and be missing from the Releases page (0.2.4 did exactly that: the notes were a separate
+      # manual step, and manual steps get forgotten). The changelog stays the single hand-written
+      # source; if it has no section for this version, this fails LOUDLY rather than shipping a
+      # note-less release. A release someone already made by hand is left untouched. The title picks
+      # up an optional tagline from the heading — `## [x.y.z] — 2026-01-01 — the tagline` — else it
+      # is plain `stratless x.y.z` (edit the title on GitHub afterwards if you want one).
+      - name: mirror the CHANGELOG to a GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          v="${GITHUB_REF_NAME#cli-v}"
+          if gh release view "$GITHUB_REF_NAME" --json name >/dev/null 2>&1; then
+            echo "::notice::a release for $GITHUB_REF_NAME already exists — leaving it alone."
+            exit 0
+          fi
+          notes="$(awk -v v="$v" '
+            $0 ~ "^## \\[" v "\\]" { grab = 1; next }
+            grab && /^## \[/ { exit }
+            grab { print }
+          ' cli/CHANGELOG.md)"
+          if [ -z "${notes//[[:space:]]/}" ]; then
+            echo "::error::cli/CHANGELOG.md has no section for $v — write the notes, then create the release by hand: gh release create $GITHUB_REF_NAME --notes-file <notes>"
+            exit 1
+          fi
+          heading="$(grep -m1 -F "## [$v]" cli/CHANGELOG.md)"
+          rest="${heading#*] — }"        # "2026-01-01" or "2026-01-01 — the tagline"
+          title="stratless $v"
+          case "$rest" in *" — "*) title="stratless $v — ${rest#* — }" ;; esac
+          notes="$notes
+
+          ---
+
+          Published to npm over Trusted Publishing (OIDC, no token) with Sigstore provenance — verify with \`npm audit signatures\`."
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "$title" --notes "$notes"
+          echo "✓ release published: $title"
