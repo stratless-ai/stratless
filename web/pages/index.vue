@@ -75,14 +75,14 @@ useHead({
         head or under it.
       </p>
 
-      <div class="term realterm" role="img" aria-label="Terminal showing stratless profile — the profile stratless writes about the person, loaded into the assistant">
+      <div class="term realterm" role="img" aria-label="Terminal showing stratless profile printing the model of the person, then stratless update loading it into the assistant">
         <div class="term-bar">
           <div class="term-dots"><span class="d-r" /><span class="d-y" /><span class="d-g" /></div>
           <div class="term-title">my-app — -zsh — 92×20</div>
         </div>
         <pre class="term-body"><code><span class="t-arrow">➜</span>  <span class="t-path">~/my-app</span> <span class="t-c">stratless profile</span>
 
-<span class="t-d"># who you are working with, loaded into your assistant every session</span>
+<span class="t-d"># who you are working with, read from your own history</span>
 
 You're talking to a solo founder building stratless, a
 human-profiler: a CLI that reads your coding-assistant
@@ -101,17 +101,18 @@ blockers," to correcting one fact and moving on. That pivot
 means you left ground level. <span class="t-b">Drop the frame, give the next move.</span>
 And they gate real decisions on verification.
 
+<span class="t-d">not loaded yet · load it into your assistant: stratless update</span>
+
+<span class="t-arrow">➜</span>  <span class="t-path">~/my-app</span> <span class="t-c">stratless update</span>
+
 <span class="t-ok">↳ loaded</span>  <span class="t-d">your assistant now talks to a person, not a blank.</span>
 
 <span class="t-arrow">➜</span>  <span class="t-path">~/my-app</span> <span class="term-cursor" /></code></pre>
       </div>
 
-      <!-- PROFILER HERO PASS (profiler-0.2.0): headline, sub-head, and the terminal above now show
-           the profiler — the terminal is a faithful excerpt of real `stratless profile` output
-           (~/.claude/HUMAN.md). STILL OLD-PRODUCT / next chunks: the "there's no trick" REVEAL
-           section below, the nuxt.config.ts title/description + JSON-LD, and the docs tree — all
-           still sell `why`. Before the live flip: re-pull the profile snapshot from the then-current
-           HUMAN.md (it refreshes every session). -->
+      <!-- PROFILER HERO, two beats: `stratless profile` prints the model (a faithful excerpt of real
+           output — re-pull it from the then-current HUMAN.md when refreshing the showcase), then
+           `stratless update` loads it. profile LOOKS, update LOADS — the terminal teaches the split. -->
 
       <div class="cta-row">
         <Btn href="#install" primary>Install</Btn>

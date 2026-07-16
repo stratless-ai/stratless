@@ -1,7 +1,8 @@
 <!doctype html>
 <!-- og.png source — the 1200×630 social card. public/og.png is a screenshot of this file.
-     Rewritten 2026-07-14 for the CLI. The old card advertised a competitive-analysis API that 404s.
-     Regenerate: serve apps/web/public at / (so /fonts + /favicon.svg resolve), then
+     Rewritten 2026-07-16 for the profiler: the card mirrors the homepage hero, so the shared link
+     and the page it lands on say the same thing.
+     Regenerate: serve web/public at / (so /fonts + /favicon.svg resolve), then
        chrome --headless=new --window-size=1200,630 --screenshot=og.png http://localhost:PORT/og-card.html
      (drop a copy of this file into the served dir first; it lives in scripts/ so it isn't deployed). -->
 <meta charset="utf-8">
@@ -61,10 +62,10 @@
 </style>
 <div class="card">
   <div class="logo"><img src="/favicon.svg" alt=""><span class="wordmark">tratless</span></div>
-  <h1>Your AI wrote your product.<br>Ask it why.</h1>
-  <p class="sub">Reads your coding assistant's own history and tells you <b>what it<br>decided for you</b>&nbsp;—&nbsp;in plain English. Runs on your machine.</p>
+  <h1>Your AI knows your code.<br>It doesn't know you.</h1>
+  <p class="sub">stratless reads your chats and teaches your AI <b>who you are</b>,<br>so it stops talking over your head or under it.</p>
   <div class="foot">
     <span class="site">stratless.com</span>
-    <span class="badge">Open source · no API key</span>
+    <span class="badge">Open source · runs on your machine</span>
   </div>
 </div>

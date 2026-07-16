@@ -24,7 +24,7 @@ Your coding assistant has no idea who it's talking to. So it only has two regist
 npx stratless init
 ```
 
-No account. No API key. No cloud. It reads transcripts already on your disk and borrows the `claude` you already have to read them. **Nothing leaves your machine.**
+No account. No API key. No cloud. It reads transcripts already on your disk and borrows the `claude` you already have to read them. **Nothing leaves your machine.** All you need: Claude Code installed and signed in, Node 18+, and a few sessions of history.
 
 ## What it builds
 

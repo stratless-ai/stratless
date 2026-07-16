@@ -37,6 +37,8 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
 
 <template>
   <div class="site">
+    <!-- keyboard users skip the header in one Tab — visible only while focused -->
+    <a class="skip" href="#main">Skip to content</a>
     <header class="nav" :class="{ 'nav-hidden': navHidden, 'nav-clear': navClear }">
       <div class="nav-inner">
         <!-- Logo's ROOT is already a <NuxtLink to="/">. Wrapping it in another one ships
@@ -48,12 +50,12 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
         <Logo :height="24" />
         <nav class="nav-right">
           <NuxtLink to="/docs">Docs</NuxtLink>
-          <a href="https://github.com/stratless-ai/stratless-cli" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/stratless-ai/stratless" target="_blank" rel="noopener">GitHub</a>
         </nav>
       </div>
     </header>
 
-    <main>
+    <main id="main">
       <slot />
     </main>
 
@@ -66,6 +68,25 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+}
+/* off-screen until keyboard focus lands on it; then a small card above the nav */
+.skip {
+  position: fixed;
+  top: 0.6rem;
+  left: 0.6rem;
+  z-index: 20; /* above .nav (10) */
+  transform: translateY(-250%);
+  background: var(--paper-2);
+  color: var(--ink);
+  border: 1.5px solid var(--ink);
+  border-radius: 8px;
+  padding: 0.5rem 0.9rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+.skip:focus-visible {
+  transform: none;
 }
 .nav {
   background: color-mix(in srgb, var(--paper) 85%, transparent);

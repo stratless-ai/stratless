@@ -31,6 +31,10 @@ export default defineNuxtConfig({
       title: TITLE,
       link: [
         { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' },
+        // iOS home screen + anything that won't take an SVG. Full-bleed on the tile's own blue so
+        // the platform's corner mask never exposes gaps. Regenerate: wrap favicon.svg in a 180×180
+        // page on #A3CFDC, screenshot with headless chrome (same trick as scripts/og-card.html).
+        { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png' },
         // PRELOAD EVERY ABOVE-THE-FOLD FONT.
         //
         // All four are `font-display: swap`, so without a preload the browser paints the page in
@@ -51,6 +55,8 @@ export default defineNuxtConfig({
       meta: [
         { name: 'description', content: DESC },
         { name: 'viewport', content: 'width=device-width, initial-scale=1' },
+        // browser chrome tint on mobile — the page's paper, so the UI reads as one surface
+        { name: 'theme-color', content: '#e9e5d8' },
         { property: 'og:type', content: 'website' },
         { property: 'og:title', content: TITLE },
         { property: 'og:description', content: DESC },
@@ -91,7 +97,7 @@ export default defineNuxtConfig({
       // Two silent traps cost an hour here: Nitro reserves `/404` (emits nothing), and Nuxt ignores
       // any pages/ file beginning with `_`. Neither warns you.
       async close() {
-        const { readFile, writeFile, rm } = await import('node:fs/promises')
+        const { readFile, writeFile, rm, readdir } = await import('node:fs/promises')
         const { join } = await import('node:path')
         const dir = join(process.cwd(), '.output', 'public')
         try {
@@ -101,6 +107,30 @@ export default defineNuxtConfig({
           console.log('[stratless] 404.html ← the prerendered error page (not the empty SPA shell)')
         } catch (e) {
           console.warn(`[stratless] ⚠ /not-found did not prerender — 404.html is still the empty shell: ${e}`)
+        }
+        // SITEMAP — built by walking the emitted `**/index.html`, AFTER the 404 shuffle above, so it
+        // lists exactly what shipped (crawled docs pages included) and can never name a dead route.
+        try {
+          const routes: string[] = []
+          const walk = async (d: string, rel: string): Promise<void> => {
+            for (const ent of await readdir(d, { withFileTypes: true })) {
+              if (ent.isDirectory()) await walk(join(d, ent.name), `${rel}${ent.name}/`)
+              else if (ent.name === 'index.html') routes.push(rel)
+            }
+          }
+          await walk(dir, '/')
+          routes.sort()
+          const xml = [
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+            ...routes.map((r) => `  <url><loc>https://stratless.com${r}</loc></url>`),
+            '</urlset>',
+            '',
+          ].join('\n')
+          await writeFile(join(dir, 'sitemap.xml'), xml)
+          console.log(`[stratless] sitemap.xml ← ${routes.length} routes`)
+        } catch (e) {
+          console.warn(`[stratless] ⚠ sitemap.xml not written: ${e}`)
         }
       },
     },

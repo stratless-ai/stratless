@@ -96,6 +96,12 @@
 * {
   box-sizing: border-box;
 }
+/* one keyboard-focus language for the whole site: the CTA blue, offset off the element.
+   :focus-visible only — pointer clicks stay ringless, keyboards always see where they are. */
+:focus-visible {
+  outline: 2px solid var(--accent-deep);
+  outline-offset: 2px;
+}
 html,
 body {
   margin: 0;
