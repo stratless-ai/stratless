@@ -4,6 +4,21 @@ All notable changes to `stratless` are recorded here — written by hand, for th
 not scraped from commits. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and each version matches its `cli-v*` git tag.
 
+## [0.2.3] — 2026-07-16
+
+### Fixed
+- **`profile` / `report` / `update` no longer load your whole history into memory.** They read only the
+  recent window (newest transcripts first, then stop), so a large archive can no longer exhaust memory
+  and hang the machine. Previously the load read and parsed *every* transcript before keeping the last
+  200 — the 0.2.1 "bounded cold start" bounded only the judging, not the load. Measured on an 833 MB /
+  2,292-file archive: ~165 MB and under half a second, versus the old path's out-of-memory hang.
+
+### Changed
+- **The after-session auto-refresh is now opt-in.** Plain `stratless init` sets up the archive and the
+  reaper but installs *no* background hook; run `stratless init --auto` to have your profile rebuild
+  itself after each session. `stratless stop` still turns it off. A tool that reads your history should
+  not silently arm a background job on every session without you choosing it.
+
 ## [0.2.2] — 2026-07-16
 
 ### Added

@@ -69,11 +69,12 @@ No model of ours. No server. No training. No inference bill.
    forever**, so each exchange is read exactly once, ever.
 3. **Synthesize.** It reads the whole stack of those judgments and writes the profile above.
 4. **Load.** It writes the profile to `~/.claude/HUMAN.md` and points your assistant's own config at it,
-   so your next session starts already knowing you, and `stratless update` refreshes it after each
-   session. `stratless stop` turns that off and unloads it.
+   so your next session starts already knowing you. Run `stratless update` to refresh it, or
+   `stratless init --auto` to have it refresh automatically after each session. `stratless stop` turns
+   that off and unloads it.
 
 It spends your own plan's tokens, never a separate bill (`stratless status` shows the running total).
-The first run reads your backlog once; after that it only ever reads what's new. If the assistant
+The first run reads a recent window of your history; after that it only ever reads what's new. If the assistant
 can't answer honestly, it says nothing: a confidently-wrong profile is the one failure that would end
 this, so silence always beats a guess.
 

@@ -40,7 +40,7 @@ export interface InitResult {
  * the background (prints nothing; rebuilds and reloads the profile). Idempotent — never adds a
  * duplicate. Returns true only when it actually added the hook.
  */
-function installStopHook(settings: any): boolean {
+export function installStopHook(settings: any): boolean {
   const command = 'stratless update >/dev/null 2>&1 &';
   settings.hooks ??= {};
   settings.hooks.Stop ??= [];
@@ -77,12 +77,14 @@ function allTranscripts(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-export function init(): InitResult {
+export function init(opts: { auto?: boolean } = {}): InitResult {
   // 1. stop the reaper
   const settings = existsSync(SETTINGS) ? JSON.parse(readFileSync(SETTINGS, 'utf8')) : {};
   const before: number | 'default (30)' = settings.cleanupPeriodDays ?? 'default (30)';
   settings.cleanupPeriodDays = KEEP_DAYS;
-  const hookInstalled = installStopHook(settings);
+  // The after-session auto-refresh is OPT-IN (`init --auto`). A tool that reads everything must not
+  // silently arm a background job that reads your history on every session — you turn that on yourself.
+  const hookInstalled = opts.auto ? installStopHook(settings) : false;
   mkdirSync(join(HOME, '.claude'), { recursive: true });
   writeFileSync(SETTINGS, `${JSON.stringify(settings, null, 2)}\n`);
 
