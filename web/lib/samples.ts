@@ -11,6 +11,10 @@ import MarkdownIt from 'markdown-it'
  * of the maker's own `~/.claude/HUMAN.md` (it refreshes every session); re-pull it before a flip.
  */
 const md = new MarkdownIt({ html: false, linkify: true, typographer: true })
+// A sample IS a file. Don't let linkify dress bare `HUMAN.md` / `cli/AGENTS.md` as links: `.md` is a
+// real TLD (Moldova), so linkify reads `AGENTS.md` as a domain. fuzzyLink:false keeps explicit
+// https:// links and drops the scheme-less ones — which is exactly the file mentions we don't want linked.
+md.linkify.set({ fuzzyLink: false })
 
 export interface Sample {
   name: string

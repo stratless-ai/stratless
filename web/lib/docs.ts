@@ -14,6 +14,9 @@ import MarkdownIt from 'markdown-it'
  * command; there are no language variants to switch between. Deleted 2026-07-14.
  */
 const md = new MarkdownIt({ html: false, linkify: true, typographer: true })
+// Docs name files constantly (`HUMAN.md`, `package.json`). `.md` is a real TLD, so linkify would dress
+// `foo.md` as a domain link. fuzzyLink:false keeps explicit https:// links but stops the scheme-less ones.
+md.linkify.set({ fuzzyLink: false })
 
 export interface Doc {
   title: string
