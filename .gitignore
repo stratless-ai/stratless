@@ -6,3 +6,8 @@ dist/
 *.log
 .DS_Store
 package-lock.json
+
+
+# scratch notes — personal working file, not repo content
+docs/notes.md
+

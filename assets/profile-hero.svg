@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 620" xml:space="preserve">
+  <defs>
+    <clipPath id="card"><rect x="18" y="14" width="564" height="592" rx="11"/></clipPath>
+    <linearGradient id="bar" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a3831"/><stop offset="1" stop-color="#322f29"/>
+    </linearGradient>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="16" stdDeviation="14" flood-color="#14120c" flood-opacity="0.45"/>
+    </filter>
+    <style>
+      text { font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace; font-size: 13px; fill: #e6e2d6; }
+      .g  { fill: #8fce6b; font-weight: 700; }
+      .pa { fill: #5fb3c9; font-weight: 700; }
+      .w  { fill: #f4f1e8; font-weight: 700; }
+      .d  { fill: #8b8677; }
+      .y  { fill: #6cb6d9; }
+    </style>
+  </defs>
+
+  <g filter="url(#sh)"><rect x="18" y="14" width="564" height="592" rx="11" fill="#1b1a16" stroke="#000"/></g>
+  <g clip-path="url(#card)">
+    <rect x="18" y="14" width="564" height="40" fill="url(#bar)"/>
+    <line x1="18" y1="54" x2="582" y2="54" stroke="#000"/>
+  </g>
+  <circle cx="42" cy="34" r="6" fill="#ff5f56"/>
+  <circle cx="62" cy="34" r="6" fill="#febc2e"/>
+  <circle cx="82" cy="34" r="6" fill="#28c840"/>
+  <text x="300" y="38" text-anchor="middle" fill="#b9b3a3" font-size="11">my-app — -zsh — 92×20</text>
+
+  <text x="36" y="74"><tspan class="g">➜</tspan>  <tspan class="pa">~/my-app</tspan> <tspan class="w">stratless profile</tspan></text>
+
+  <text x="36" y="118" class="d"># who you are working with, loaded into your assistant every session</text>
+
+  <text x="36" y="162">You're talking to a solo founder building stratless, a</text>
+  <text x="36" y="184">human-profiler: a CLI that reads your coding-assistant</text>
+  <text x="36" y="206">transcripts, judges them, and writes a <tspan class="w">HUMAN.md</tspan> the</text>
+  <text x="36" y="228">assistant loads at session start to know who it is talking to.</text>
+
+  <text x="36" y="272">They are not fluent in the tech, and the tech is never what</text>
+  <text x="36" y="294">stalls them. <tspan class="w">Altitude is.</tspan> Concrete, nameable architecture</text>
+  <text x="36" y="316">lands; abstract strategy framings get redirected. On</text>
+  <text x="36" y="338">implementation they give short orders, <tspan class="y">"go," "ok," "commit,"</tspan></text>
+  <text x="36" y="360">and rely on you for the how.</text>
+
+  <text x="36" y="404"><tspan class="w">Failure signal</tspan>  go abstract or long and they don't argue,</text>
+  <text x="36" y="426">they redirect: to a concrete task, to "just summarize the</text>
+  <text x="36" y="448">blockers," to correcting one fact and moving on. That pivot</text>
+  <text x="36" y="470">means you left ground level. <tspan class="w">Drop the frame, give the next move.</tspan></text>
+  <text x="36" y="492">And they gate real decisions on verification.</text>
+
+  <text x="36" y="536"><tspan class="g">↳ loaded</tspan>  <tspan class="d">your assistant now talks to a person, not a blank.</tspan></text>
+
+  <text x="36" y="580"><tspan class="g">➜</tspan>  <tspan class="pa">~/my-app</tspan></text>
+  <rect x="133" y="568" width="8" height="15" fill="#e6e2d6"/>
+</svg>
