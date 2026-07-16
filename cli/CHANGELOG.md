@@ -4,6 +4,32 @@ All notable changes to `stratless` are recorded here — written by hand, for th
 not scraped from commits. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and each version matches its `cli-v*` git tag.
 
+## [0.3.1] — unreleased
+
+The streaming release. 0.3.0's dogfood measured where the money actually goes: every judge and
+audit call re-booted the whole Claude Code harness — ~30k tokens and ~10 seconds of startup for a
+one-line question, 99% luggage. 0.3.1 pays the toll once.
+
+### Changed
+- **Judging and auditing now stream through ONE `claude` process per batch.** The instructions ride
+  the session's system prompt (sent once, cached); each judgment or audit is a turn. Measured in
+  prototype: ~3.2x cheaper per verdict and no per-call boot; sessions rotate every 25 turns to
+  bound context growth. The old per-call path remains as the automatic fallback (older CLIs,
+  mid-batch failures) — the ladder is stream → per-call → silence, and a failed turn is skipped,
+  never guessed. Streamed prompts carry a `<stratless-…>` sentinel so the pipeline can never parse
+  its own sessions as your conversation.
+- **The profile is SECTIONED** — the six kinds as fixed headings (WHAT THEY KNOW · HOW THEY THINK ·
+  HOW THEY WORK · DIRECTION · FAILURE SIGNALS · TRIGGERS), only sections with evidence appear,
+  under 350 words, with a `humanmd/v1` schema marker in the file. HUMAN.md starts looking like the
+  protocol it is becoming.
+- **Time is narrated.** The trend and window every pattern carries now reach the prose: "has held
+  for two months, lean on it", "faded through July: who they were". And the miner now sees each
+  judgment's local time tag (computed by code, never raw timestamps), so time-conditioned patterns
+  ("terser in the morning") can finally emerge.
+- **`report` joins the pattern era** — the human's mirror is now reasoned from the audited
+  patterns and centers the trajectory: what stopped, what holds, what's new. It also gains the
+  numbers-lint: both renderings now refuse to deliver an invented number.
+
 ## [0.3.0] — 2026-07-17
 
 The learning release. Until now the profile was re-derived from raw judgment lines on every build

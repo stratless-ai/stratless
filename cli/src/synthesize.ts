@@ -181,17 +181,29 @@ Your evidence comes in two blocks:
 A — MINED PATTERNS: named regularities about this person. Each carries a real count, a time window,
 a trend (rising/steady/fading), a stability class and a confidence, audited against the underlying
 exchanges. These are the claims to reason FROM: lean hardest on bedrock and strong patterns; treat
-volatile or thin ones lightly; a fading pattern is who they WERE — say so if it matters.
+volatile or thin ones lightly.
 B — MOST RECENT raw observations: their current focus. If B contradicts an older pattern, the
 person changed — describe NOW, never the historical average.
 
 Write a model of a human to reason FROM — never a list of rules ("do X, don't do Y"), which this
-person rejects as more paper. Cover, only where the evidence supports it:
-- what they KNOW and don't (technical and non-technical; name the tell)
-- what actually stalls them — the tech, or MEANING and altitude?
-- how they think and talk; how they work
-- what they are building and WHY — their CURRENT direction, the thing to lean on hardest
-- the FAILURE SIGNAL: the exact words/moves that mean the assistant just went abstract or long
+person rejects as more paper.
+
+TIME IS PART OF EVERY CLAIM: narrate trend and window where they matter ("has held for two months,
+lean on it", "faded through July: who they WERE", "new this week, hold it lightly"). If a pattern is
+time-conditioned (mornings vs late nights), describe the MODES and their tells — never predict which
+mode is active; the assistant reading this will read the room.
+
+FORMAT — sections with EXACTLY these headings, in this order, KEEPING ONLY sections with real
+evidence (omit empty ones; never pad):
+WHAT THEY KNOW
+HOW THEY THINK
+HOW THEY WORK
+DIRECTION
+FAILURE SIGNALS
+TRIGGERS
+Each pattern's [kind] tag names its home section (know/think/work/direction/failure-signals/
+triggers; unsorted goes where it fits best or stays out). Headings in ALL CAPS on their own line,
+plain prose beneath, no other markdown.
 
 Hard rules:
 - SPECIFIC or nothing. A sentence that could describe anyone is a failure, so cut it.
@@ -199,16 +211,32 @@ Hard rules:
   or invent a number.
 - Ground every claim in the evidence. Invent nothing. Thin evidence means say less, don't pad.
 - Never use an em dash or en dash (— or –). Use a comma, a colon, a period, or parentheses instead.
-- Second person, addressed to the assistant about the person. Plain text, no markdown headings,
-  under 250 words. Lead with what matters most.`;
+- Second person, addressed to the assistant about the person. Under 350 words total. Lead each
+  section with what matters most.`;
 
-/**
- * The AI's copy, reasoned FROM the mined patterns (0.3.0) — the writer as spokesperson: it may
- * only weaken claims, never mint them. Input stays flat no matter how large the judgment pile
- * grows: the pattern sheet is bounded and the raw sample is small. Returns the text, or the list
- * of invented numerals if the lint refused the build (silence over a precise-looking lie).
- */
-export function synthesizeProfileFromPatterns(
+const PATTERNS_REPORT_PROMPT = `You are writing a short, honest note to a PERSON about their own
+pattern of working with an AI coding assistant. The reader is that person — not their assistant.
+
+Your evidence: A — MINED PATTERNS (each with a real count, time window, trend, stability, audited
+against real exchanges); B — their MOST RECENT raw observations.
+
+Tell them, warmly and without flattery:
+- where things click and where they get lost — real topics, real moments
+- the pattern underneath (is the block the tech, or meaning?)
+- the TRAJECTORY — the heart of this note, the thing only time can show: what stopped ("you used to
+  bounce on X; it faded in July"), what holds ("Y has held for two months"), what is new this week
+- if a pattern is time-conditioned (mornings vs late nights), name it kindly as a mode
+
+Hard rules:
+- SPECIFIC or nothing: real topics, real frequencies. No horoscope, no generic praise.
+- NUMBERS: only as they appear in the evidence. Never compute, round, or invent one.
+- Ground every claim in the evidence. Invent nothing.
+- Never use an em dash or en dash (— or –). Use a comma, a colon, a period, or parentheses instead.
+- Second person ("you"), plain and kind, no headings, under 220 words.`;
+
+/** Shared assembly for the two pattern-grounded renderings — one evidence block, two audiences. */
+function synthesizeFromPatterns(
+  prompt: string,
   patterns: Pattern[],
   recent: Judgment[],
   corpus: Corpus,
@@ -216,7 +244,7 @@ export function synthesizeProfileFromPatterns(
 ): { text?: string; invented?: string[] } {
   if (!patterns.length && !recent.length) return {};
   const input = [
-    PATTERNS_PROFILE_PROMPT,
+    prompt,
     '',
     `CORPUS: ${ground(corpus)}`,
     '',
@@ -232,6 +260,35 @@ export function synthesizeProfileFromPatterns(
   const invented = inventedNumbers(text, input);
   if (invented.length) return { invented }; // the promise layer: refuse, don't lie
   return { text };
+}
+
+/**
+ * The AI's copy, reasoned FROM the mined patterns — the writer as spokesperson: it may only weaken
+ * claims, never mint them. 0.3.1: sectioned (the six kinds as headings — the protocol made visible,
+ * ≤350 words) and time-narrating. Input stays flat no matter how large the judgment pile grows.
+ * Returns the text, or the invented numerals if the lint refused the build (silence over a
+ * precise-looking lie).
+ */
+export function synthesizeProfileFromPatterns(
+  patterns: Pattern[],
+  recent: Judgment[],
+  corpus: Corpus,
+  bin: string,
+): { text?: string; invented?: string[] } {
+  return synthesizeFromPatterns(PATTERNS_PROFILE_PROMPT, patterns, recent, corpus, bin);
+}
+
+/**
+ * The human's copy, reasoned FROM the patterns (0.3.1) — the mirror finally gets the trajectory:
+ * what stopped, what holds, what is new. Same evidence, same lint, kinder register.
+ */
+export function synthesizeReportFromPatterns(
+  patterns: Pattern[],
+  recent: Judgment[],
+  corpus: Corpus,
+  bin: string,
+): { text?: string; invented?: string[] } {
+  return synthesizeFromPatterns(PATTERNS_REPORT_PROMPT, patterns, recent, corpus, bin);
 }
 
 /** The AI's copy — what loads into its context. Returns undefined if the read couldn't be done. */

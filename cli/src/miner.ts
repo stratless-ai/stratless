@@ -22,6 +22,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { runClaude } from './claude.js';
+import { runStreamBatch } from './stream.js';
 import type { Judgment } from './judge.js';
 
 const STORE = join(homedir(), '.stratless', 'patterns.json');
@@ -248,6 +249,20 @@ export function aggregate(
 /** The mining model. Naming and equivalence reward a stronger model; the pass is rare and gated. */
 const minerModel = (): string => process.env.STRATLESS_MINER_MODEL || 'sonnet';
 
+/**
+ * Local-time context for one judgment, CODE-computed — the model receives structured time, never a
+ * raw timestamp (the recency-bug lesson, still law). This is what lets time-conditioned patterns
+ * ("terser in the morning") emerge through the normal machinery. Exported for tests.
+ */
+export function timeTag(ts: string): string {
+  const d = new Date(ts);
+  if (!Number.isFinite(d.getTime())) return '';
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `[${days[d.getDay()]} ${hh}:${mm}] `;
+}
+
 /** New judgments offered to one mining pass — the rest wait for the next gate (amortize).
  *  Sized with the timeout below: a bigger batch is fewer calls but longer single-call thinking;
  *  60 keeps one pass inside a sane latency (dogfood 2026-07-17: 120 + a 120s timeout never landed). */
@@ -273,6 +288,9 @@ Rules:
   "unsorted" — never force the nearest box.
 - Never invent a hash. Only hashes from section B may appear in new_receipts.
 - A judgment may support several patterns, or none — leaving one unassigned is honest work.
+- Each judgment carries its local time tag ([Ddd HH:MM], computed by the system, trustworthy). A
+  regularity conditioned on time of day or week ("terser and directive in the morning") is a VALID
+  pattern — but only when the tags actually support it.
 - Statements DESCRIBE the person; they never instruct an assistant what to do.
 
 Output EXACTLY one JSON object, no preamble, no markdown, no code fence:
@@ -353,7 +371,7 @@ export function mine(
   const sheet = [...store.patterns, ...store.candidates]
     .map((p) => `${p.id} [${p.kind}]: ${p.statement}`)
     .join('\n');
-  const lines = batch.map((j) => `${j.hash}: ${j.line}`).join('\n');
+  const lines = batch.map((j) => `${j.hash}: ${timeTag(j.ts)}${j.line}`).join('\n');
   const input = `${MINE_PROMPT}\n\nA — EXISTING PATTERNS:\n${sheet || '(none yet — this is the first pass)'}\n\nB — NEW JUDGMENTS:\n${lines}`;
 
   const raw = runClaude(bin, input, minerModel(), 'miner', MINE_TIMEOUT_MS);
@@ -395,15 +413,21 @@ export function mine(
 // (pattern, receipt) pair — the same read-once discipline as everything else.
 // ────────────────────────────────────────────────────────────────────────────────────────────────
 
-const AUDIT_PROMPT = `You are the AUDITOR — an independent check on an analyst's claim about ONE
-person. Below: a pattern STATEMENT about that person, then the judgment lines assigned to it as
-evidence (hash: line).
+/** The auditor's RULES — system-prompt half in streamed sessions, prepended in the fallback. */
+const AUDIT_RULES = `You are the AUDITOR — an independent check on an analyst's claims about ONE
+person, one claim per message. Each message gives a pattern STATEMENT about that person, then the
+judgment lines assigned to it as evidence (hash: line).
 
 For EACH line, judge independently: does this judgment actually SATISFY the statement? Not "related
 to it" — satisfies it. When uncertain, evict: thin true evidence beats padded evidence.
 
-Output EXACTLY one JSON object, no preamble, no markdown:
+Reply to EACH message with EXACTLY one JSON object, no preamble, no markdown:
 {"keep":["<hash>","..."],"evict":["<hash>","..."]}`;
+
+/** One audit turn: the statement + its fresh evidence. Rules ride the session's system prompt. */
+function auditTurnBody(statement: string, lines: string): string {
+  return `STATEMENT: ${statement}\n\nEVIDENCE:\n${lines}`;
+}
 
 /**
  * Parse the audit reply. Hashes outside the offered set are ignored; a hash the model failed to
@@ -435,14 +459,16 @@ export interface AuditResult {
 }
 
 /**
- * Audit every pattern's unaudited receipts, one call per pattern. Runs at the gate, after mine().
- * A refused call leaves that pattern's receipts unaudited — re-offered next gate, nothing lost.
+ * Audit every pattern's unaudited receipts — 0.3.1: through ONE streamed audit session (a turn per
+ * pattern; the separate-mind rule holds — the auditor session never wrote any statement), with the
+ * per-pattern one-shot as fallback. Runs at the gate, after mine(). A refused/failed turn leaves
+ * that pattern's receipts unaudited — re-offered next gate, nothing lost.
  */
-export function auditPatterns(
+export async function auditPatterns(
   pile: Judgment[],
   bin: string,
   opts: { now?: Date; file?: string } = {},
-): AuditResult {
+): Promise<AuditResult> {
   const file = opts.file ?? storePath();
   const store = loadPatterns(file);
   const byHash = new Map(pile.map((j) => [j.hash, j]));
@@ -450,27 +476,41 @@ export function auditPatterns(
   let kept = 0;
   let evicted = 0;
 
-  const evictions = new Map<string, Set<string>>(); // pattern id → hashes to remove
+  // Collect the work first: every pattern with receipts not yet audited against its statement.
+  const work: { p: Pattern; fresh: string[]; body: string }[] = [];
   for (const p of [...store.patterns, ...store.candidates]) {
     const fresh = p.receipts.filter((h) => !store.audited[`${p.id}:${h}`] && byHash.has(h));
     if (!fresh.length) continue;
-
     const lines = fresh.map((h) => `${h}: ${byHash.get(h)!.line}`).join('\n');
-    const input = `${AUDIT_PROMPT}\n\nSTATEMENT: ${p.statement}\n\nEVIDENCE:\n${lines}`;
-    const raw = runClaude(bin, input, 'haiku', 'audit');
+    work.push({ p, fresh, body: auditTurnBody(p.statement, lines) });
+  }
+
+  // Rung 1 — one streamed session, a turn per pattern; rung 2 — per-pattern one-shot fallback.
+  const stream = await runStreamBatch(bin, {
+    systemPrompt: AUDIT_RULES,
+    role: 'audit',
+    model: 'haiku',
+    feature: 'audit',
+    items: work.map((w) => ({ id: w.p.id, prompt: w.body })),
+  });
+
+  const evictions = new Map<string, Set<string>>(); // pattern id → hashes to remove
+  for (const w of work) {
+    let raw = stream.results.get(w.p.id);
+    if (raw === undefined) raw = runClaude(bin, `${AUDIT_RULES}\n\n${w.body}`, 'haiku', 'audit');
     calls++;
-    const verdict = raw ? parseAuditOutput(raw, new Set(fresh)) : undefined;
+    const verdict = raw ? parseAuditOutput(raw, new Set(w.fresh)) : undefined;
     if (!verdict) continue; // refused — these receipts stay unaudited, re-offered next gate
 
-    for (const h of fresh) {
-      store.audited[`${p.id}:${h}`] = 1;
+    for (const h of w.fresh) {
+      store.audited[`${w.p.id}:${h}`] = 1;
       if (verdict.evict.has(h)) evicted++;
       else kept++;
     }
-    if (verdict.evict.size) evictions.set(p.id, verdict.evict);
-    const prior = p.audit ?? { kept: 0, evicted: 0, at: '' };
-    p.audit = {
-      kept: prior.kept + (fresh.length - verdict.evict.size),
+    if (verdict.evict.size) evictions.set(w.p.id, verdict.evict);
+    const prior = w.p.audit ?? { kept: 0, evicted: 0, at: '' };
+    w.p.audit = {
+      kept: prior.kept + (w.fresh.length - verdict.evict.size),
       evicted: prior.evicted + verdict.evict.size,
       at: (opts.now ?? new Date()).toISOString(),
     };
