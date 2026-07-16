@@ -54,7 +54,7 @@ prefixing every command below with `npx `. Both work.
 stratless init       turn it on: keep your history, and start reading it
 stratless profile    see the model of you (profile looks; update loads)
 stratless report     the same picture, written for you to read
-stratless update     re-read what's new, rebuild the profile, and load it into your assistant
+stratless update     judge what's new; rebuild + load the profile when due (--now: always)
 stratless stop       turn it off: stop refreshing and unload the profile
 stratless status     stratless's own state: on or off, and what it has cost
 stratless stats      raw counts about your assistant in a project, instant and free
@@ -68,13 +68,13 @@ and copies everything somewhere safe. Everything else reads from there.
 
 ## How it works, there's no trick
 
-No model of ours. No server. No training. No inference bill.
+No model of ours. No server. No training. No separate bill.
 
 1. **Read.** Every session Claude Code has is already on your disk, in `~/.claude/projects`.
    stratless walks each one into `(what the assistant said → how you reacted)` pairs.
 2. **Judge.** It hands each pair to the `claude` you already have (`claude -p`, on your own plan)
-   and asks one question: *did understanding transfer, and about what?* One line back, **cached
-   forever**, so each exchange is read exactly once, ever.
+   and asks one question: *did understanding transfer, and about what?* One line back, **cached**,
+   so each exchange is read once.
 3. **Synthesize.** It reads the whole stack of those judgments and writes the profile above.
 4. **Load.** `stratless update` writes the profile to `~/.claude/HUMAN.md` and points your assistant's
    own config at it, so your next session starts already knowing you. Run it again any time to refresh,

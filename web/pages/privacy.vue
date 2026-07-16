@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { legal } from '~/lib/legal'
 import { useSeo } from '~/lib/seo'
+
+// computed at build from cli/src (see nuxt.config.ts) — the trust claim must never go stale by hand
+const cliLines = useRuntimeConfig().public.cliLines
 useSeo({
   title: 'Privacy',
   description:
@@ -57,8 +60,8 @@ useSeo({
           <strong>Nothing.</strong> No telemetry, no analytics, no crash reports, no usage counters,
           no phone-home of any kind. This is not a promise we're asking you to take on trust:
           <a :href="legal.source" target="_blank" rel="noopener">the source is public and it is
-          about 1,500 lines</a>. You can read the whole thing in an afternoon and confirm there is
-          no network code in it.
+          about {{ cliLines }} lines</a>. You can read the whole thing in an afternoon and confirm
+          there is no network code in it.
         </p>
 
         <h2>This website</h2>

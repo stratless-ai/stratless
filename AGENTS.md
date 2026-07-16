@@ -28,5 +28,8 @@ pnpm dev:web        # run stratless.com locally   (pnpm generate = static build)
 - 🚫 **Never auto-commit.** Stage explicit pathspecs, leave the tree green and uncommitted; a human commits.
 - 🚫 **Never add telemetry or central pooling.** Nothing leaves the user's machine, ever.
 - ⚠️ **Ask before flipping the published cli or the live site** — both are one-way doors; don't ship an unproven change to either.
+- ✅ **Docs move with the code.** A PR that changes `cli/` behavior updates `web/content/docs/` and `cli/README.md` in the same PR — the site describing a previous version is a trust bug. (CI nudges: `.github/workflows/docs-nudge.yml`.)
+- ✅ **Numbers in copy are computed, never typed.** The site's version badge and line-count claim both come from the build (`web/nuxt.config.ts`); never hand-write either, anywhere.
+- ✅ **One sample profile.** The npm README sample, the hero terminal, and `web/content/samples/HUMAN.md` show the same profile — update them together or not at all.
 - ✅ Leave `pnpm -r typecheck`, `pnpm -r build`, and `pnpm test` green before handing work back.
 - ✅ End commit messages with: `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`
