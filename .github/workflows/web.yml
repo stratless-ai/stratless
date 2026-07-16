@@ -8,7 +8,10 @@ name: web
 on:
   push:
     branches: [main]
-    paths: ['web/**', '.github/workflows/web.yml', 'pnpm-lock.yaml']
+    # cli/ is a BUILD INPUT of the site: nuxt.config reads cli/package.json (the version badge)
+    # and counts cli/src (the line-count trust claim). A cli-only merge must redeploy or the
+    # badge lies — 0.3.0 shipped and the site said v0.2.4 until a hand-run dispatch (2026-07-17).
+    paths: ['web/**', '.github/workflows/web.yml', 'pnpm-lock.yaml', 'cli/package.json', 'cli/src/**']
   workflow_dispatch:
 
 permissions:
