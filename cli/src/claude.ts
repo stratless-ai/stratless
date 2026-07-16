@@ -35,7 +35,13 @@ export function findAssistant(): string | undefined {
  * for the usage ledger ('judge', 'synthesis') so `status` can show WHERE the spend went, not just
  * its total.
  */
-export function runClaude(bin: string, input: string, model?: string, feature?: string): string | undefined {
+export function runClaude(
+  bin: string,
+  input: string,
+  model?: string,
+  feature?: string,
+  timeoutMs = 120_000,
+): string | undefined {
   // Prefer JSON so we can record what the borrowed call cost (see `status`); fall back to plain text,
   // and to the default model, so an older `claude`, or one whose JSON we can't parse, still answers.
   const modelArgs = model ? ['--model', model] : [];
@@ -53,7 +59,9 @@ export function runClaude(bin: string, input: string, model?: string, feature?: 
     try {
       const out = execFileSync(bin, args, {
         encoding: 'utf8',
-        timeout: 120_000, // the CLI has real startup cost; 60s silently degraded every call
+        timeout: timeoutMs, // sized PER CALL: a one-line judgment needs little; a mining pass over
+        // dozens of judgments legitimately thinks for minutes (dogfood 2026-07-17: the default
+        // 120s made mining structurally impossible — every attempt timed out, silently)
         stdio: ['ignore', 'pipe', 'ignore'],
         maxBuffer: 8 * 1024 * 1024, // JSON carries metadata on top of the text — give it room
       }).trim();

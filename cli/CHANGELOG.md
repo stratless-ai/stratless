@@ -4,6 +4,47 @@ All notable changes to `stratless` are recorded here — written by hand, for th
 not scraped from commits. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and each version matches its `cli-v*` git tag.
 
+## [0.3.0] — 2026-07-17
+
+The learning release. Until now the profile was re-derived from raw judgment lines on every build
+and the derivation thrown away; nothing accumulated. 0.3.0 makes the derivation a persistent,
+auditable artifact — the profile stops being an impression and becomes a derivation from evidence.
+
+### Added
+- **The miner.** A new pass turns your judgments into `~/.stratless/patterns.json`: named
+  regularities, each carrying a real count, a time window, a trend (rising/steady/fading), a
+  stability class, and — the part that matters — **receipts**: the exchange hashes that witnessed
+  it. Every claim traces to replies that could have gone the other way; no receipt, no claim. The
+  split is strict: **the model names, the code counts** — counts, dates and trends are computed
+  deterministically and the model is never shown a number it could hallucinate. Categories emerge
+  from your data (a pattern needs 5+ receipts to exist; anecdotes stay candidates); they sort into
+  six fixed kinds — what you know · how you think · how you work · direction · failure signals ·
+  triggers — and anything that fits none is kept `unsorted`, never forced.
+- **`stratless patterns`** — every claim with its count, trend, audit tally, and receipt trail.
+  Your profile's evidence, inspectable. Free; add `--all` for candidates below the evidence bar.
+- **The auditor.** A separate mind — never the one that wrote a statement — re-checks every newly
+  assigned receipt against its pattern ("does this judgment actually SATISFY the statement?").
+  Evicted evidence is removed by code and admission is re-decided by arithmetic. Audited once,
+  ever, per receipt.
+- **The numbers-lint.** Every numeral in a built profile must already exist in the evidence the
+  writer was shown. An invented or rounded frequency is a **refused build** — the old profile stays
+  loaded, nothing lies. A wrong frequency is a lie wearing precision; now it's a build failure.
+- **Dynamic aperture.** The judge's view of each exchange is sized from *your own* history (p90 of
+  your real lengths × 1.2, clamped), reading head + tail of long turns — the plan and the
+  conclusion — instead of a fixed head-cut sized on the author's machine. Recorded in
+  `state.json`, visible.
+
+### Changed
+- **Judgments are structured (v2).** Verdict / topic / behavior fields, JSON output validated in
+  code (malformed = refused, never guessed). The pipeline version now lives in the cache key, so
+  this release re-judges your window **gradually, under the normal per-run budget** — an upgrade
+  never re-spends your backlog at once.
+- **The profile is written FROM the patterns** — audited claims with real numbers, plus a small
+  recent sample for freshness. The writer's input stays the same size whether you have 200
+  judgments or 20,000: the learning architecture is the cost-control architecture.
+- **The parse cap rose 4,000 → 8,000 chars per field** (inside the v2 re-judge, so the identity
+  churn was free). Long assistant turns keep more of their real tail.
+
 ## [0.2.4] — 2026-07-16
 
 ### Changed

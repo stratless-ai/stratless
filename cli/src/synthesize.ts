@@ -19,6 +19,7 @@
  */
 import { runClaude } from './claude.js';
 import type { Judgment } from './judge.js';
+import type { Pattern } from './miner.js';
 
 /**
  * The synthesis model. Reading the shape of a person is subtle work, so it does not ride the tiny
@@ -35,9 +36,12 @@ const synthModel = (): string => process.env.STRATLESS_SYNTH_MODEL || 'sonnet';
  * Judgments that carry signal. A `none` verdict is, by the judge's own definition, a reaction that
  * says nothing about understanding (pure logistics, a thank-you) — so it never reaches the writer.
  * It stays cached forever like everything else: filtered at synthesis time, never re-judged.
+ * (v2: read from the structured field, not the rendered line. The `none` pile is not waste — it is
+ * exactly where the miner will hunt how-they-work and trigger patterns, and where Law 3 evidence
+ * accumulates.)
  */
 export function hasSignal(j: Judgment): boolean {
-  return !/^\s*none\b/i.test(j.line);
+  return j.verdict !== 'none';
 }
 
 /** Free, raw counts that ground the synthesis so it can cite real frequencies. */
@@ -144,6 +148,92 @@ function deDash(s: string): string {
   return s.replace(/\s*[—–]\s*/g, ', ');
 }
 
+/**
+ * Render the pattern sheet the writer reasons from — the ONLY place its numbers may come from.
+ * One line per pattern: kind, count, window, trend, stability, confidence, audit tally, statement.
+ * Exported for tests (the numbers-lint's allowed set is literally "numerals shown to the model").
+ */
+export function renderPatternSheet(patterns: Pattern[]): string {
+  return patterns
+    .map((p) => {
+      const audit = p.audit ? ` · audited ${p.audit.kept}/${p.audit.kept + p.audit.evicted}` : '';
+      return `[${p.kind} · ${p.count}x · ${p.window.from} → ${p.window.to} · ${p.trend} · ${p.stability} · ${p.confidence}${audit}] ${p.statement}`;
+    })
+    .join('\n');
+}
+
+/**
+ * THE NUMBERS-LINT (promise layer): every numeral in the writer's output must already exist in the
+ * input it was shown. No new numbers means no invented counts, no rounded frequencies, no
+ * hallucinated dates — a wrong frequency is a lie wearing precision, and this makes it a build
+ * failure instead. Pure; exported for tests.
+ */
+export function inventedNumbers(output: string, input: string): string[] {
+  const numerals = (s: string) => new Set(s.match(/\d+/g) ?? []);
+  const allowed = numerals(input);
+  return [...numerals(output)].filter((n) => !allowed.has(n));
+}
+
+const PATTERNS_PROFILE_PROMPT = `You are writing the file an AI coding assistant loads at the start
+of every session so it knows WHO IT IS TALKING TO. The reader is the assistant, not the person.
+
+Your evidence comes in two blocks:
+A — MINED PATTERNS: named regularities about this person. Each carries a real count, a time window,
+a trend (rising/steady/fading), a stability class and a confidence, audited against the underlying
+exchanges. These are the claims to reason FROM: lean hardest on bedrock and strong patterns; treat
+volatile or thin ones lightly; a fading pattern is who they WERE — say so if it matters.
+B — MOST RECENT raw observations: their current focus. If B contradicts an older pattern, the
+person changed — describe NOW, never the historical average.
+
+Write a model of a human to reason FROM — never a list of rules ("do X, don't do Y"), which this
+person rejects as more paper. Cover, only where the evidence supports it:
+- what they KNOW and don't (technical and non-technical; name the tell)
+- what actually stalls them — the tech, or MEANING and altitude?
+- how they think and talk; how they work
+- what they are building and WHY — their CURRENT direction, the thing to lean on hardest
+- the FAILURE SIGNAL: the exact words/moves that mean the assistant just went abstract or long
+
+Hard rules:
+- SPECIFIC or nothing. A sentence that could describe anyone is a failure, so cut it.
+- NUMBERS: cite counts, dates and trends ONLY as they appear in your evidence. Never compute, round,
+  or invent a number.
+- Ground every claim in the evidence. Invent nothing. Thin evidence means say less, don't pad.
+- Never use an em dash or en dash (— or –). Use a comma, a colon, a period, or parentheses instead.
+- Second person, addressed to the assistant about the person. Plain text, no markdown headings,
+  under 250 words. Lead with what matters most.`;
+
+/**
+ * The AI's copy, reasoned FROM the mined patterns (0.3.0) — the writer as spokesperson: it may
+ * only weaken claims, never mint them. Input stays flat no matter how large the judgment pile
+ * grows: the pattern sheet is bounded and the raw sample is small. Returns the text, or the list
+ * of invented numerals if the lint refused the build (silence over a precise-looking lie).
+ */
+export function synthesizeProfileFromPatterns(
+  patterns: Pattern[],
+  recent: Judgment[],
+  corpus: Corpus,
+  bin: string,
+): { text?: string; invented?: string[] } {
+  if (!patterns.length && !recent.length) return {};
+  const input = [
+    PATTERNS_PROFILE_PROMPT,
+    '',
+    `CORPUS: ${ground(corpus)}`,
+    '',
+    'A — MINED PATTERNS (audited, counted, dated):',
+    patterns.length ? renderPatternSheet(patterns) : '(none admitted yet — reason from block B only, and say less)',
+    '',
+    'B — MOST RECENT raw observations:',
+    recent.length ? recent.map((j) => j.line).join('\n') : '(none)',
+  ].join('\n');
+  const out = runClaude(bin, input, synthModel(), 'synthesis');
+  if (!out) return {};
+  const text = deDash(out);
+  const invented = inventedNumbers(text, input);
+  if (invented.length) return { invented }; // the promise layer: refuse, don't lie
+  return { text };
+}
+
 /** The AI's copy — what loads into its context. Returns undefined if the read couldn't be done. */
 export function synthesizeProfile(judgments: Judgment[], corpus: Corpus, bin: string): string | undefined {
   if (!judgments.length) return undefined;
@@ -160,12 +250,12 @@ export function synthesizeReport(judgments: Judgment[], corpus: Corpus, bin: str
   return out ? deDash(out) : undefined;
 }
 
-/** The pile's own centre of gravity — the topics that come up most, for grounding + `stats`. */
+/** The pile's own centre of gravity — the topics that come up most, for grounding + `stats`.
+ *  (v2: reads the structured topic field — no more parsing the rendered line by its separator.) */
 export function topTopics(judgments: Judgment[], n = 8): string[] {
   const counts = new Map<string, number>();
   for (const j of judgments) {
-    // line shape: "<verdict> — <topic> — <what they did>"; the middle field is the topic
-    const topic = j.line.split('—')[1]?.trim().toLowerCase();
+    const topic = j.topic?.trim().toLowerCase();
     if (!topic) continue;
     counts.set(topic, (counts.get(topic) ?? 0) + 1);
   }
