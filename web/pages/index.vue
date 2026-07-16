@@ -117,7 +117,7 @@ And they gate real decisions on verification.
         <Btn href="#install" primary>Install</Btn>
         <Btn :href="GITHUB" target="_blank" rel="noopener">Read the source</Btn>
       </div>
-      <p class="free-note cursor">MIT. No account, no API key, no cloud. 900 lines you can audit in an afternoon.</p>
+      <p class="free-note cursor">MIT. No account, no API key, no cloud. ~1,500 lines you can audit in an afternoon.</p>
     </div>
   </section>
 

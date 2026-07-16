@@ -2,7 +2,7 @@
 import { docs } from '~/lib/docs'
 import { useSeo } from '~/lib/seo'
 
-const GITHUB = 'https://github.com/stratless-ai/stratless-cli'
+const GITHUB = 'https://github.com/stratless-ai/stratless'
 
 const route = useRoute()
 const current = computed(() => docs[route.path.replace(/\/+$/, '') || '/docs'])
@@ -14,9 +14,9 @@ const nav = [
     group: 'stratless',
     links: [
       { to: '/docs', label: 'Install' },
-      { to: '/docs/why', label: 'why' },
-      { to: '/docs/stats', label: 'stats' },
-      { to: '/docs/init', label: 'init' },
+      { to: '/docs/human-md', label: 'HUMAN.md' },
+      { to: '/docs/commands', label: 'Commands' },
+      { to: '/docs/assistants', label: 'Assistants' },
     ],
   },
   {

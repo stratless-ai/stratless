@@ -1,10 +1,10 @@
 # stratless
 
-**stratless builds your AI a living model of who you are — what you know, how you think, what
-you're building — so it stops talking over your head, or under it.**
+**stratless builds your AI a living model of who you are (what you know, how you think, what
+you're building), so it stops talking over your head, or under it.**
 
 Your coding assistant has no idea who it's talking to. So it only has two registers: silence, or a
-wall of jargon. stratless gives it the missing third thing — a picture of *you*, read from the
+wall of jargon. stratless gives it the missing third thing, a picture of *you*, read from the
 conversations you've already had.
 
 No model. No server. No API key. No account. It reads the transcripts already on your disk and
@@ -26,7 +26,7 @@ Install and usage live in **[cli/README.md](cli/README.md)**. The pitch lives at
 
 This thing reads your entire conversation history, so the first question any sensible person asks
 is *"is it phoning home?"* The whole tool is in `cli/`, small enough to read in an afternoon and
-satisfy yourself that it isn't. That is not a slogan — **the line count is the trust argument.** At
+satisfy yourself that it isn't. That is not a slogan. **The line count is the trust argument.** At
 fifty thousand lines nobody checks, and *"trust me"* is the one thing we're not allowed to say.
 
 ## Develop
@@ -37,7 +37,7 @@ pnpm test        # the CLI's tests
 pnpm dev:web     # stratless.com, locally
 ```
 
-The `cli/` is published standalone and must stay dependency-free. Never auto-commit — the tree is
+The `cli/` is published standalone and must stay dependency-free. Never auto-commit. The tree is
 left green and uncommitted for a human to review.
 
 ---
