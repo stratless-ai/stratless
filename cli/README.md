@@ -56,6 +56,7 @@ stratless init       turn it on: keep your history, and start reading it
 stratless profile    see the model of you (profile looks; update loads)
 stratless report     the same picture, written for you to read
 stratless update     judge what's new; rebuild + load the profile when due (--now: always)
+stratless patterns   the evidence behind your profile: every claim with its receipts
 stratless stop       turn it off: stop refreshing and unload the profile
 stratless status     stratless's own state: on or off, and what it has cost
 stratless stats      raw counts about your assistant in a project, instant and free
@@ -74,9 +75,12 @@ No model of ours. No server. No training. No separate bill.
 1. **Read.** Every session Claude Code has is already on your disk, in `~/.claude/projects`.
    stratless walks each one into `(what the assistant said → how you reacted)` pairs.
 2. **Judge.** It hands each pair to the `claude` you already have (`claude -p`, on your own plan)
-   and asks one question: *did understanding transfer, and about what?* One line back, **cached**,
-   so each exchange is read once.
-3. **Synthesize.** It reads the whole stack of those judgments and writes the profile above.
+   and asks one question: *did understanding transfer, and about what?* One structured verdict
+   back, **cached**, so each exchange is read once.
+3. **Mine + synthesize.** The judgments are mined into named patterns, each with a real count and
+   **receipts**: the exchanges that witnessed it. No receipt, no claim. A separate pass audits the
+   evidence, and the profile is written from what survives; a number the evidence can't back
+   refuses the whole build. `stratless patterns` shows you all of it.
 4. **Load.** `stratless update` writes the profile to `~/.claude/HUMAN.md` and points your assistant's
    own config at it, so your next session starts already knowing you. Run it again any time to refresh,
    or `stratless init --auto` to have it refresh automatically after each session. `stratless stop`
