@@ -25,20 +25,21 @@ Run `stratless profile` and it shows you the model it has built, the one `stratl
 to your assistant:
 
 ```
-WHO YOU'RE WORKING WITH                    (stratless · 84 sessions · 3,756 exchanges)
+WHO YOU'RE WORKING WITH                        (stratless · read from your own history)
 
-Fluent builder, not a beginner. Uses api / commit / schema / deploy casually, 900+×.
-Don't explain the stack. They ship.
+You're talking to a solo founder building stratless, a human-profiler: a CLI
+that reads your coding-assistant transcripts, judges them, and writes a
+HUMAN.md the assistant loads at session start to know who it is talking to.
 
-What stalls them is never the tech. It's MEANING. Their commonest move when stuck
-isn't "what is X" but "what does this mean for us?" Abstract explanation with no line
-to the product is noise. Attach the consequence or don't say it.
+They are not fluent in the tech, and the tech is never what stalls them.
+Altitude is. Concrete, nameable architecture lands; abstract strategy
+framings get redirected. On implementation they give short orders, "go,"
+"ok," "commit," and rely on you for the how.
 
-Thinks out loud. Not giving orders, reasoning. Be a thinking partner. "ok" usually
-means "ok, and here's the next thing" (they're driving; keep up, don't stop and wait).
-
-Failure signal: "what does this mean" / "i feel stupider" / "cant keep up" / going
-quiet. Every time = you went abstract or long. Back up, get concrete.
+Failure signal: go abstract or long and they don't argue, they redirect: to
+a concrete task, to "just summarize the blockers," to correcting one fact
+and moving on. That pivot means you left ground level. Drop the frame, give
+the next move. And they gate real decisions on verification.
 ```
 
 Not a rules sheet you wrote. A model of a person, reasoned from your real history, and it sharpens
