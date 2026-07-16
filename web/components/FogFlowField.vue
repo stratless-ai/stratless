@@ -218,11 +218,10 @@ onMounted(() => {
   /* fog — misty, low contrast, horizontally stretched strata */
   const renderFog = (t: number) => {
     if (!fogImg || !fogPx) return
-    const m = reduced.matches ? 0.3 : 1
-    const ox1 = Math.floor(t * 7 * m)
-    const oy1 = Math.floor(t * 2.3 * m)
-    const ox2 = Math.floor(-t * 11 * m)
-    const oy2 = Math.floor(t * 3.1 * m)
+    const ox1 = Math.floor(t * 7)
+    const oy1 = Math.floor(t * 2.3)
+    const ox2 = Math.floor(-t * 11)
+    const oy2 = Math.floor(t * 3.1)
     const px = fogPx
     let i = 0
     for (let y = 0; y < artH; y++) {
@@ -320,7 +319,7 @@ onMounted(() => {
   }
   const drawTrain = (t: number, dt: number) => {
     tctx.drawImage(bgC, 0, 0)
-    const speedPx = BASE_SPEED * flowMult * (reduced.matches ? 0.4 : 1)
+    const speedPx = BASE_SPEED * flowMult
     for (const s of streaks) {
       s.x -= speedPx * s.f * dt * 0.9
       if (s.x < -s.len) {
@@ -445,22 +444,26 @@ onMounted(() => {
     initStreaks()
     resetMask()
   }
-  const ro = new ResizeObserver(resize)
+  const ro = new ResizeObserver(() => {
+    resize()
+    if (!running && reduced.matches) still() // loop's stopped: repaint the still at the new size
+  })
   ro.observe(host)
   resize()
 
-  /* main loop */
+  /* main loop — runs ONLY while the band is on-screen, the tab visible, and motion is allowed.
+     Scrolled past, backgrounded, or prefers-reduced-motion: the rAF stops dead (no idle burn on
+     mobile). Reduced motion gets one finished STILL of the scene, not a slower animation — the
+     marquee already stops completely under reduced-motion; the fog now keeps the same promise. */
   let prev = performance.now()
   let fogTick = 0
   let raf = 0
-  const frame = (now: number) => {
-    raf = requestAnimationFrame(frame)
+  let running = false
+  const render = (now: number, dt: number) => {
     if (!artW) return
-    const dt = Math.min(0.05, (now - prev) / 1000)
-    prev = now
     const t = now / 1000
     flowMult = FLOW * (1 + 0.06 * Math.sin(t * 0.45))
-    if ((fogTick++ & 1) === 0) renderFog(t) // fog at half rate — it drifts slowly
+    if (dt === 0 || (fogTick++ & 1) === 0) renderFog(t) // fog at half rate — it drifts slowly
     drawTrain(t, dt)
     drawMask()
     rctx.clearRect(0, 0, artW, artH)
@@ -473,12 +476,42 @@ onMounted(() => {
     vctx.drawImage(fogC, 0, 0, artW, artH, 0, 0, view.width, view.height)
     vctx.drawImage(revC, 0, 0, artW, artH, 0, 0, view.width, view.height)
   }
-  raf = requestAnimationFrame(frame)
+  const frame = (now: number) => {
+    raf = requestAnimationFrame(frame)
+    const dt = Math.min(0.05, (now - prev) / 1000)
+    prev = now
+    render(now, dt)
+  }
+  const still = () => render(performance.now(), 0) // dt 0: draw the scene where it stands, no motion
+  let onScreen = true
+  const sync = () => {
+    const shouldRun = onScreen && !document.hidden && !reduced.matches
+    if (shouldRun && !running) {
+      running = true
+      prev = performance.now() // resume without a huge dt jump
+      raf = requestAnimationFrame(frame)
+    } else if (!shouldRun && running) {
+      running = false
+      cancelAnimationFrame(raf)
+    }
+    if (reduced.matches) still() // motion off: leave a complete scene, never a half-drawn band
+  }
+  const io = new IntersectionObserver((es) => {
+    onScreen = !!es[0]?.isIntersecting
+    sync()
+  })
+  io.observe(host)
+  document.addEventListener('visibilitychange', sync)
+  reduced.addEventListener('change', sync)
+  sync()
 
   onBeforeUnmount(() => {
     cancelAnimationFrame(raf)
     window.clearInterval(leakTimer)
     ro.disconnect()
+    io.disconnect()
+    document.removeEventListener('visibilitychange', sync)
+    reduced.removeEventListener('change', sync)
     host.removeEventListener('pointermove', onMove)
     host.removeEventListener('pointerdown', onDown)
     host.removeEventListener('pointerleave', onLeave)

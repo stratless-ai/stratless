@@ -1,0 +1,5 @@
+# Cloudflare Pages response headers (this file ships in the build output; Pages reads it at serve time).
+# HSTS: browsers pin HTTPS for 180 days after one visit. Deliberately conservative — no
+# includeSubDomains (future subdomains stay unconstrained) and no preload (a one-way door).
+/*
+  Strict-Transport-Security: max-age=15552000

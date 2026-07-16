@@ -2,6 +2,8 @@
 User-agent: *
 Allow: /
 
+Sitemap: https://stratless.com/sitemap.xml
+
 # AI assistants & answer engines are explicitly welcome — this product is built for them.
 User-agent: GPTBot
 Allow: /
