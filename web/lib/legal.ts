@@ -12,6 +12,6 @@ export const legal = {
   jurisdiction: 'Malaysia',
   email: 'sun@stratless.com',
   license: 'MIT',
-  source: 'https://github.com/stratless-ai/stratless-cli',
-  effectiveDate: 'July 14, 2026',
+  source: 'https://github.com/stratless-ai/stratless',
+  effectiveDate: 'July 16, 2026',
 }
