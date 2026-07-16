@@ -69,6 +69,20 @@ export function judge(ex: Exchange, bin: string): Judgment | undefined {
 
 type Cache = Record<string, Judgment>;
 
+/**
+ * How many exchanges have a cached judgment — free and instant, for `status`. Reads the cache file
+ * directly (default, or STRATLESS_CACHE for tests) and, like the loader, treats missing or corrupt as
+ * zero rather than throwing.
+ */
+export function cachedCount(file: string = process.env.STRATLESS_CACHE || CACHE): number {
+  if (!existsSync(file)) return 0;
+  try {
+    return Object.keys(JSON.parse(readFileSync(file, 'utf8'))).length;
+  } catch {
+    return 0;
+  }
+}
+
 function loadCache(): Cache {
   if (!existsSync(CACHE)) return {};
   try {

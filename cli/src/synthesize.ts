@@ -93,8 +93,10 @@ person rejects as more paper. Cover, only where the evidence supports it:
 
 Hard rules:
 - SPECIFIC or nothing. Cite concrete topics and real frequencies where the pile shows them. A sentence
-  that could describe anyone is a failure — cut it.
-- Ground every claim in the observations. Invent nothing. Thin evidence on something → say less, don't pad.
+  that could describe anyone is a failure, so cut it.
+- Ground every claim in the observations. Invent nothing. Thin evidence on something means say less, don't pad.
+- Never use an em dash or en dash (— or –). Use a comma, a colon, a period, or parentheses instead. They
+  read as machine-written and this person treats them as a tell.
 - Second person, addressed to the assistant about the person. Plain text, no markdown headings, under
   250 words. Lead with what matters most.`;
 
@@ -108,22 +110,34 @@ says whether understanding transferred and about what. Tell them, warmly and wit
 - the TREND: what changed between EARLIER and MOST RECENT — where they've grown, where they pivoted
 
 Hard rules:
-- SPECIFIC or nothing — real topics, moments, frequencies. No horoscope, no generic praise.
+- SPECIFIC or nothing: real topics, moments, frequencies. No horoscope, no generic praise.
 - Ground every claim in the observations. Invent nothing. Weight MOST RECENT for who they are now.
+- Never use an em dash or en dash (— or –). Use a comma, a colon, a period, or parentheses instead.
 - Second person ("you"), plain and kind, no markdown headings, under 220 words.`;
+
+/**
+ * Guarantee no em/en dash reaches the artifact. The prompt asks the model to avoid them, but a prompt
+ * is a request, not a promise — this is the promise. Sun reads a stray "—" as an AI wrote this, and
+ * the profile's whole job is to not feel machine-made, so we strip them deterministically, in code.
+ */
+function deDash(s: string): string {
+  return s.replace(/\s*[—–]\s*/g, ', ');
+}
 
 /** The AI's copy — what loads into its context. Returns undefined if the read couldn't be done. */
 export function synthesizeProfile(judgments: Judgment[], corpus: Corpus, bin: string): string | undefined {
   if (!judgments.length) return undefined;
   const input = `${PROFILE_PROMPT}\n\nCORPUS: ${ground(corpus)}\n\n${recencyBlocks(judgments)}`;
-  return runClaude(bin, input);
+  const out = runClaude(bin, input);
+  return out ? deDash(out) : undefined;
 }
 
 /** The human's copy — what the person reads. Returns undefined if the read couldn't be done. */
 export function synthesizeReport(judgments: Judgment[], corpus: Corpus, bin: string): string | undefined {
   if (!judgments.length) return undefined;
   const input = `${REPORT_PROMPT}\n\nCORPUS: ${ground(corpus)}\n\n${recencyBlocks(judgments)}`;
-  return runClaude(bin, input);
+  const out = runClaude(bin, input);
+  return out ? deDash(out) : undefined;
 }
 
 /** The pile's own centre of gravity — the topics that come up most, for grounding + `stats`. */

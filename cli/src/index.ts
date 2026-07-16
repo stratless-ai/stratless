@@ -7,7 +7,8 @@
  *   stratless report    the same picture, written for you to read
  *   stratless update    re-read what's new, rebuild the profile, and load it
  *   stratless stop      turn it off — stop refreshing and unload the profile
- *   stratless stats     raw counts — instant, free, no tokens
+ *   stratless status    stratless's own state: on or off, and what it has cost
+ *   stratless stats     your assistant's activity in a project, in raw counts
  *
  * Runs on your machine. Reads your own history. Nothing leaves.
  */
@@ -16,10 +17,11 @@ import { findAssistant } from './claude.js';
 import { init as doInit, ARCHIVE, stopRefresh } from './init.js';
 import { health } from './canary.js';
 import { loadExchanges, sessionCount } from './exchange.js';
-import { judgeAll } from './judge.js';
+import { judgeAll, cachedCount } from './judge.js';
 import { synthesizeProfile, synthesizeReport, topTopics, type Corpus } from './synthesize.js';
-import { injectProfile, removeProfile } from './sink.js';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { injectProfile, removeProfile, humanMdPath, claudeMdPath } from './sink.js';
+import { readUsage } from './usage.js';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -227,8 +229,8 @@ function update(): void {
 }
 
 /**
- * STOP — the off switch. Removes the after-session refresh hook. Your history, archive, and profile
- * stay exactly as they are; only the automatic updates stop. Being able to shut it up is half of why a
+ * STOP — the off switch. Removes the after-session refresh hook AND unloads the profile from CLAUDE.md;
+ * the HUMAN.md file is left in place (your data). Being able to shut it up completely is half of why a
  * tool that reads everything earns trust.
  */
 function stop(): void {
@@ -243,6 +245,59 @@ function stop(): void {
   if (unloaded) console.log(`  ${C.dim('· profile unloaded from your CLAUDE.md')}`);
   console.log(`  ${C.dim('Your ~/.claude/HUMAN.md is left as-is — delete it yourself if you want it gone.')}`);
   console.log(`  ${C.dim('Run `stratless init` to turn everything back on.')}\n`);
+}
+
+/**
+ * STATUS — stratless's own state, and what it has cost. Distinct from `stats` (which counts your
+ * ASSISTANT's activity in a project): this answers "is stratless on, is my profile loaded, and how
+ * much of my own plan has it spent?" Every line is read locally and for free — it spends nothing.
+ */
+function status(): void {
+  // 1. Is the after-session refresh installed? (the Stop hook we write into settings.json)
+  const settings = join(homedir(), '.claude', 'settings.json');
+  let refresh = false;
+  try {
+    if (existsSync(settings)) {
+      const s = JSON.parse(readFileSync(settings, 'utf8')) as { hooks?: { Stop?: unknown } };
+      refresh = JSON.stringify(s.hooks?.Stop ?? []).includes('stratless update');
+    }
+  } catch {
+    /* an unreadable settings file reads as off, never a crash */
+  }
+
+  // 2. Is the profile actually loaded? HUMAN.md exists AND CLAUDE.md carries our redirect block.
+  const human = humanMdPath();
+  const claude = claudeMdPath();
+  const humanExists = existsSync(human);
+  let redirected = false;
+  try {
+    redirected = existsSync(claude) && readFileSync(claude, 'utf8').includes('<!-- stratless:start -->');
+  } catch {
+    /* treat unreadable as not-loaded */
+  }
+  const loaded = humanExists && redirected;
+
+  // 3. When was it last refreshed? HUMAN.md's mtime is the honest answer.
+  let last = 'never';
+  try {
+    if (humanExists) last = statSync(human).mtime.toISOString().slice(0, 10);
+  } catch {
+    /* leave as "never" */
+  }
+
+  const judged = cachedCount();
+  const u = readUsage();
+  const cost = `$${u.costUsd.toFixed(2)}`;
+  const onOwn = `across ${u.calls.toLocaleString()} read${u.calls === 1 ? '' : 's'}, on your own claude`;
+
+  console.log(`\n  ${C.b('stratless status')}\n`);
+  console.log(`    after-session refresh   ${refresh ? C.ok('on') : C.dim('off')}`);
+  console.log(`    profile loaded          ${loaded ? C.ok('yes') : C.dim('no')}${humanExists ? `  ${C.dim(human)}` : ''}`);
+  console.log(`    exchanges judged        ${C.b(judged.toLocaleString())}`);
+  console.log(`    last refresh            ${C.dim(last)}`);
+  console.log(`    spent so far            ${C.b(cost)}  ${C.dim(onOwn)}`);
+  if (!refresh) console.log(`\n  ${C.dim('Run `stratless init` to turn the after-session refresh on.')}`);
+  console.log('');
 }
 
 /** The installed version, read from the package.json that ships next to dist/. */
@@ -287,7 +342,8 @@ function main(): void {
     ${C.b('stratless report')}     ${C.dim('the same picture, written for you to read')}
     ${C.b('stratless update')}     ${C.dim('re-read what is new, rebuild the profile, and load it')}
     ${C.b('stratless stop')}       ${C.dim('turn it off — stop refreshing and unload the profile')}
-    ${C.b('stratless stats')}      ${C.dim('raw counts — instant, free, no tokens')}
+    ${C.b('stratless status')}     ${C.dim("stratless's own state: on or off, and what it has cost")}
+    ${C.b('stratless stats')}      ${C.dim("your assistant's activity in a project: raw counts, free")}
 
   ${C.dim('Runs on your machine. Reads your own history. Nothing leaves.')}
 `);
@@ -295,6 +351,7 @@ function main(): void {
   }
 
   if (cmd === 'stats') return stats(cwd);
+  if (cmd === 'status') return status();
   if (cmd === 'profile') return profiler('profile');
   if (cmd === 'report') return profiler('report');
   if (cmd === 'update') return update();

@@ -2,10 +2,9 @@ name: web
 
 # stratless.com → Cloudflare Pages (Direct Upload; the project is `stratless`).
 #
-# ⚠️ This workflow has NEVER SUCCEEDED. The repo has no Cloudflare secrets, so every run dies on
-# an empty CLOUDFLARE_API_TOKEN — and the site has been deployed BY HAND from a laptop instead.
-# That means nothing verifies that a green `main` equals what is on the domain. Set the two
-# secrets and this becomes the only way the site ships.
+# This is the deploy path: a push to main that touches web/ builds the site and ships it here, and the
+# post-deploy smoke test (below) fails the run if the live domain doesn't answer, so a green main equals
+# what is on the domain. Requires two repo secrets: CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID.
 on:
   push:
     branches: [main]
@@ -24,7 +23,7 @@ jobs:
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with: { version: 9.15.0 }
       - uses: actions/setup-node@v6
         with: { node-version: 22, cache: pnpm }
