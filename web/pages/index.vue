@@ -263,7 +263,7 @@ And they gate real decisions on verification.
      (.nav-clear, layouts/default.vue). padding-top hands the content those 58px back.
      The nav sits at z-index 10 and the hero at auto, so the logo + links stay above the fog. */
   margin-top: -58px;
-  padding-top: calc(3.25rem + 58px);
+  padding-top: calc(1rem + 58px);
   /* The fog's stand-in, painted from static CSS the moment the HTML parses. The canvas needs
      hydration + two 512² noise tiles (~1s cold) and is transparent until then — without this,
      bare paper shows through the header strip and the fog visibly pops in. Same ramp as
@@ -282,7 +282,13 @@ And they gate real decisions on verification.
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1.4rem;
+  gap: 0.85rem;
+}
+/* the hero eyebrow rides the flex gap, so drop its default <p> 1rem bottom margin and
+   tighten the inherited 1.62 line-height — otherwise it carries too much top/bottom air. */
+.hero-inner .eyebrow {
+  margin: 0;
+  line-height: 1.2;
 }
 h1 {
   font-size: clamp(2.1rem, 5.2vw, 3.6rem);
@@ -294,8 +300,9 @@ h1 {
   max-width: 34rem;
   color: var(--ink-2);
   font-family: var(--font-read);
+  font-size: 0.9rem;
   line-height: 1.6;
-  margin: 0;
+  margin: 0.666rem;
 }
 .cta-row {
   display: flex;
