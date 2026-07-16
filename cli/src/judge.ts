@@ -48,19 +48,29 @@ How to read it:
 Output EXACTLY one line, no preamble, no markdown, in this shape:
 <transferred|partial|no|none> — <topic> — <what the person did, in a few words>`;
 
-/** Judge a single exchange. Returns undefined if the assistant couldn't answer — silence over guess. */
-export function judge(ex: Exchange, bin: string): Judgment | undefined {
-  const input = [
+/**
+ * The judge's view of one exchange. The REACTION answers the END of what the assistant said, so a
+ * long `said` keeps its TAIL — measured 2026-07-16: 83% of real turns exceed this view, and their
+ * heads are preamble ("Looking now…"), not the conclusion the person actually reacted to. The `…`
+ * marks the cut so the model knows it is reading mid-text. Exported for tests.
+ */
+export function judgeInput(ex: Exchange): string {
+  const flat = (s: string) => s.replace(/\s+/g, ' ');
+  const said = flat(ex.said);
+  return [
     PROMPT,
     '',
-    `PERSON ASKED: ${ex.prompt.replace(/\s+/g, ' ').slice(0, 800)}`,
+    `PERSON ASKED: ${flat(ex.prompt).slice(0, 800)}`,
     '',
-    `ASSISTANT SAID: ${ex.said.replace(/\s+/g, ' ').slice(0, 1500)}`,
+    `ASSISTANT SAID: ${said.length > 1500 ? `…${said.slice(-1500)}` : said}`,
     '',
-    `PERSON REACTED: ${ex.reaction.replace(/\s+/g, ' ').slice(0, 800)}`,
+    `PERSON REACTED: ${flat(ex.reaction).slice(0, 800)}`,
   ].join('\n');
+}
 
-  const raw = runClaude(bin, input, 'haiku');
+/** Judge a single exchange. Returns undefined if the assistant couldn't answer — silence over guess. */
+export function judge(ex: Exchange, bin: string): Judgment | undefined {
+  const raw = runClaude(bin, judgeInput(ex), 'haiku', 'judge');
   if (!raw) return undefined;
   const line = raw.split('\n').find((l) => l.trim())?.trim().slice(0, 300);
   if (!line) return undefined;

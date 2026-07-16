@@ -69,6 +69,14 @@ export function injectProfile(
   writeFileSync(humanTarget, human);
 
   // 2. Point CLAUDE.md at it, inside our managed block — the person's own content is never touched.
+  upsertBlock(humanTarget, claudeTarget);
+
+  return { humanMd: humanTarget, claudeMd: claudeTarget };
+}
+
+/** Upsert our managed block in CLAUDE.md so it @imports HUMAN.md. Only ever touches what's between
+ *  the markers; everything around it is the person's and is left exactly as it was. */
+function upsertBlock(humanTarget: string, claudeTarget: string): void {
   const block = [
     START,
     '# Who you are working with — managed by stratless. Edit HUMAN.md, not here.',
@@ -88,8 +96,17 @@ export function injectProfile(
   }
   mkdirSync(dirname(claudeTarget), { recursive: true });
   writeFileSync(claudeTarget, doc);
+}
 
-  return { humanMd: humanTarget, claudeMd: claudeTarget };
+/**
+ * The cheap half of the load: point CLAUDE.md at an EXISTING HUMAN.md without rewriting the profile.
+ * A gated `update` (no synthesis due) uses this to guarantee the profile stays loaded — e.g. after a
+ * `stop` — without spending a fresh build. Returns true iff a HUMAN.md existed to point at.
+ */
+export function ensureLoaded(humanTarget: string = humanMdPath(), claudeTarget: string = claudeMdPath()): boolean {
+  if (!existsSync(humanTarget)) return false;
+  upsertBlock(humanTarget, claudeTarget);
+  return true;
 }
 
 /**

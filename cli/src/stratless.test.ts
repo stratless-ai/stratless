@@ -13,10 +13,13 @@ import { test, before, after } from 'node:test';
 
 import { parseSession } from './transcript.js';
 import { parseExchanges, loadRecentExchanges } from './exchange.js';
-import { injectProfile, removeProfile } from './sink.js';
+import { injectProfile, removeProfile, ensureLoaded } from './sink.js';
+import { readState, writeState, synthesisDue } from './state.js';
 import { readUsage, recordUsage } from './usage.js';
-import { cachedCount } from './judge.js';
-import { installStopHook } from './init.js';
+import { parseJsonResult } from './claude.js';
+import { hasSignal } from './synthesize.js';
+import { cachedCount, judgeInput } from './judge.js';
+import { installStopHook, readSettings } from './init.js';
 
 let dir: string;
 
@@ -177,6 +180,38 @@ test('subagent turns are not the human conversation', () => {
   assert.equal(parseExchanges(p).length, 0, 'a sidechain turn is not the person talking');
 });
 
+// The tail rule (0.2.4): the person reacts to the END of the assistant's turn, but a long turn used
+// to be truncated from the head — so the judge read the preamble and then a reaction to a conclusion
+// it never saw. Measured 2026-07-16: 83% of real turns exceeded the judge's view, 21% the parse cap.
+
+test('a long assistant turn keeps its TAIL — the reaction pairs with the end of what was said', () => {
+  const p = writeTranscript(
+    'longsaid.jsonl',
+    [u('explain the whole design'), a(`THE-OPENING ${'y'.repeat(4100)} THE-CONCLUSION`), u('got it')].join('\n'),
+  );
+  const ex = parseExchanges(p);
+  assert.equal(ex.length, 1);
+  assert.ok(ex[0].said.includes('THE-CONCLUSION'), 'the end survives the cap');
+  assert.ok(!ex[0].said.includes('THE-OPENING'), 'the head is what gets cut');
+  assert.ok(ex[0].said.length <= 4000, 'the cap itself still holds');
+});
+
+test('the judge reads the TAIL of a long turn, with the cut marked', () => {
+  const ex = {
+    prompt: 'why a queue?',
+    said: `PREAMBLE ${'x'.repeat(2000)} CONCLUSION`,
+    reaction: 'ok makes sense',
+    ts: '2026-07-01T10:00:00Z',
+    session: 's',
+    hash: 'h',
+  };
+  const input = judgeInput(ex);
+  assert.ok(input.includes('CONCLUSION'), 'the conclusion the person reacted to survives');
+  assert.ok(!input.includes('PREAMBLE'), 'the preamble is what gets cut');
+  assert.ok(input.includes('…'), 'truncation is marked so the model knows it reads mid-text');
+  assert.ok(input.includes('why a queue?'), 'the prompt keeps its head');
+});
+
 // ── sink: the load step ─────────────────────────────────────────────────────────────────────
 //
 // The load writes the profile to the canonical HUMAN.md and points CLAUDE.md at it with an @import.
@@ -253,15 +288,74 @@ test('removeProfile is a safe no-op with no block (or no file)', () => {
   assert.equal(removeProfile(join(dir, 'does-not-exist.md')), false, 'missing file is a no-op');
 });
 
+// ── the synthesis gate: sessions accumulate, the profile consumes in batches ──────────────────
+//
+// The synthesis is the expensive read (~32 judge calls' worth, measured 2026-07-16). The gate is
+// what keeps the after-session hook cheap: due on K new judgments, on the staleness backstop, on a
+// cache reset, or on first build. Missing/corrupt state fails OPEN — one extra synthesis, never a
+// stuck-stale profile.
+
+test('synthesisDue: first build, K accumulation, the backstop, and cache reset', () => {
+  const now = new Date('2026-07-16T12:00:00Z');
+  assert.equal(synthesisDue({}, 40, now).due, true, 'never synthesized = first build = due');
+
+  const fresh = { lastSynthesisAt: '2026-07-15T12:00:00Z', judgmentsAtLastSynthesis: 100 };
+  assert.equal(synthesisDue(fresh, 110, now).due, false, '10 of 25 accumulated — not yet');
+  assert.equal(synthesisDue(fresh, 110, now).newSince, 10, 'progress is reported honestly');
+  assert.equal(synthesisDue(fresh, 125, now).due, true, 'K reached = due');
+
+  const stale = { lastSynthesisAt: '2026-07-01T12:00:00Z', judgmentsAtLastSynthesis: 100 };
+  assert.equal(synthesisDue(stale, 101, now).due, true, 'past the backstop + anything new = due');
+  assert.equal(synthesisDue(stale, 100, now).due, false, 'stale but NOTHING new = same pile, same profile, skip');
+
+  assert.equal(synthesisDue(fresh, 50, now).due, true, 'count went backwards = cache was reset = rebuild');
+});
+
+test('state: missing or corrupt reads as never-synthesized (fails open), and round-trips', () => {
+  const f = join(dir, 'state.json');
+  assert.deepEqual(readState(f), {}, 'missing = never synthesized');
+  writeFileSync(f, 'garbage {');
+  assert.deepEqual(readState(f), {}, 'corrupt = never synthesized, never a throw');
+  writeState({ lastSynthesisAt: '2026-07-16T12:00:00Z', judgmentsAtLastSynthesis: 190 }, f);
+  const s = readState(f);
+  assert.equal(s.lastSynthesisAt, '2026-07-16T12:00:00Z');
+  assert.equal(s.judgmentsAtLastSynthesis, 190);
+});
+
+test('ensureLoaded re-points CLAUDE.md at an existing HUMAN.md without rewriting it', () => {
+  const humanMd = join(dir, 'HUMAN-ens.md');
+  const claudeMd = join(dir, 'CLAUDE-ens.md');
+  injectProfile('the profile', humanMd, claudeMd);
+  removeProfile(claudeMd); // `stop` unloads
+  const before = readFileSync(humanMd, 'utf8');
+
+  assert.equal(ensureLoaded(humanMd, claudeMd), true, 'an existing HUMAN.md can be re-pointed');
+  assert.ok(readFileSync(claudeMd, 'utf8').includes('stratless:start'), 'the block is back');
+  assert.equal(readFileSync(humanMd, 'utf8'), before, 'HUMAN.md untouched — no synthesis spent');
+
+  assert.equal(ensureLoaded(join(dir, 'HUMAN-missing.md'), claudeMd), false, 'no HUMAN.md = nothing to load');
+});
+
 // ── usage + status: the "least wasteful" claim must be checkable ──────────────────────────────
 //
 // `status` shows what the borrowed `claude` has cost. If the tally lied — over-counted, or crashed
 // on a corrupt file mid-judge — the one number that backs the whole "least wasteful" pitch is worse
 // than useless. Recording must accumulate honestly and must NEVER throw into a judge call.
 
+const ZERO_USAGE = {
+  calls: 0,
+  costUsd: 0,
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheCreationTokens: 0,
+  cacheReadTokens: 0,
+  byFeature: {},
+  byModel: {},
+};
+
 test('recordUsage accumulates calls, cost, and tokens; a missing file reads as zero', () => {
   const f = join(dir, 'usage.json');
-  assert.deepEqual(readUsage(f), { calls: 0, costUsd: 0, inputTokens: 0, outputTokens: 0 }, 'missing = zero');
+  assert.deepEqual(readUsage(f), ZERO_USAGE, 'missing = zero');
   recordUsage({ costUsd: 0.01, inputTokens: 100, outputTokens: 20 }, f);
   recordUsage({ costUsd: 0.02, inputTokens: 50, outputTokens: 10 }, f);
   const t = readUsage(f);
@@ -274,7 +368,80 @@ test('recordUsage accumulates calls, cost, and tokens; a missing file reads as z
 test('readUsage on a corrupt file reads as zero and never throws', () => {
   const f = join(dir, 'usage-corrupt.json');
   writeFileSync(f, 'not json {');
-  assert.deepEqual(readUsage(f), { calls: 0, costUsd: 0, inputTokens: 0, outputTokens: 0 });
+  assert.deepEqual(readUsage(f), ZERO_USAGE);
+});
+
+// v2 (0.2.4): the meter must count the WHOLE story. The harness overhead every borrowed call
+// carries (~17–24k tokens) arrives as cache tokens — v1 dropped them, so the ledger showed 484
+// input tokens where reality was over a million. And without the judge/synthesis split, the
+// discovery that one synthesis costs ~32 judge calls was invisible to our own meter.
+
+test('the meter counts cache tokens and keeps per-feature and per-model buckets', () => {
+  const f = join(dir, 'usage-v2.json');
+  recordUsage(
+    {
+      costUsd: 0.02,
+      inputTokens: 10,
+      cacheCreationTokens: 7000,
+      cacheReadTokens: 17000,
+      feature: 'judge',
+      byModel: { 'claude-haiku-4-5': { costUsd: 0.02, inputTokens: 10, cacheCreationTokens: 7000, cacheReadTokens: 17000 } },
+    },
+    f,
+  );
+  recordUsage(
+    {
+      costUsd: 0.12,
+      outputTokens: 5000,
+      feature: 'synthesis',
+      byModel: { 'claude-sonnet-5': { costUsd: 0.12, outputTokens: 5000 } },
+    },
+    f,
+  );
+  const t = readUsage(f);
+  assert.equal(t.cacheCreationTokens, 7000, 'cache-creation counted — the harness overhead is real consumption');
+  assert.equal(t.cacheReadTokens, 17000, 'cache-read counted');
+  assert.equal(t.byFeature.judge.calls, 1, 'the judge bucket exists');
+  assert.ok(Math.abs(t.byFeature.synthesis.costUsd - 0.12) < 1e-9, 'the judge/synthesis split is visible');
+  assert.equal(t.byModel['claude-haiku-4-5'].cacheReadTokens, 17000, 'per-model truth survives');
+  assert.equal(t.byModel['claude-sonnet-5'].outputTokens, 5000);
+});
+
+test('a v1 usage.json (0.2.3) upgrades in place — the old tally is never lost', () => {
+  const f = join(dir, 'usage-v1.json');
+  writeFileSync(f, JSON.stringify({ calls: 50, costUsd: 2.06, inputTokens: 484, outputTokens: 53170 }));
+  const t = readUsage(f);
+  assert.equal(t.calls, 50, 'v1 totals survive');
+  assert.equal(t.cacheCreationTokens, 0, 'missing v1 fields read as zero, never NaN');
+  assert.deepEqual(t.byFeature, {}, 'no buckets yet');
+  recordUsage({ costUsd: 0.02, cacheReadTokens: 17000, feature: 'judge' }, f);
+  const t2 = readUsage(f);
+  assert.equal(t2.calls, 51, 'recording on top of a v1 file just works');
+  assert.equal(t2.byFeature.judge.cacheReadTokens, 17000);
+});
+
+test('parseJsonResult reads the full receipt: cache tokens and the per-model truth', () => {
+  // The shape below is a real `claude -p --output-format json` receipt (measured 2026-07-16).
+  const raw = JSON.stringify({
+    result: 'transferred — batching — acknowledged and moved on',
+    total_cost_usd: 0.0195,
+    usage: { input_tokens: 10, output_tokens: 272, cache_creation_input_tokens: 7727, cache_read_input_tokens: 17370 },
+    modelUsage: {
+      'claude-haiku-4-5-20251001': {
+        inputTokens: 923,
+        outputTokens: 286,
+        cacheReadInputTokens: 17370,
+        cacheCreationInputTokens: 7727,
+        costUSD: 0.019544,
+      },
+    },
+  });
+  const p = parseJsonResult(raw);
+  assert.ok(p, 'a well-formed receipt parses');
+  assert.equal(p.usage.cacheCreationTokens, 7727, 'cache-creation extracted — v1 dropped this');
+  assert.equal(p.usage.cacheReadTokens, 17370, 'cache-read extracted');
+  assert.equal(p.usage.byModel?.['claude-haiku-4-5-20251001']?.cacheReadTokens, 17370, 'the model that ACTUALLY ran');
+  assert.ok(Math.abs((p.usage.byModel?.['claude-haiku-4-5-20251001']?.costUsd ?? 0) - 0.019544) < 1e-9);
 });
 
 test('recordUsage tolerates missing fields — a JSON payload without usage still counts the call', () => {
@@ -283,6 +450,15 @@ test('recordUsage tolerates missing fields — a JSON payload without usage stil
   const t = readUsage(f);
   assert.equal(t.calls, 1);
   assert.equal(t.costUsd, 0);
+});
+
+test('`none` judgments carry no signal and never reach the writer', () => {
+  const j = (line: string) => ({ hash: 'x', ts: '2026-07-01T10:00:00Z', session: 's', line });
+  assert.equal(hasSignal(j('none — cost logistics — asked about pricing')), false, 'a none line is filtered');
+  assert.equal(hasSignal(j('None — a thank-you — said thanks')), false, 'case-insensitive');
+  assert.equal(hasSignal(j('transferred — the deploy step — moved on immediately')), true);
+  assert.equal(hasSignal(j('no — JWT expiry — re-asked the same question')), true, '`no` IS signal — it did not land');
+  assert.equal(hasSignal(j('partial — queues — accepted but pivoted')), true);
 });
 
 test('cachedCount counts judgments, and reads missing or corrupt as zero', () => {
@@ -349,5 +525,29 @@ test('installStopHook adds the refresh once, idempotently, in the form `status`/
   assert.ok(JSON.stringify(settings.hooks?.Stop).includes('stratless update'), 'the hook runs `stratless update`');
   assert.equal(installStopHook(settings), false, 'second call is a no-op — never a duplicate');
   assert.equal(settings.hooks?.Stop?.length, 1, 'exactly one Stop group, ever');
+});
+
+// ── a hand-edited settings.json must never crash init, and must NEVER be silently overwritten ──
+
+test('readSettings: a malformed settings.json reads as not-ok, never a throw', () => {
+  const p = join(dir, 'settings-broken.json');
+  writeFileSync(p, '{ "cleanupPeriodDays": 30, }'); // the classic hand-edit: a trailing comma
+  const read = readSettings(p);
+  assert.equal(read.ok, false, 'malformed JSON is reported, not thrown');
+  assert.equal(read.settings, undefined, 'no half-parsed settings to accidentally write back');
+});
+
+test('readSettings: a missing settings.json is ok and empty — first run on a fresh machine', () => {
+  const read = readSettings(join(dir, 'settings-nowhere.json'));
+  assert.equal(read.ok, true);
+  assert.deepEqual(read.settings, {});
+});
+
+test('readSettings: a valid settings.json comes back parsed, untouched', () => {
+  const p = join(dir, 'settings-good.json');
+  writeFileSync(p, JSON.stringify({ cleanupPeriodDays: 30, hooks: { Stop: [] } }));
+  const read = readSettings(p);
+  assert.equal(read.ok, true);
+  assert.equal(read.settings.cleanupPeriodDays, 30);
 });
 

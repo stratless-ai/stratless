@@ -14,11 +14,15 @@ npx stratless init
 No account. No API key. No cloud. It reads transcripts already on your disk and borrows the
 `claude` you already have to read them. **Nothing leaves your machine.**
 
+You need three things, and you probably have all of them: **Claude Code** installed and signed in
+(the `claude` command), **Node 18+**, and a few sessions of history on this machine. That's it.
+
 ---
 
 ## What it builds
 
-Run `stratless profile` and it hands your assistant something like this:
+Run `stratless profile` and it shows you the model it has built, the one `stratless update` hands
+to your assistant:
 
 ```
 WHO YOU'RE WORKING WITH                    (stratless · 84 sessions · 3,756 exchanges)
@@ -42,9 +46,13 @@ as that history grows.
 
 ## The commands
 
+One note first: `npx` runs stratless without installing it, so after `npx stratless init` the bare
+`stratless` won't be on your PATH. Either install it properly, `npm install -g stratless`, or keep
+prefixing every command below with `npx `. Both work.
+
 ```
 stratless init       turn it on: keep your history, and start reading it
-stratless profile    the model of you your assistant should load
+stratless profile    see the model of you (profile looks; update loads)
 stratless report     the same picture, written for you to read
 stratless update     re-read what's new, rebuild the profile, and load it into your assistant
 stratless stop       turn it off: stop refreshing and unload the profile
@@ -68,10 +76,10 @@ No model of ours. No server. No training. No inference bill.
    and asks one question: *did understanding transfer, and about what?* One line back, **cached
    forever**, so each exchange is read exactly once, ever.
 3. **Synthesize.** It reads the whole stack of those judgments and writes the profile above.
-4. **Load.** It writes the profile to `~/.claude/HUMAN.md` and points your assistant's own config at it,
-   so your next session starts already knowing you. Run `stratless update` to refresh it, or
-   `stratless init --auto` to have it refresh automatically after each session. `stratless stop` turns
-   that off and unloads it.
+4. **Load.** `stratless update` writes the profile to `~/.claude/HUMAN.md` and points your assistant's
+   own config at it, so your next session starts already knowing you. Run it again any time to refresh,
+   or `stratless init --auto` to have it refresh automatically after each session. `stratless stop`
+   turns that off and unloads it.
 
 It spends your own plan's tokens, never a separate bill (`stratless status` shows the running total).
 The first run reads a recent window of your history; after that it only ever reads what's new. If the assistant

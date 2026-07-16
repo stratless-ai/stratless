@@ -77,7 +77,7 @@ export function health(cwd: string, edits: Edit[]): Health {
         `single edit out of them. The log format has changed.\n\n` +
         `  stratless will NOT guess. Every answer would be "you wrote this yourself" — and that would be a lie.\n\n` +
         `  Please open an issue. It needs no code from you:\n` +
-        `  https://github.com/stratless-ai/stratless-cli/issues/new?title=format+drift`,
+        `  https://github.com/stratless-ai/stratless/issues/new?title=format+drift`,
     };
   }
 
@@ -91,7 +91,7 @@ export function health(cwd: string, edits: Edit[]): Health {
       reason:
         `Your assistant used write tools stratless doesn't know: ${[...unknown].join(', ')}.\n` +
         `  Edits made with them are INVISIBLE here — lines they wrote will be reported as yours.\n` +
-        `  https://github.com/stratless-ai/stratless-cli/issues/new?title=unknown+tool+${[...unknown][0]}`,
+        `  https://github.com/stratless-ai/stratless/issues/new?title=unknown+tool+${[...unknown][0]}`,
     };
   }
 
