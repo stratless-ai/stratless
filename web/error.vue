@@ -23,7 +23,7 @@ useHead({ title: `${props.error?.statusCode ?? 'Error'} — stratless` })
         <Logo :height="24" />
         <nav class="nav-right">
           <NuxtLink to="/docs">Docs</NuxtLink>
-          <a href="https://github.com/stratless-ai/stratless-cli" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/stratless-ai/stratless" target="_blank" rel="noopener">GitHub</a>
         </nav>
       </div>
     </header>

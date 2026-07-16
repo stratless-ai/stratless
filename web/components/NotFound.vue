@@ -14,7 +14,7 @@
  */
 withDefaults(defineProps<{ code?: number | string; message?: string }>(), { code: 404 })
 
-const GITHUB = 'https://github.com/stratless-ai/stratless-cli'
+const GITHUB = 'https://github.com/stratless-ai/stratless'
 </script>
 
 <template>

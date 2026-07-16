@@ -14,7 +14,7 @@ const version = useRuntimeConfig().public.version
       <Logo :height="24" />
       <nav class="footer-links">
         <NuxtLink to="/docs">Docs</NuxtLink>
-        <a href="https://github.com/stratless-ai/stratless-cli" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/stratless-ai/stratless" target="_blank" rel="noopener">GitHub</a>
         <NuxtLink to="/privacy">Privacy</NuxtLink>
         <NuxtLink to="/terms">Terms</NuxtLink>
         <a href="mailto:sun@stratless.com">sun@stratless.com</a>
