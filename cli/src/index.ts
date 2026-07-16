@@ -22,6 +22,7 @@ import {
   synthesizeProfile,
   synthesizeReport,
   synthesizeProfileFromPatterns,
+  synthesizeReportFromPatterns,
   topTopics,
   hasSignal,
   type Corpus,
@@ -143,15 +144,20 @@ function profileLoaded(): boolean {
 }
 
 /**
- * Build the AI's copy — from the mined patterns when they exist (0.3.0: the writer as spokesperson,
- * reasoning FROM audited claims), falling back to the flat pile read before the first mine. The
- * numbers-lint is enforced here: a profile with an invented numeral is REFUSED, not loaded — a
- * wrong frequency is a lie wearing precision, and silence beats it.
+ * Build either rendering — from the mined patterns when they exist (the writer as spokesperson,
+ * reasoning FROM audited claims; 0.3.1: `report` joins the pattern era and gets the trajectory),
+ * falling back to the flat pile read before the first mine. The numbers-lint is enforced here for
+ * BOTH audiences: a rendering with an invented numeral is REFUSED, not delivered — a wrong
+ * frequency is a lie wearing precision, and silence beats it.
  */
-function buildProfileText(signal: Judgment[], corpus: Corpus, bin: string): string | undefined {
+function buildRenderedText(kind: 'profile' | 'report', signal: Judgment[], corpus: Corpus, bin: string): string | undefined {
   const store = loadPatterns();
-  if (!store.patterns.length) return synthesizeProfile(signal, corpus, bin); // pre-miner fallback
-  const built = synthesizeProfileFromPatterns(store.patterns, signal.slice(-25), corpus, bin);
+  if (!store.patterns.length) {
+    // pre-miner fallback — the 0.2.x flat read
+    return kind === 'profile' ? synthesizeProfile(signal, corpus, bin) : synthesizeReport(signal, corpus, bin);
+  }
+  const synth = kind === 'profile' ? synthesizeProfileFromPatterns : synthesizeReportFromPatterns;
+  const built = synth(store.patterns, signal.slice(-25), corpus, bin);
   if (built.invented?.length) {
     console.error(`\n  ${C.bad('Refused: the writer invented numbers.')} ${C.dim(`(${built.invented.join(', ')})`)}`);
     console.error(`  ${C.dim('Nothing was written or loaded — this build is discarded. Try again with `' + hint('stratless update --now') + '`.')}\n`);
@@ -168,7 +174,7 @@ function buildProfileText(signal: Judgment[], corpus: Corpus, bin: string): stri
  * config — so `profile` ends by saying, honestly, whether a profile is loaded and how to load one.
  * Same pipeline underneath — judge every exchange once (cached forever), synthesize the pile once.
  */
-function profiler(kind: 'profile' | 'report'): void {
+async function profiler(kind: 'profile' | 'report'): Promise<void> {
   const bin = findAssistant();
   if (!bin) {
     console.error(`\n  ${C.bad('stratless needs your assistant to read your history.')}`);
@@ -189,7 +195,7 @@ function profiler(kind: 'profile' | 'report'): void {
   // computed in code, costs nothing, never part of the cache identity.
   const aperture = fitAperture(window);
   process.stderr.write(`\n  ${C.dim(`reading ${window.length.toLocaleString()} recent exchanges across ${sessions} sessions…`)}\n`);
-  const run = judgeAll([...window].reverse(), bin, {
+  const run = await judgeAll([...window].reverse(), bin, {
     limit: judgeLimit(),
     aperture,
     onProgress: (done, total) => process.stderr.write(`\r  ${C.dim(`judging ${done}/${total} new…`)}   `),
@@ -212,10 +218,7 @@ function profiler(kind: 'profile' | 'report'): void {
     to: window[window.length - 1].ts.slice(0, 10),
   };
 
-  const text =
-    kind === 'profile'
-      ? buildProfileText(signal, corpus, bin)
-      : synthesizeReport(signal, corpus, bin);
+  const text = buildRenderedText(kind, signal, corpus, bin);
 
   if (!text) {
     console.error(`\n  ${C.bad(`Could not build your ${kind}.`)} ${C.dim('The assistant returned nothing — silence beats a guess.')}\n`);
@@ -263,7 +266,7 @@ function profiler(kind: 'profile' | 'report'): void {
  * existing profile is loaded (covers `update` after `stop`) — the skip is invisible, only the cost
  * is missing.
  */
-function update(rest: string[]): void {
+async function update(rest: string[]): Promise<void> {
   const force = rest.includes('--now');
   const bin = findAssistant();
   if (!bin) {
@@ -283,7 +286,7 @@ function update(rest: string[]): void {
   // computed in code, costs nothing, never part of the cache identity.
   const aperture = fitAperture(window);
   process.stderr.write(`\n  ${C.dim(`reading ${window.length.toLocaleString()} recent exchanges across ${sessions} sessions…`)}\n`);
-  const run = judgeAll([...window].reverse(), bin, {
+  const run = await judgeAll([...window].reverse(), bin, {
     limit: judgeLimit(),
     aperture,
     onProgress: (done, total) => process.stderr.write(`\r  ${C.dim(`judging ${done}/${total} new…`)}   `),
@@ -328,10 +331,10 @@ function update(rest: string[]): void {
   const pile = allJudgments();
   process.stderr.write(`  ${C.dim('mining patterns…')}   `);
   const mined = mine(pile, bin);
-  const audited = auditPatterns(pile, bin);
+  const audited = await auditPatterns(pile, bin);
   process.stderr.write(`\r${' '.repeat(24)}\r`);
 
-  const text = buildProfileText(signal, corpus, bin);
+  const text = buildRenderedText('profile', signal, corpus, bin);
   if (!text) {
     console.error(`\n  ${C.bad('Could not build your profile.')} ${C.dim('The assistant returned nothing — silence beats a guess.')}\n`);
     process.exit(1);
@@ -501,7 +504,7 @@ function version(): string {
   }
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const cmd = args[0];
   const cwd = process.cwd();
@@ -576,4 +579,4 @@ function main(): void {
   process.exit(1);
 }
 
-main();
+void main();

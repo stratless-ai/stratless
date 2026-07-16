@@ -61,6 +61,7 @@ export function injectProfile(
   const human = [
     '# Who you are working with',
     '# (managed by stratless — do not edit by hand; refreshed by `stratless update`)',
+    '<!-- humanmd/v1 -->', // the person-layer protocol's schema marker (0.3.1: sectioned form)
     '',
     text.trim(),
     '',

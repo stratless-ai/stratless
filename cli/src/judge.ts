@@ -22,6 +22,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { runClaude } from './claude.js';
+import { runStreamBatch } from './stream.js';
 import type { Exchange } from './exchange.js';
 
 const CACHE = join(homedir(), '.stratless', 'judgments.json');
@@ -60,11 +61,17 @@ export function currentJudgment(j: Partial<Judgment> | undefined): j is Judgment
   return !!j && j.v === PIPELINE_V && typeof j.verdict === 'string' && VERDICTS.has(j.verdict);
 }
 
-const PROMPT = `You are studying ONE exchange between a person and their AI coding assistant. Your
-job is to learn about the PERSON, not to grade the assistant's answer.
+/**
+ * The judge's RULES — the instruction half, split from the per-turn exchange (0.3.1). In streamed
+ * sessions this rides `--append-system-prompt` (sent once, cached); in the one-shot fallback it is
+ * simply prepended. Worded per-message so one set of rules governs a whole streamed session.
+ */
+export const JUDGE_RULES = `You are studying exchanges between a person and their AI coding
+assistant, ONE per message. Your job is to learn about the PERSON, not to grade the assistant's
+answer.
 
-You are given what the person asked, what the assistant said back, and how the person reacted. From
-the REACTION, judge one thing:
+Each message gives what the person asked, what the assistant said back, and how the person reacted.
+From the REACTION, judge one thing:
 
   did understanding transfer, and about WHAT?
 
@@ -80,7 +87,7 @@ How to read it:
 - If the reaction carries no signal about understanding (pure logistics, a thank-you), the verdict
   is "none" — but still describe the behavior; even "ok, commit" shows how the person works.
 
-Output EXACTLY one line of JSON, no preamble, no markdown, no code fence:
+Reply to EACH message with EXACTLY one line of JSON, no preamble, no markdown, no code fence:
 {"verdict":"transferred|partial|no|none","topic":"<concrete topic>","behavior":"<what the person did>"}`;
 
 /**
@@ -145,17 +152,35 @@ function view(s: string, budget: number, headShare: number): string {
   return `${flat.slice(0, head)} … ${flat.slice(-tail)}`;
 }
 
-/** The judge's view of one exchange, under a fitted aperture. Exported for tests. */
-export function judgeInput(ex: Exchange, aperture: Aperture = DEFAULT_APERTURE): string {
+/** The per-turn exchange rendering — a streamed turn carries ONLY this (rules ride the system
+ *  prompt, sent once per session). Exported for tests. */
+export function judgeTurnBody(ex: Exchange, aperture: Aperture = DEFAULT_APERTURE): string {
   return [
-    PROMPT,
-    '',
     `PERSON ASKED: ${view(ex.prompt, aperture.prompt, 0.7)}`,
     '',
     `ASSISTANT SAID: ${view(ex.said, aperture.said, 0.2)}`,
     '',
     `PERSON REACTED: ${view(ex.reaction, aperture.reaction, 1)}`,
   ].join('\n');
+}
+
+/** One-shot judge input — the per-call fallback: rules + exchange in a single prompt. */
+export function judgeInput(ex: Exchange, aperture: Aperture = DEFAULT_APERTURE): string {
+  return [JUDGE_RULES, '', judgeTurnBody(ex, aperture)].join('\n');
+}
+
+/** Build a Judgment from a raw model reply — shared by the streamed and one-shot paths. */
+function toJudgment(ex: Exchange, raw: string): Judgment | undefined {
+  const parsed = parseJudgeOutput(raw);
+  if (!parsed) return undefined;
+  return {
+    hash: ex.hash,
+    ts: ex.ts,
+    session: ex.session,
+    v: PIPELINE_V,
+    ...parsed,
+    line: `${parsed.verdict} — ${parsed.topic} — ${parsed.behavior}`,
+  };
 }
 
 /**
@@ -185,17 +210,7 @@ export function parseJudgeOutput(raw: string): { verdict: Verdict; topic: string
 /** Judge a single exchange. Returns undefined if the assistant couldn't answer — silence over guess. */
 export function judge(ex: Exchange, bin: string, aperture?: Aperture): Judgment | undefined {
   const raw = runClaude(bin, judgeInput(ex, aperture), 'haiku', 'judge');
-  if (!raw) return undefined;
-  const parsed = parseJudgeOutput(raw);
-  if (!parsed) return undefined;
-  return {
-    hash: ex.hash,
-    ts: ex.ts,
-    session: ex.session,
-    v: PIPELINE_V,
-    ...parsed,
-    line: `${parsed.verdict} — ${parsed.topic} — ${parsed.behavior}`,
-  };
+  return raw ? toJudgment(ex, raw) : undefined;
 }
 
 type Cache = Record<string, Judgment>;
@@ -249,45 +264,65 @@ export interface JudgeRun {
 /**
  * Judge every exchange, reading each only once ever — per pipeline version.
  *
- * A cache hit requires the CURRENT version; stale entries re-judge under the same per-run `limit`
- * as everything else, so a version bump drains over runs instead of walling one. `limit` caps how
- * many FRESH claude calls this run makes (cache hits are always free and never counted).
- * `onProgress(done, total)` fires per fresh judgment.
+ * 0.3.1: async, with the degradation ladder — STREAM (one harness, many verdicts; measured ~3.2x
+ * cheaper and boot-free per turn) → PER-CALL runClaude (older CLIs, mid-batch stream failures) →
+ * silence. A cache hit requires the CURRENT version; stale entries re-judge under the same per-run
+ * `limit` as everything else, so a version bump drains over runs instead of walling one.
+ * `onProgress(done, total)` fires per fresh judgment; checkpoints every 10 exactly as before.
  */
-export function judgeAll(
+export async function judgeAll(
   exchanges: Exchange[],
   bin: string,
   opts: { limit?: number; aperture?: Aperture; onProgress?: (done: number, total: number) => void } = {},
-): JudgeRun {
+): Promise<JudgeRun> {
   const cache = loadCache();
-  const judgments: Judgment[] = [];
   const unjudged = exchanges.filter((e) => !currentJudgment(cache[e.hash]));
   const budget = opts.limit ?? unjudged.length;
-  const target = Math.min(budget, unjudged.length);
 
-  let fresh = 0;
-  let cached = 0;
-  let spent = 0;
-
+  // The attempt set: uncached exchanges up to the budget, in window order.
+  const toJudge: Exchange[] = [];
   for (const ex of exchanges) {
-    const hit = cache[ex.hash];
-    if (currentJudgment(hit)) {
-      judgments.push(hit);
-      cached++;
-      continue;
-    }
-    if (spent >= budget) continue; // over this run's limit — leave it for next time
-    spent++;
-    const j = judge(ex, bin, opts.aperture);
-    if (j) {
-      cache[ex.hash] = j; // overwrites a stale-version entry, if one was there
-      judgments.push(j);
-      fresh++;
-      if (fresh % 10 === 0) saveCache(cache); // checkpoint so a crash never re-spends what it read
-      opts.onProgress?.(fresh, target);
-    }
+    if (currentJudgment(cache[ex.hash])) continue;
+    if (toJudge.length >= budget) break;
+    toJudge.push(ex);
+  }
+  const target = toJudge.length;
+  let fresh = 0;
+  const accept = (ex: Exchange, j: Judgment | undefined): void => {
+    if (!j) return; // refused — stays uncached, retried next run
+    cache[ex.hash] = j; // overwrites a stale-version entry, if one was there
+    fresh++;
+    if (fresh % 10 === 0) saveCache(cache); // checkpoint so a crash never re-spends what it read
+  };
+
+  // Rung 1 — the stream: one harness, many verdicts. Progress ticks LIVE, per turn — a streamed
+  // batch is minutes of otherwise-silent work, and silence reads as a hang (learned by watching).
+  const byHash = new Map(toJudge.map((e) => [e.hash, e]));
+  const stream = await runStreamBatch(bin, {
+    systemPrompt: JUDGE_RULES,
+    role: 'judge',
+    model: 'haiku',
+    feature: 'judge',
+    items: toJudge.map((e) => ({ id: e.hash, prompt: judgeTurnBody(e, opts.aperture) })),
+    onTurn: (done, total) => opts.onProgress?.(done, total),
+  });
+  for (const [hash, text] of stream.results) {
+    const ex = byHash.get(hash);
+    if (ex) accept(ex, toJudgment(ex, text));
   }
 
+  // Rung 2 — the per-call fallback for whatever the stream left behind.
+  let progressed = stream.completed;
+  for (const item of stream.remaining) {
+    const ex = byHash.get(item.id);
+    if (ex) accept(ex, judge(ex, bin, opts.aperture));
+    opts.onProgress?.(++progressed, target);
+  }
   saveCache(cache);
-  return { judgments, fresh, cached, deferred: unjudged.length - spent };
+
+  // Serve in window order from the now-warm cache — cached and fresh together.
+  const judgments = exchanges
+    .map((e) => cache[e.hash])
+    .filter((j): j is Judgment => currentJudgment(j));
+  return { judgments, fresh, cached: judgments.length - fresh, deferred: unjudged.length - target };
 }
