@@ -349,7 +349,10 @@ export async function judgeAll(
       const t0 = Date.now();
       const j = judge(ex, bin, opts.aperture);
       accept(ex, j);
-      if (j) turnsMs.push(Date.now() - t0); // a refused call is not a verdict — its wall stays out of the rates
+      if (j) {
+        turnsMs.push(Date.now() - t0); // a refused call is not a verdict — its wall stays out of the rates
+        saveCache(cache); // bank EVERY fallback verdict (C3): this rung is slow and each one is paid for
+      }
     }
     opts.onProgress?.(++progressed, target);
   }
