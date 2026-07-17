@@ -40,6 +40,9 @@ export interface Progress {
   summary?: string[];
   /** terminal phases only: did the run end well (done) or not (failed/stopped) */
   ok?: boolean;
+  /** the run's spend receipt (0.3.5): tokens, API-equivalent cost, ground-truth models — set only
+   *  when the run actually spent */
+  spend?: string;
 }
 
 /** Read the progress file. Missing or damaged reads as nothing — it is narration, never a ledger. */
@@ -58,6 +61,7 @@ export function readProgress(file: string = progressPath()): Progress | undefine
       ...(Number.isFinite(Number(raw.total)) ? { total: Number(raw.total) } : {}),
       ...(Array.isArray(raw.summary) ? { summary: raw.summary.filter((l): l is string => typeof l === 'string') } : {}),
       ...(typeof raw.ok === 'boolean' ? { ok: raw.ok } : {}),
+      ...(typeof raw.spend === 'string' ? { spend: raw.spend } : {}),
     };
   } catch {
     return undefined;

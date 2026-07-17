@@ -18,6 +18,7 @@ import { iterateExchangesNewestFirst } from './exchange.js';
 import { artifactShapeProblem } from './synthesize.js';
 import { stopWorker, readLock } from './worker.js';
 import { readProgress } from './progress.js';
+import { readUsage, diffUsage } from './usage.js';
 
 let dir: string;
 const distDir = dirname(fileURLToPath(import.meta.url));
@@ -285,4 +286,112 @@ test('shape lint: the exact production chatter is refused; real artifacts pass',
   assert.equal(artifactShapeProblem('**HOW THEY WORK**\nShort loops.', { kind: 'profile', patternEra: true }), undefined, 'markdown-bold drift is cosmetic, not a different shape');
   assert.equal(artifactShapeProblem('You move fast and check claims yourself.', { kind: 'profile', patternEra: false }), undefined, 'the flat-era profile is plain prose');
   assert.equal(artifactShapeProblem('You clicked with the deploy work this week.', { kind: 'report', patternEra: true }), undefined, 'the report is prose for a human');
+});
+
+// ── The Phase 2 review fixes (2026-07-18): each verified finding pinned ────────────────────────
+
+test('review: stopWorker never kills an unverified holder — a recycled PID is not a worker', async () => {
+  const lockFile = join(dir, 'unverified.lock');
+  const innocent = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 8000)'], { stdio: 'ignore' });
+  await sleep(80);
+  try {
+    // A crash leftover: lock says "worker", but its startedAt is months before this process began.
+    writeFileSync(lockFile, `${JSON.stringify({ pid: innocent.pid, startedAt: '2026-01-01T00:00:00Z', kind: 'worker' })}\n`);
+    process.env.STRATLESS_LOCK = lockFile;
+    process.env.STRATLESS_PROGRESS = join(dir, 'unverified-progress.json');
+    const res = await stopWorker(500);
+    assert.equal(res.killed, false, 'the kill is refused');
+    assert.equal(res.unverified, true, 'and says why');
+    assert.equal(innocent.exitCode, null, 'the innocent process is untouched');
+  } finally {
+    delete process.env.STRATLESS_LOCK;
+    delete process.env.STRATLESS_PROGRESS;
+    innocent.kill('SIGKILL');
+  }
+});
+
+test('review: update respects a foreground COMMAND lock — no tail, no spawn, honest message', async () => {
+  const { env } = makeHome('cmdlock-home', [{ exchanges: 4 }]);
+  const holder = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 6000)'], { stdio: 'ignore' });
+  await sleep(80);
+  try {
+    writeFileSync(env.STRATLESS_LOCK, `${JSON.stringify({ pid: holder.pid, startedAt: new Date().toISOString(), kind: 'command' })}\n`);
+    const out = await new Promise<string>((resolve) => {
+      execFile(process.execPath, [cli, 'update'], { env: { ...process.env, ...env }, timeout: 15_000 }, (_e, stdout) => resolve(stdout));
+    });
+    assert.ok(out.includes('another stratless command is running'), 'the command holder is named, not tailed');
+    assert.equal(readProgress(env.STRATLESS_PROGRESS), undefined, 'and no worker was spawned over it');
+  } finally {
+    holder.kill('SIGKILL');
+  }
+});
+
+test('review: init goes through the strict-args gate too', () => {
+  try {
+    execFileSync(process.execPath, [cli, 'init', '--autoo'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000 });
+    assert.fail('should have refused');
+  } catch (err: any) {
+    assert.equal(err.status, 1);
+    const out = `${err.stdout ?? ''}${err.stderr ?? ''}`;
+    assert.ok(out.includes('unknown flag'), 'the typo refuses before init runs');
+    assert.ok(out.includes('--auto'), 'with the did-you-mean');
+  }
+});
+
+test('review: the lint spares honest writing — breezy openers and quoted failure-signals pass', () => {
+  assert.equal(
+    artifactShapeProblem("Here's the person behind the pile: fast, skeptical, verifying.", { kind: 'profile', patternEra: false }),
+    undefined,
+    'a breezy but real opener is not chatter',
+  );
+  assert.equal(
+    artifactShapeProblem('You move fast. When lost you say "i can\'t read this" and stop replying.', { kind: 'profile', patternEra: false }),
+    undefined,
+    "quoting the person's own failure signal is evidence, not chatter",
+  );
+  assert.equal(
+    artifactShapeProblem('It looks like the deploy work finally clicked for you this month.', { kind: 'report', patternEra: true }),
+    undefined,
+    'the report is never linted — a human reads it and can see chatter for what it is',
+  );
+  assert.equal(
+    artifactShapeProblem('What would you like to work on?', { kind: 'profile', patternEra: false }),
+    'assistant chatter',
+    'the unambiguous tells still refuse',
+  );
+});
+
+// ── The per-run receipt (0.3.5): announced, spent, accounted ───────────────────────────────────
+
+test('receipt: diffUsage isolates one run\'s spend, including per-model ground truth', () => {
+  const before = readUsage(join(dir, 'nonexistent-usage.json'));
+  const t = (calls: number, cost: number, tok: number) => ({
+    calls, costUsd: cost, inputTokens: tok, outputTokens: tok, cacheCreationTokens: 0, cacheReadTokens: tok * 10,
+    unmeteredCalls: 0, pinEscapedCalls: 0,
+  });
+  const after = { ...t(34, 0.21, 900), byFeature: {}, byModel: { 'claude-haiku-4-5': t(31, 0.11, 700), 'claude-sonnet-5': t(3, 0.1, 200) } };
+  const d = diffUsage(before, after);
+  assert.equal(d.calls, 34);
+  assert.ok(Math.abs(d.costUsd - 0.21) < 1e-9);
+  assert.equal(d.byModel['claude-haiku-4-5'].calls, 31, 'the models that ran, by their real names');
+  assert.equal(d.byModel['claude-sonnet-5'].calls, 3);
+  const later = { ...after, ...t(35, 0.22, 910), byFeature: {}, byModel: { ...after.byModel, 'claude-haiku-4-5': t(32, 0.12, 710) } };
+  const d2 = diffUsage(after, later);
+  assert.equal(d2.calls, 1, 'a second snapshot isolates only the new spend');
+  assert.equal(d2.byModel['claude-haiku-4-5'].calls, 1);
+  assert.equal(d2.byModel['claude-sonnet-5'], undefined, 'models that spent nothing stay off the receipt');
+});
+
+test('receipt: a finished run carries its spend line; status can read it after the fact', async () => {
+  const { env } = makeHome('receipt-home', [{ exchanges: 6 }]);
+  const bin = writeCountingBin('counting-claude-receipt', 20);
+  const childEnv = { ...process.env, ...env, STRATLESS_CLAUDE_BIN: bin, FAKE_COUNTER: join(dir, 'counter-receipt'), STRATLESS_JUDGE_LIMIT: '6' };
+  const w = spawn(process.execPath, [cli, '__worker', '--now'], { env: childEnv, stdio: 'ignore' });
+  await new Promise((r) => w.on('close', r));
+  assert.equal(await waitTerminal(env, 3000), 'done');
+  const p = readProgress(env.STRATLESS_PROGRESS)!;
+  assert.ok(p.spend, 'the run carries its receipt');
+  assert.ok(/this run: .*tokens/.test(p.spend!), `tokens first (${p.spend})`);
+  assert.ok(/\$\d/.test(p.spend!), 'with the API-equivalent cost');
+  assert.ok(p.summary!.some((l) => l === p.spend), 'and the tail prints it with the summary');
 });

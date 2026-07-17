@@ -21,16 +21,17 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { atomicWriteFileSync } from './atomic.js';
+import { atomicWriteFileSync, CorruptStoreError } from './atomic.js';
 import { findAssistant } from './claude.js';
 import { loadRecentExchanges, sessionCount } from './exchange.js';
-import { judgeAll, cachedCount, pendingCount, allJudgments, fitAperture } from './judge.js';
+import { judgeAll, cachedCount, allJudgments, fitAperture } from './judge.js';
 import { mine, auditPatterns, gradePatterns, loadPatterns } from './miner.js';
 import { dailyCheck } from './notify.js';
 import { refreshArmed } from './init.js';
 import { injectProfile, ensureLoaded, humanMdPath } from './sink.js';
 import { readState, writeState, synthesisDue, writeRender, SYNTH_EVERY } from './state.js';
 import { startRun } from './stopwatch.js';
+import { readUsage, diffUsage, fmtTokens } from './usage.js';
 import { killActiveSession } from './stream.js';
 import {
   synthesizeProfile,
@@ -43,7 +44,7 @@ import {
   topTopics,
   type Corpus,
 } from './synthesize.js';
-import { acquireLock, releaseLock } from './worker.js';
+import { acquireLock, releaseLock, lockFilePath } from './worker.js';
 import { writeProgress } from './progress.js';
 import type { Judgment } from './judge.js';
 
@@ -125,18 +126,42 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
  * works the rungs, re-scans once, narrates, releases, ends.
  */
 export async function runWorker(opts: { force?: boolean } = {}): Promise<number> {
-  if (!acquireLock()) return 0; // a live worker exists — the doorbell already did its job
+  if (!acquireLock(lockFilePath(), 'worker')) return 0; // a live worker exists — the doorbell already did its job
   const startedAt = new Date().toISOString();
+
+  // THE RECEIPT (0.3.5): the meter at birth, diffed at every ending — announced, spent, accounted.
+  // Sound because the lock admits one spender at a time: nothing else can move the meter mid-run.
+  const usageBefore = readUsage();
+  const receipt = (): string | undefined => {
+    try {
+      const d = diffUsage(usageBefore, readUsage());
+      if (!(d.calls > 0)) return undefined; // a run that spent nothing owes no receipt
+      const tokens = d.inputTokens + d.outputTokens + d.cacheCreationTokens + d.cacheReadTokens;
+      const models = Object.entries(d.byModel)
+        .map(([m, t]) => `${m} ×${t.calls}`)
+        .join(' · ');
+      // a sub-cent spend is still a spend — "$0.00" would read as free, and free it was not
+      const cost = d.costUsd > 0 && d.costUsd < 0.005 ? '< $0.01' : `≈ $${d.costUsd.toFixed(2)}`;
+      return `this run: ${fmtTokens(tokens)} tokens · ${cost} at API rates${models ? ` · ${models}` : ''}`;
+    } catch {
+      return undefined;
+    }
+  };
 
   // Die well (C7): kill the in-flight borrowed session, label honestly, release, exit. The
   // hash-keyed cache means at most one chunk of work re-asks next wake — stopping is cheap.
   const onKill = (): void => {
     killActiveSession();
+    const spent = receipt();
     writeProgress({
       phase: 'stopped',
       ok: false,
       startedAt,
-      summary: ['stopped by you — everything already judged is banked; the next run re-reads at most one chunk'],
+      summary: [
+        'stopped by you — everything already judged is banked; the next run re-reads at most one chunk',
+        ...(spent ? [spent] : []),
+      ],
+      ...(spent ? { spend: spent } : {}),
     });
     releaseLock();
     process.exit(0);
@@ -145,7 +170,14 @@ export async function runWorker(opts: { force?: boolean } = {}): Promise<number>
   process.once('SIGINT', onKill);
 
   const fail = (lines: string[]): number => {
-    writeProgress({ phase: 'failed', ok: false, startedAt, summary: lines });
+    const spent = receipt(); // a refused build still spent — the receipt survives the refusal
+    writeProgress({
+      phase: 'failed',
+      ok: false,
+      startedAt,
+      summary: spent ? [...lines, spent] : lines,
+      ...(spent ? { spend: spent } : {}),
+    });
     return 1;
   };
 
@@ -154,19 +186,15 @@ export async function runWorker(opts: { force?: boolean } = {}): Promise<number>
     const bin = findAssistant();
     if (!bin) return fail(['stratless needs your assistant to read your history — is `claude` installed?']);
 
-    let force = !!opts.force;
+    const force = !!opts.force;
     const summary: string[] = [];
+    const knownHashes = new Set<string>();
 
-    for (let pass = 0; pass < 2; pass++) {
-      const window = loadRecentExchanges(JUDGE_WINDOW);
-      if (!window.length) {
-        if (pass === 0) summary.push('no conversations found yet — talk to your assistant a few times, then run `stratless update`');
-        break;
-      }
-      // The re-scan (pass 1) exists to bank exchanges that arrived WHILE working — skip it clean
-      // when nothing new landed.
-      if (pass === 1 && pendingCount([...window].reverse(), judgeLimit()) === 0) break;
-
+    const window = loadRecentExchanges(JUDGE_WINDOW);
+    if (!window.length) {
+      summary.push('no conversations found yet — talk to your assistant a few times, then run `stratless update`');
+    } else {
+      for (const e of window) knownHashes.add(e.hash);
       const sw = startRun();
       const sessions = sessionCount(window);
       const aperture = fitAperture(window);
@@ -190,82 +218,96 @@ export async function runWorker(opts: { force?: boolean } = {}): Promise<number>
         writeState({ ...state, aperture: { ...aperture, computedAt: new Date().toISOString() } });
         if (run.fresh) sw.record();
         ensureLoaded();
-        if (summary.length === 0) {
-          const judged = run.fresh ? `judged ${run.fresh} new` : 'nothing new to judge';
-          summary.push(`profile is fresh enough (${judged} · ${gate.newSince}/${synthEvery()} toward the next build)`);
-        } else if (run.fresh) {
-          summary.push(`also judged ${run.fresh} new that arrived during the build`);
+        const judged = run.fresh ? `judged ${run.fresh} new` : 'nothing new to judge';
+        summary.push(`profile is fresh enough (${judged} · ${gate.newSince}/${synthEvery()} toward the next build)`);
+      } else {
+        // The expensive rungs — mine, audit, grade, write, load — behind the one gate.
+        const signal = run.judgments.filter(hasSignal);
+        const corpus: Corpus = {
+          sessions,
+          exchanges: signal.length,
+          topics: topTopics(signal),
+          from: window[0].ts.slice(0, 10),
+          to: window[window.length - 1].ts.slice(0, 10),
+        };
+        const pile = allJudgments();
+        writeProgress({ phase: 'mining', startedAt });
+        const tMine = Date.now();
+        const mined = mine(pile, bin);
+        sw.stage('mine', Date.now() - tMine, mined.assigned);
+        writeProgress({ phase: 'auditing', startedAt });
+        const tAudit = Date.now();
+        const audited = await auditPatterns(pile, bin);
+        sw.stage('audit', Date.now() - tAudit, audited.calls);
+        writeProgress({ phase: 'grading', startedAt });
+        const tGrade = Date.now();
+        const graded = await gradePatterns(pile, bin);
+        sw.stage('grade', Date.now() - tGrade, graded.graded);
+
+        writeProgress({ phase: 'writing', startedAt });
+        const tSynth = Date.now();
+        const built = buildRendered('profile', signal, corpus, bin);
+        sw.stage('synthesis', Date.now() - tSynth, built.text ? 1 : 0);
+        sw.record();
+        if (built.invented?.length) {
+          return fail([
+            `refused: the writer invented numbers (${built.invented.join(', ')}) — nothing was written or loaded`,
+            'this build is discarded; try again with `stratless update --now`',
+          ]);
         }
-        break;
+        if (built.malformed) {
+          return fail([
+            `refused: the writer returned ${built.malformed} instead of a profile — nothing was written or loaded`,
+            'this build is discarded; try again with `stratless update --now`',
+          ]);
+        }
+        if (!built.text) {
+          return fail(['could not build the profile — the assistant returned nothing; silence beats a guess']);
+        }
+
+        atomicWriteFileSync(join(STRATLESS_DIR, 'profile.txt'), `${built.text}\n`);
+        writeRender('profile', { builtAt: new Date().toISOString(), sessions, exchanges: signal.length });
+        const { humanMd, claudeMd } = injectProfile(built.text);
+        writeState({
+          ...readState(),
+          lastSynthesisAt: new Date().toISOString(),
+          judgmentsAtLastSynthesis: cachedCount(),
+          aperture: { ...aperture, computedAt: new Date().toISOString() },
+        });
+
+        const why = force ? 'forced with --now' : noProfile ? 'first load' : gate.reason;
+        const spend = run.fresh ? `${run.fresh} new, ${run.cached} from cache` : `all ${run.cached} from cache`;
+        const more = run.deferred ? ` · ${run.deferred} left for next run` : '';
+        const gradeNote = graded.graded
+          ? ` · graded ${graded.graded}${graded.surprised ? ` (${graded.surprised} surprised${graded.flagged ? `, ${graded.flagged} flagged` : ''})` : ''}`
+          : '';
+        const mineNote = mined.mined
+          ? ` · mined ${mined.assigned} → ${audited.store.patterns.length} patterns${audited.evicted ? `, ${audited.evicted} receipts evicted` : ''}${gradeNote}`
+          : gradeNote;
+        summary.push(`profile refreshed and loaded (${why} · ${spend}${more}${mineNote})`);
+        summary.push(`wrote ${humanMd}`);
+        summary.push(`pointed ${claudeMd} at it (via @import)`);
       }
 
-      // The expensive rungs — mine, audit, grade, write, load — behind the one gate.
-      const signal = run.judgments.filter(hasSignal);
-      const corpus: Corpus = {
-        sessions,
-        exchanges: signal.length,
-        topics: topTopics(signal),
-        from: window[0].ts.slice(0, 10),
-        to: window[window.length - 1].ts.slice(0, 10),
-      };
-      const pile = allJudgments();
-      writeProgress({ phase: 'mining', startedAt });
-      const tMine = Date.now();
-      const mined = mine(pile, bin);
-      sw.stage('mine', Date.now() - tMine, mined.assigned);
-      writeProgress({ phase: 'auditing', startedAt });
-      const tAudit = Date.now();
-      const audited = await auditPatterns(pile, bin);
-      sw.stage('audit', Date.now() - tAudit, audited.calls);
-      writeProgress({ phase: 'grading', startedAt });
-      const tGrade = Date.now();
-      const graded = await gradePatterns(pile, bin);
-      sw.stage('grade', Date.now() - tGrade, graded.graded);
-
-      writeProgress({ phase: 'writing', startedAt });
-      const tSynth = Date.now();
-      const built = buildRendered('profile', signal, corpus, bin);
-      sw.stage('synthesis', Date.now() - tSynth, built.text ? 1 : 0);
-      sw.record();
-      if (built.invented?.length) {
-        return fail([
-          `refused: the writer invented numbers (${built.invented.join(', ')}) — nothing was written or loaded`,
-          'this build is discarded; try again with `stratless update --now`',
-        ]);
+      // THE RE-SCAN — one look back for exchanges that arrived WHILE working. Arrivals only
+      // (never the deferred backlog: the announced bill is a promise, and the window drains over
+      // runs by design), rung 1 only (gates wait for the next wake — no silent second mine).
+      const window2 = loadRecentExchanges(JUDGE_WINDOW);
+      const arrivals = window2.filter((e) => !knownHashes.has(e.hash));
+      if (arrivals.length) {
+        const sw2 = startRun();
+        const t2 = Date.now();
+        const run2 = await judgeAll([...arrivals].reverse(), bin, {
+          limit: judgeLimit(),
+          aperture: fitAperture(window2),
+          onProgress: (done, total) => writeProgress({ phase: 'judging', startedAt, done, total }),
+        });
+        sw2.stage('judge', Date.now() - t2, run2.fresh, run2.turnsMs);
+        if (run2.fresh) {
+          sw2.record();
+          summary.push(`also judged ${run2.fresh} new that arrived during the build`);
+        }
       }
-      if (built.malformed) {
-        return fail([
-          `refused: the writer returned ${built.malformed} instead of a profile — nothing was written or loaded`,
-          'this build is discarded; try again with `stratless update --now`',
-        ]);
-      }
-      if (!built.text) {
-        return fail(['could not build the profile — the assistant returned nothing; silence beats a guess']);
-      }
-
-      atomicWriteFileSync(join(STRATLESS_DIR, 'profile.txt'), `${built.text}\n`);
-      writeRender('profile', { builtAt: new Date().toISOString(), sessions, exchanges: signal.length });
-      const { humanMd, claudeMd } = injectProfile(built.text);
-      writeState({
-        ...readState(),
-        lastSynthesisAt: new Date().toISOString(),
-        judgmentsAtLastSynthesis: cachedCount(),
-        aperture: { ...aperture, computedAt: new Date().toISOString() },
-      });
-
-      const why = force ? 'forced with --now' : noProfile ? 'first load' : gate.reason;
-      const spend = run.fresh ? `${run.fresh} new, ${run.cached} from cache` : `all ${run.cached} from cache`;
-      const more = run.deferred ? ` · ${run.deferred} left for next run` : '';
-      const gradeNote = graded.graded
-        ? ` · graded ${graded.graded}${graded.surprised ? ` (${graded.surprised} surprised${graded.flagged ? `, ${graded.flagged} flagged` : ''})` : ''}`
-        : '';
-      const mineNote = mined.mined
-        ? ` · mined ${mined.assigned} → ${audited.store.patterns.length} patterns${audited.evicted ? `, ${audited.evicted} receipts evicted` : ''}${gradeNote}`
-        : gradeNote;
-      summary.push(`profile refreshed and loaded (${why} · ${spend}${more}${mineNote})`);
-      summary.push(`wrote ${humanMd}`);
-      summary.push(`pointed ${claudeMd} at it (via @import)`);
-      force = false; // the re-scan pass is never forced
     }
 
     // The daily version line rides ONLY on --auto consent (the installed hook is the consent
@@ -273,9 +315,19 @@ export async function runWorker(opts: { force?: boolean } = {}): Promise<number>
     const newer = await dailyCheck(installedVersion(), refreshArmed());
     if (newer) summary.push(`stratless ${newer} available: npm i -g stratless`);
 
-    writeProgress({ phase: 'done', ok: true, startedAt, summary });
+    const spent = receipt();
+    if (spent) summary.push(spent);
+    writeProgress({ phase: 'done', ok: true, startedAt, summary, ...(spent ? { spend: spent } : {}) });
     return 0;
   } catch (err) {
+    if (err instanceof CorruptStoreError) {
+      // C2's refusal keeps its remedy even when the corruption is found INSIDE the worker.
+      fail([
+        `refused: ${err.file} is damaged — and re-reading your whole history over it would re-bill you`,
+        `nothing was read or spent past it; move it aside, then rerun: mv ${err.file} ${err.file}.damaged`,
+      ]);
+      return 1;
+    }
     fail([`the worker hit an unexpected error: ${err instanceof Error ? err.message : String(err)}`]);
     return 1;
   } finally {

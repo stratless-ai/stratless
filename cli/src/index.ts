@@ -318,10 +318,8 @@ function renderFinal(p: Progress): void {
  * renders the familiar lines; Ctrl-C closes the window and prints the kill ladder (the work
  * continues; `stop` is one line away). Returns the exit code the outcome deserves.
  */
-async function tailWorker(spawnedAtMs: number): Promise<number> {
+async function tailWorker(spawnedAtMs: number, prevStamp: string): Promise<number> {
   const startMs = Date.now();
-  // Clock slack: the worker stamps its frames from its own clock, moments after our spawn call.
-  const spawnIso = spawnedAtMs ? new Date(spawnedAtMs - 2000).toISOString() : '';
   process.once('SIGINT', () => {
     process.stderr.write(`\r${' '.repeat(60)}\r`);
     console.log(`\n  ${C.it('detached — the refresh continues in the background')}`);
@@ -345,12 +343,13 @@ async function tailWorker(spawnedAtMs: number): Promise<number> {
       process.stderr.write(`\r  ${CE.dim(line)}${' '.repeat(Math.max(0, 40 - line.length))}`);
     }
     if (!alive) {
-      // Trust a terminal frame only when it plausibly belongs to OUR run — a worker we watched
-      // die, or (when we spawned it) a frame stamped after the spawn.
-      const trusted = p && TERMINAL_PHASES.has(p.phase) && (sawAlive || !spawnedAtMs || p.updatedAt >= spawnIso);
+      // Trust a terminal frame only when it is strictly NEWER than the narration that existed
+      // before this run began — a leftover 'done' from a previous run is history, not our outcome.
+      const trusted = p && TERMINAL_PHASES.has(p.phase) && p.updatedAt > prevStamp && (sawAlive || spawnedAtMs > 0);
       if (trusted) {
         renderFinal(p!);
-        return p!.ok ? 0 : 1;
+        // 'stopped' is the person getting exactly what they asked for — never an error exit
+        return p!.ok || p!.phase === 'stopped' ? 0 : 1;
       }
       const startupGrace = !sawAlive && spawnedAtMs > 0 && Date.now() - startMs < 5000;
       if (!startupGrace) {
@@ -395,9 +394,19 @@ async function update(rest: string[]): Promise<void> {
 
   const holder = readLock();
   const alive = !!(holder && !lockIsStale(holder));
+  // A foreground command (profile/report --now in another terminal) holds the same lock but
+  // narrates nothing — tailing it would render a LEFTOVER frame as this run's outcome. Respect it.
+  if (alive && holder!.kind !== 'worker') {
+    console.log(`\n  ${C.it('another stratless command is running')} ${C.dim(`(pid ${holder!.pid}) — nothing was spent; try again when it finishes.`)}\n`);
+    return;
+  }
+  // The previous run's last narration frame: only frames NEWER than this belong to our run (a
+  // stale 'done' from yesterday must never be rendered as today's outcome).
+  const prevStamp = readProgress()?.updatedAt ?? '';
   let spawnedAtMs = 0;
   if (alive) {
-    console.log(`\n  ${C.dim(`a refresh is already running (pid ${holder!.pid}) — watching it`)}`);
+    const watching = process.stderr.isTTY ? ' — watching it' : '';
+    console.log(`\n  ${C.dim(`a refresh is already running (pid ${holder!.pid})${watching}`)}`);
     if (force) {
       console.log(`  ${C.dim(`note: it may not be a forced rebuild; if you still want one, run \`${hint('stratless update --now')}\` after it finishes`)}`);
     }
@@ -421,7 +430,7 @@ async function update(rest: string[]): Promise<void> {
     console.log(`  refresh running in the background · watch: ${hint('stratless status')}`);
     return;
   }
-  const code = await tailWorker(spawnedAtMs);
+  const code = await tailWorker(spawnedAtMs, prevStamp);
   if (code) process.exit(code);
 }
 
@@ -647,10 +656,14 @@ async function status(rest: string[] = []): Promise<void> {
         ? (wp.phase === 'judging' && wp.total ? `judging ${wp.done ?? 0}/${wp.total}` : wp.phase)
         : 'working';
       console.log(`    running now             ${C.ok('yes')}  ${C.dim(`${ph} · pid ${holder.pid} · stop: ${hint('stratless stop')}`)}`);
-    } else if (wp && wp.phase === 'stopped') {
-      console.log(`    last run                ${C.it('stopped by you')}`);
-    } else if (wp && wp.phase === 'failed') {
-      console.log(`    last run                ${C.warn('failed')}  ${C.dim(wp.summary?.[0] ?? '')}`);
+    } else {
+      if (wp && wp.phase === 'stopped') {
+        console.log(`    last run                ${C.it('stopped by you')}`);
+      } else if (wp && wp.phase === 'failed') {
+        console.log(`    last run                ${C.warn('failed')}  ${C.dim(wp.summary?.[0] ?? '')}`);
+      }
+      // The receipt of the most recent run (0.3.5) — the hook's silent spends stay readable.
+      if (wp?.spend) console.log(`    last run spend          ${C.dim(wp.spend.replace('this run: ', ''))}`);
     }
   }
   console.log(`    profile loaded          ${loaded ? C.ok('yes') : C.dim('no')}${humanExists ? `  ${C.dim(human)}` : ''}`);
@@ -738,6 +751,16 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Strict args before anything runs: a typo must never silently become a different request.
+  if (cmd && COMMAND_ARGS[cmd]) {
+    const problem = argProblem(cmd, args.slice(1));
+    if (problem) {
+      console.error(`\n  ${C.bad(problem)}`);
+      console.error(`  ${C.dim(`see \`${hint('stratless help')}\` for what ${cmd} takes`)}\n`);
+      process.exit(1);
+    }
+  }
+
   if (cmd === 'init') {
     const auto = args.includes('--auto');
     let r: InitResult;
@@ -793,16 +816,6 @@ async function main(): Promise<void> {
   ${C.dim('docs: https://stratless.com/docs')}
 `);
     return;
-  }
-
-  // Strict args before anything runs: a typo must never silently become a different request.
-  if (cmd && COMMAND_ARGS[cmd]) {
-    const problem = argProblem(cmd, args.slice(1));
-    if (problem) {
-      console.error(`\n  ${C.bad(problem)}`);
-      console.error(`  ${C.dim(`see \`${hint('stratless help')}\` for what ${cmd} takes`)}\n`);
-      process.exit(1);
-    }
   }
 
   // C2's command-layer half: a damaged spend-cache surfaces as ONE clear refusal, wherever it was

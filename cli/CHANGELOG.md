@@ -29,6 +29,12 @@ do; there is no daemon.
   now exit loudly, with a did-you-mean.
 
 ### Added
+- **Every run hands you its receipt.** A finished `update` closes with what it actually spent —
+  `this run: 1.2M tokens · ≈ $0.21 at API rates · claude-haiku-4-5 ×31 · claude-sonnet-5 ×3` —
+  tokens first, models by their ground-truth names (which model RAN, not which was asked for).
+  Refused and stopped runs get their receipt too; a run that spent nothing owes none. `status`
+  keeps the most recent run's receipt (`last run spend`), so the hook's silent spends stay
+  readable. Announced before, metered during, accounted after.
 - **The artifact-shape lint** (the second half of the tool-less-borrow guarantee, pulled forward
   after a chatter reply was loaded as a real HUMAN.md in the wild): a profile that opens with
   assistant chatter, or a pattern-era profile without its section headings, is REFUSED like an

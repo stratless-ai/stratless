@@ -113,6 +113,36 @@ function add(t: Tally, d: CallCost): void {
   if (d.pinEscaped) t.pinEscapedCalls += 1;
 }
 
+/**
+ * The spend BETWEEN two meter snapshots — the per-run receipt (0.3.5). Pure arithmetic over
+ * readUsage() totals taken at run start and run end; sound because the lock guarantees exactly
+ * one spender at a time, so nothing else can move the meter mid-run. byModel keeps only models
+ * that actually spent in the window. Exported for tests.
+ */
+export function diffUsage(before: UsageTotals, after: UsageTotals): Tally & { byModel: Record<string, Tally> } {
+  const sub = (a: Tally, b: Tally): Tally => ({
+    calls: Math.max(0, a.calls - b.calls),
+    costUsd: Math.max(0, a.costUsd - b.costUsd),
+    inputTokens: Math.max(0, a.inputTokens - b.inputTokens),
+    outputTokens: Math.max(0, a.outputTokens - b.outputTokens),
+    cacheCreationTokens: Math.max(0, a.cacheCreationTokens - b.cacheCreationTokens),
+    cacheReadTokens: Math.max(0, a.cacheReadTokens - b.cacheReadTokens),
+    unmeteredCalls: Math.max(0, a.unmeteredCalls - b.unmeteredCalls),
+    pinEscapedCalls: Math.max(0, a.pinEscapedCalls - b.pinEscapedCalls),
+  });
+  const byModel: Record<string, Tally> = {};
+  for (const [model, t] of Object.entries(after.byModel)) {
+    const d = sub(t, before.byModel[model] ?? zeroTally());
+    if (d.calls > 0 || d.costUsd > 0) byModel[model] = d;
+  }
+  return { ...sub(after, before), byModel };
+}
+
+/** Tokens, human-sized: 1.2M · 412k · 87. The same rendering status uses — one voice. */
+export function fmtTokens(t: number): string {
+  return t >= 1e6 ? `${(t / 1e6).toFixed(1)}M` : t >= 1000 ? `${Math.round(t / 1000)}k` : String(t);
+}
+
 /** Add one borrowed call to the running total. Best-effort: never throws into the caller. */
 export function recordUsage(
   delta: CallCost & { feature?: string; byModel?: Record<string, CallCost> },
