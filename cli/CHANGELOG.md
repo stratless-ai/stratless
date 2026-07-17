@@ -26,7 +26,13 @@ do; there is no daemon.
   whole batch. (The Phase 2 gauntlet test caught the old behavior losing the entire batch.)
 - **Typos refuse instead of quietly running something else.** `stratless update --npw` used to run
   a plain update while you believed you had forced a rebuild. Unknown flags and stray arguments
-  now exit loudly, with a did-you-mean.
+  now exit loudly, with a did-you-mean — and a mistyped command (`stratless updat`) gets the same
+  courtesy, suggesting the nearest verb.
+- **The borrowed model pin is absolute.** A stage pinned to sonnet (mining, writing, grading) or
+  haiku (judging) now runs on that model or REFUSES — it never silently falls back to your account
+  default. Left unchecked, a failed pin could land the priciest stage on the priciest model (if you
+  default to Opus) at frontier rates, invisibly. Override stays yours via `STRATLESS_SYNTH_MODEL`;
+  a CLI without JSON output still answers, but on the same pinned model.
 
 ### Added
 - **Every run hands you its receipt.** A finished `update` closes with what it actually spent —

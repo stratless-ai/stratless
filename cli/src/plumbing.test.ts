@@ -521,19 +521,17 @@ test('C11: the plain-text rung records an UNMETERED call, never a confident zero
   }
 });
 
-test('C11: a model-pin escape is recorded, with the model ground truth from the receipt (B3)', () => {
+test('the pin is absolute: a call that cannot run on its model REFUSES, never escapes (Sun 2026-07-18)', () => {
   const bin = writeOneShotBin();
-  const usageFile = join(dir, 'usage-c11-pin.json');
+  const usageFile = join(dir, 'usage-pin-absolute.json');
   process.env.STRATLESS_USAGE = usageFile;
-  process.env.FAKE_MODE = 'nopin-json'; // every --model attempt dies; the unpinned rung answers
+  process.env.FAKE_MODE = 'nopin-json'; // every --model attempt dies; the ONLY answer is on the default
   try {
     const out = runClaude(bin, 'question', 'sonnet', 'synthesis');
-    assert.equal(out, 'hi');
+    assert.equal(out, undefined, 'refuse rather than silently run on the account default (e.g. Opus)');
     const u = readUsage(usageFile);
-    assert.equal(u.pinEscapedCalls, 1, 'landing on the account default is visible');
-    assert.equal(u.unmeteredCalls, 0, 'the JSON receipt still metered it');
-    assert.ok(u.byModel['claude-test-default'], 'and the ledger records WHICH model actually ran');
-    assert.ok(u.byModel['claude-test-default'].costUsd > 0);
+    assert.equal(u.pinEscapedCalls, 0, 'no escape happened — there is no escape rung anymore');
+    assert.equal(u.byModel['claude-test-default'], undefined, 'the default model was never run');
   } finally {
     delete process.env.STRATLESS_USAGE;
     delete process.env.FAKE_MODE;
@@ -556,18 +554,18 @@ test('review: an is_error envelope is a refusal — parseJsonResult never return
   assert.equal(parseJsonResult(ok)?.result, 'real answer', 'a healthy envelope still parses');
 });
 
-test('review: a broken model pin advances the ladder to the metered unpinned rung, never poisons', () => {
+test('a broken model pin REFUSES and never returns error prose (envelope on both rungs)', () => {
   const bin = writeOneShotBin();
   const usageFile = join(dir, 'usage-envelope.json');
   process.env.STRATLESS_USAGE = usageFile;
-  process.env.FAKE_MODE = 'error-envelope-pinned';
+  process.env.FAKE_MODE = 'error-envelope-pinned'; // both pinned rungs emit an is_error envelope
   try {
     const out = runClaude(bin, 'question', 'haiku', 'judge');
-    assert.equal(out, 'hi', 'the unpinned rung answered');
-    assert.ok(!String(out).includes('issue with the selected model'), 'error prose never escapes as an answer');
+    assert.equal(out, undefined, 'no escape, no answer — the pin could not be honored');
+    // The JSON rung refuses via parseJsonResult's is_error check; the plain rung refuses via
+    // isErrorEnvelope — error prose never passes as a verdict on EITHER rung.
     const u = readUsage(usageFile);
-    assert.equal(u.pinEscapedCalls, 1, 'and the escape is on the meter');
-    assert.equal(u.unmeteredCalls, 0, 'still a metered JSON rung — no unmetered fallback needed');
+    assert.equal(u.pinEscapedCalls, 0, 'the escape rung is gone');
   } finally {
     delete process.env.STRATLESS_USAGE;
     delete process.env.FAKE_MODE;

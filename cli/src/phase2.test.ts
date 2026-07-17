@@ -345,6 +345,24 @@ test('review: init goes through the strict-args gate too', () => {
   }
 });
 
+test('a mistyped command suggests the nearest one (0.3.5 did-you-mean, commands too)', () => {
+  const run = (args: string[]): { code: number; out: string } => {
+    try {
+      const out = execFileSync(process.execPath, [cli, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000 });
+      return { code: 0, out };
+    } catch (err: any) {
+      return { code: err.status ?? 1, out: `${err.stdout ?? ''}${err.stderr ?? ''}` };
+    }
+  };
+  const typo = run(['updat']);
+  assert.equal(typo.code, 1, 'the mistyped command refuses');
+  assert.ok(typo.out.includes('unknown command'), 'and says so');
+  assert.ok(typo.out.includes('did you mean update'), 'with the nearest verb');
+  const far = run(['xyzzy']);
+  assert.equal(far.code, 1);
+  assert.ok(!far.out.includes('did you mean'), 'gibberish gets no false suggestion');
+});
+
 test('review: the lint spares honest writing — breezy openers and quoted failure-signals pass', () => {
   assert.equal(
     artifactShapeProblem("Here's the person behind the pile: fast, skeptical, verifying.", { kind: 'profile', patternEra: false }),
