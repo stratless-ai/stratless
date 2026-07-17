@@ -14,10 +14,11 @@
  */
 import { loadEdits, claudeProjectDir, type Edit } from './transcript.js';
 import { findAssistant, onPath } from './claude.js';
-import { init as doInit, ARCHIVE, stopRefresh, type InitResult } from './init.js';
+import { init as doInit, ARCHIVE, stopRefresh, refreshArmed, type InitResult } from './init.js';
+import { dailyCheck, fetchLatest, newerThan } from './notify.js';
 import { health } from './canary.js';
-import { loadRecentExchanges, sessionCount } from './exchange.js';
-import { judgeAll, cachedCount, fitAperture, allJudgments, type Judgment } from './judge.js';
+import { loadRecentExchanges, sessionCount, findExchange } from './exchange.js';
+import { judgeAll, cachedCount, fitAperture, allJudgments, pendingCount, type Judgment } from './judge.js';
 import {
   synthesizeProfile,
   synthesizeReport,
@@ -27,24 +28,19 @@ import {
   hasSignal,
   type Corpus,
 } from './synthesize.js';
-import { mine, auditPatterns, gradePatterns, loadPatterns, MIN_RECEIPTS } from './miner.js';
+import { mine, auditPatterns, gradePatterns, loadPatterns, displayOrder, matchReceiptPrefix, MIN_RECEIPTS } from './miner.js';
 import { injectProfile, removeProfile, ensureLoaded, humanMdPath, claudeMdPath } from './sink.js';
-import { readState, writeState, synthesisDue, SYNTH_EVERY } from './state.js';
+import { readState, writeState, synthesisDue, readRenders, writeRender, SYNTH_EVERY } from './state.js';
 import { readUsage } from './usage.js';
+import { makePalette } from './palette.js';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const C = {
-  b: (s: string) => `\x1b[1m${s}\x1b[0m`,
-  dim: (s: string) => `\x1b[2m${s}\x1b[0m`,
-  you: (s: string) => `\x1b[36m${s}\x1b[0m`,
-  it: (s: string) => `\x1b[33m${s}\x1b[0m`,
-  ok: (s: string) => `\x1b[32m${s}\x1b[0m`,
-  warn: (s: string) => `\x1b[33m${s}\x1b[0m`,
-  bad: (s: string) => `\x1b[31m${s}\x1b[0m`,
-};
+// Two palettes, one per stream — results style by stdout's TTY, progress by stderr's (clig).
+const C = makePalette(process.stdout);
+const CE = makePalette(process.stderr);
 
 /**
  * Ran via `npx stratless …`? Then the bare `stratless` is NOT on the person's PATH, and every hint
@@ -166,15 +162,57 @@ function buildRenderedText(kind: 'profile' | 'report', signal: Judgment[], corpu
   return built.text;
 }
 
+/** The one honest footer both paths of a look share. */
+function lookFooter(kind: 'profile' | 'report'): void {
+  if (kind === 'profile') {
+    console.log(
+      profileLoaded()
+        ? `  ${C.dim(`loaded: ${humanMdPath()} · refresh it with \`${hint('stratless update')}\``)}\n`
+        : `  ${C.it('not loaded yet')} ${C.dim('· load it into your assistant:')} ${C.b(hint('stratless update'))}\n`,
+    );
+  } else {
+    // The evidence loop closes: every report points at the receipts behind it (clig: next command).
+    console.log(`  ${C.dim(`the evidence behind this: ${hint('stratless patterns')}`)}\n`);
+  }
+}
+
+/** The pre-spend disclosure — the person hears the bill BEFORE the first fresh call, never after.
+ *  Only when fresh > 0; dim; stderr (it's messaging, not output). */
+function preSpend(pending: number): void {
+  if (pending <= 0) return;
+  process.stderr.write(
+    `\n  ${CE.dim(`about to read ${pending} new exchange${pending === 1 ? '' : 's'} on your own claude (each read once, cached forever)`)}\n  ${CE.dim(`the meter: ${hint('stratless status')}`)}\n`,
+  );
+}
+
 /**
- * The profiler — read the whole corpus, learn who you are, say it back.
+ * The profiler — LOOKING IS FREE (the polish release, Sun's design decision).
  *
- * `profile` and `report` LOOK, `update` ACTS: these render the picture (the AI's copy and yours),
- * and only `update` loads it. A command that prints must not quietly rewrite the assistant's
- * config — so `profile` ends by saying, honestly, whether a profile is loaded and how to load one.
- * Same pipeline underneath — judge every exchange once (cached forever), synthesize the pile once.
+ * `profile` and `report` print the LAST BUILT rendering instantly, at zero spend, under a header
+ * that carries the build's own date and numbers (from the sidecar — never recomputed at print).
+ * Only `update` — and a first-ever look, or an explicit `--now` — spends. One word keeps one
+ * meaning across the CLI: `--now` = spend now, skip nothing. `profile` looks, `update` loads:
+ * unchanged.
  */
-async function profiler(kind: 'profile' | 'report'): Promise<void> {
+async function profiler(kind: 'profile' | 'report', rest: string[] = []): Promise<void> {
+  const force = rest.includes('--now');
+  const cachedFile = join(STRATLESS, `${kind}.txt`);
+  const meta = readRenders()[kind];
+
+  // The free path: a cached rendering + its build facts. No model, no meter movement.
+  if (!force && meta && existsSync(cachedFile)) {
+    const text = readFileSync(cachedFile, 'utf8').trimEnd();
+    const header = kind === 'profile' ? "WHO YOU'RE WORKING WITH" : 'YOUR PATTERN — what stratless sees';
+    console.log(
+      `\n  ${C.b(header)}   ${C.dim(`(stratless · built ${meta.builtAt.slice(0, 10)} · ${meta.sessions} sessions · ${meta.exchanges} exchanges)`)}\n`,
+    );
+    console.log(text.split('\n').map((l) => `  ${l}`).join('\n'));
+    console.log(`\n  ${C.dim(`free — this is the last build · rebuild with \`${hint(`stratless ${kind} --now`)}\``)}`);
+    lookFooter(kind);
+    return;
+  }
+
+  // The build path: first-ever look, or --now. This spends — the pre-spend line says so first.
   const bin = findAssistant();
   if (!bin) {
     console.error(`\n  ${C.bad('stratless needs your assistant to read your history.')}`);
@@ -194,11 +232,12 @@ async function profiler(kind: 'profile' | 'report'): Promise<void> {
   // The aperture: the judge's view sizes, fitted to THIS user's window (p90 × 1.2, clamped) —
   // computed in code, costs nothing, never part of the cache identity.
   const aperture = fitAperture(window);
-  process.stderr.write(`\n  ${C.dim(`reading ${window.length.toLocaleString()} recent exchanges across ${sessions} sessions…`)}\n`);
+  preSpend(pendingCount([...window].reverse(), judgeLimit()));
+  process.stderr.write(`\n  ${CE.dim(`reading ${window.length.toLocaleString()} recent exchanges across ${sessions} sessions…`)}\n`);
   const run = await judgeAll([...window].reverse(), bin, {
     limit: judgeLimit(),
     aperture,
-    onProgress: (done, total) => process.stderr.write(`\r  ${C.dim(`judging ${done}/${total} new…`)}   `),
+    onProgress: (done, total) => process.stderr.write(`\r  ${CE.dim(`judging ${done}/${total} new…`)}   `),
   });
   process.stderr.write(`\r${' '.repeat(44)}\r`);
 
@@ -226,8 +265,8 @@ async function profiler(kind: 'profile' | 'report'): Promise<void> {
   }
 
   mkdirSync(STRATLESS, { recursive: true });
-  const file = join(STRATLESS, `${kind}.txt`);
-  writeFileSync(file, `${text}\n`);
+  writeFileSync(cachedFile, `${text}\n`);
+  writeRender(kind, { builtAt: new Date().toISOString(), sessions, exchanges: signal.length });
 
   const header = kind === 'profile' ? "WHO YOU'RE WORKING WITH" : 'YOUR PATTERN — what stratless sees';
   console.log(`\n  ${C.b(header)}   ${C.dim(`(stratless · ${sessions} sessions · ${signal.length} exchanges)`)}\n`);
@@ -241,18 +280,8 @@ async function profiler(kind: 'profile' | 'report'): Promise<void> {
     ? `${run.fresh} new read${run.fresh === 1 ? '' : 's'}, ${run.cached} from cache`
     : `all ${run.cached} from cache`;
   const more = run.deferred ? C.dim(` · ${run.deferred} left for next run`) : '';
-  console.log(`\n  ${C.dim(`${spend} · saved to ${file}`)}${more}`);
-
-  // `profile` looks, `update` acts — so end by saying, honestly, where the load stands.
-  if (kind === 'profile') {
-    console.log(
-      profileLoaded()
-        ? `  ${C.dim(`loaded: ${humanMdPath()} · refresh it with \`${hint('stratless update')}\``)}\n`
-        : `  ${C.it('not loaded yet')} ${C.dim('· load it into your assistant:')} ${C.b(hint('stratless update'))}\n`,
-    );
-  } else {
-    console.log('');
-  }
+  console.log(`\n  ${C.dim(`${spend} · saved to ${cachedFile}`)}${more}`);
+  lookFooter(kind);
 }
 
 /**
@@ -285,11 +314,12 @@ async function update(rest: string[]): Promise<void> {
   // The aperture: the judge's view sizes, fitted to THIS user's window (p90 × 1.2, clamped) —
   // computed in code, costs nothing, never part of the cache identity.
   const aperture = fitAperture(window);
-  process.stderr.write(`\n  ${C.dim(`reading ${window.length.toLocaleString()} recent exchanges across ${sessions} sessions…`)}\n`);
+  preSpend(pendingCount([...window].reverse(), judgeLimit()));
+  process.stderr.write(`\n  ${CE.dim(`reading ${window.length.toLocaleString()} recent exchanges across ${sessions} sessions…`)}\n`);
   const run = await judgeAll([...window].reverse(), bin, {
     limit: judgeLimit(),
     aperture,
-    onProgress: (done, total) => process.stderr.write(`\r  ${C.dim(`judging ${done}/${total} new…`)}   `),
+    onProgress: (done, total) => process.stderr.write(`\r  ${CE.dim(`judging ${done}/${total} new…`)}   `),
   });
   process.stderr.write(`\r${' '.repeat(44)}\r`);
 
@@ -304,6 +334,13 @@ async function update(rest: string[]): Promise<void> {
   const state = readState();
   const gate = synthesisDue(state, cachedCount(), new Date(), { every: synthEvery() });
   const noProfile = !existsSync(humanMdPath());
+  // The daily version line rides ONLY on --auto consent (the installed hook is the consent
+  // artifact) — a plain-init user's update makes zero registry calls, provably (notify tests).
+  const versionLine = async (): Promise<void> => {
+    const newer = await dailyCheck(version(), refreshArmed());
+    if (newer) console.log(`  ${C.dim(`stratless ${newer} available: npm i -g stratless`)}`);
+  };
+
   if (!force && !noProfile && !gate.due) {
     // Record the fitted aperture even on the cheap path — state.json is where it's visible.
     writeState({ ...state, aperture: { ...aperture, computedAt: new Date().toISOString() } });
@@ -311,7 +348,9 @@ async function update(rest: string[]): Promise<void> {
     const judged = run.fresh ? `judged ${run.fresh} new` : 'nothing new to judge';
     console.log(`\n  ${C.ok('profile is fresh enough')}  ${C.dim(`(${judged} · ${gate.newSince}/${synthEvery()} toward the next build)`)}`);
     if (ensured) console.log(`  ${C.dim(`loaded: ${humanMdPath()}`)}`);
-    console.log(`  ${C.dim(`rebuild now with \`${hint('stratless update --now')}\``)}\n`);
+    console.log(`  ${C.dim(`rebuild now with \`${hint('stratless update --now')}\``)}`);
+    await versionLine();
+    console.log('');
     return;
   }
 
@@ -329,7 +368,7 @@ async function update(rest: string[]): Promise<void> {
   // ride one cadence. The analyst assigns the un-mined judgments (whole pile, batched); a separate
   // mind then checks every fresh receipt against its statement before the writer may lean on it.
   const pile = allJudgments();
-  process.stderr.write(`  ${C.dim('mining patterns…')}   `);
+  process.stderr.write(`  ${CE.dim('mining patterns…')}   `);
   const mined = mine(pile, bin);
   const audited = await auditPatterns(pile, bin);
   // THE GRADER (0.3.2) — every admitted pattern is a dated prediction; the window's new evidence
@@ -346,6 +385,7 @@ async function update(rest: string[]): Promise<void> {
 
   mkdirSync(STRATLESS, { recursive: true });
   writeFileSync(join(STRATLESS, 'profile.txt'), `${text}\n`);
+  writeRender('profile', { builtAt: new Date().toISOString(), sessions, exchanges: signal.length });
   const { humanMd, claudeMd } = injectProfile(text);
   writeState({
     lastSynthesisAt: new Date().toISOString(),
@@ -364,7 +404,9 @@ async function update(rest: string[]): Promise<void> {
     : gradeNote;
   console.log(`\n  ${C.ok('profile refreshed and loaded')}  ${C.dim(`(${why} · ${spend}${more}${mineNote})`)}`);
   console.log(`  ${C.dim(`wrote ${humanMd}`)}`);
-  console.log(`  ${C.dim(`pointed ${claudeMd} at it (via @import)`)}\n`);
+  console.log(`  ${C.dim(`pointed ${claudeMd} at it (via @import)`)}`);
+  await versionLine();
+  console.log('');
 }
 
 /**
@@ -396,16 +438,18 @@ function patternsCmd(rest: string[]): void {
       `(${store.patterns.length} admitted · ${store.candidates.length} candidates · last mined ${store.minedAt?.slice(0, 10) ?? 'never'})`,
     )}`,
   );
+  const ordered = displayOrder(store);
+  let idx = 0;
   for (const kind of Object.keys(KIND_LABEL)) {
-    const ps = store.patterns.filter((p) => p.kind === kind);
+    const ps = ordered.filter((p) => p.kind === kind);
     if (!ps.length) continue;
     console.log(`\n  ${C.b(KIND_LABEL[kind])}`);
     for (const p of ps) {
+      idx++;
       const audit = p.audit ? ` · audited ${p.audit.kept}/${p.audit.kept + p.audit.evicted}` : ' · unaudited';
-      console.log(`    ${C.ok('•')} ${p.statement}`);
-      console.log(`      ${C.dim(`${p.count}x · ${p.window.from} → ${p.window.to} · ${p.trend} · ${p.stability} · ${p.confidence}${audit}`)}`);
-      const shown = p.receipts.slice(0, 4).join(' ');
-      console.log(`      ${C.dim(`receipts: ${shown}${p.receipts.length > 4 ? ` … (${p.receipts.length} total)` : ''}`)}`);
+      console.log(`    ${C.ok(`${idx}.`)} ${p.statement}`);
+      console.log(`       ${C.dim(`${p.count}x · ${p.window.from} → ${p.window.to} · ${p.trend} · ${p.stability} · ${p.confidence}${audit}`)}`);
+      console.log(`       ${C.dim(`prove it: ${hint(`stratless receipt ${idx}`)}`)}`);
     }
   }
   if (store.candidates.length) {
@@ -417,6 +461,86 @@ function patternsCmd(rest: string[]): void {
     }
   }
   console.log(`\n  ${C.dim('Every line traces to real exchanges through its receipts. No receipt, no claim.')}\n`);
+}
+
+/** One field of a dereferenced exchange, display-capped like the judge's own aperture. */
+const receiptField = (s: string): string => {
+  const flat = s.replace(/\s+/g, ' ').trim();
+  return flat.length <= 500 ? flat : `${flat.slice(0, 300)} … ${flat.slice(-180)}`;
+};
+
+/** Print one receipt as a readable exchange — or the honest-failure lesson when the transcript
+ *  predates the archive and was reaped (this is exactly what init protects against). */
+function printReceipt(hash: string, byHash: Map<string, Judgment>): void {
+  const j = byHash.get(hash);
+  if (!j) {
+    console.log(`  ${C.dim(`── ${hash} — no judgment on record (evicted or from another era)`)}\n`);
+    return;
+  }
+  console.log(`  ${C.dim(`── ${j.ts.slice(0, 10)} · session ${j.session.slice(0, 8)} ─────────────`)}`);
+  const ex = findExchange(j.session, hash);
+  if (!ex) {
+    console.log(`  ${C.warn('The judgment survives; the raw transcript behind it was deleted by Claude Code\'s')}`);
+    console.log(`  ${C.warn('30-day cleanup before your archive existed. This is what init protects against.')}`);
+    console.log(`  ${C.dim(`what the judge recorded: ${j.line}`)}\n`);
+    return;
+  }
+  console.log(`  ${C.you('YOU ASKED')}     ${receiptField(ex.prompt)}`);
+  console.log(`  ${C.it('IT SAID')}       ${receiptField(ex.said)}`);
+  console.log(`  ${C.you('YOU REACTED')}   ${receiptField(ex.reaction)}\n`);
+}
+
+/**
+ * RECEIPT — dereference a claim back to the raw exchanges behind it. The falsifiability loop
+ * closes here: patterns → pick a number → the actual moments, readable. Free; zero model calls.
+ */
+function receiptCmd(rest: string[]): void {
+  const showAll = rest.includes('--all');
+  const arg = rest.find((a) => !a.startsWith('--'));
+  const store = loadPatterns();
+  const ordered = displayOrder(store);
+
+  if (!ordered.length) {
+    console.log(`\n  No patterns yet — nothing to prove. Build them: ${C.b(hint('stratless update --now'))}\n`);
+    return;
+  }
+  if (!arg) {
+    // clig: a bare run teaches with a REAL number from the user's own store, never scolds.
+    console.log(`\n  which claim? try: ${C.b(hint('stratless receipt 1'))}   ${C.dim(`(list them: ${hint('stratless patterns')})`)}\n`);
+    return;
+  }
+
+  const byHash = new Map(allJudgments().map((j) => [j.hash, j]));
+  const n = Number(arg);
+
+  if (Number.isInteger(n) && n >= 1) {
+    if (n > ordered.length) {
+      console.log(`\n  Only ${ordered.length} claim${ordered.length === 1 ? '' : 's'} on file — list them: ${C.b(hint('stratless patterns'))}\n`);
+      return;
+    }
+    const p = ordered[n - 1];
+    const shown = showAll ? p.receipts : p.receipts.slice(0, 3);
+    console.log(`\n  ${C.b(p.statement)}`);
+    console.log(`  ${C.dim(`${p.receipts.length} receipt${p.receipts.length === 1 ? '' : 's'} · showing ${shown.length}${showAll || shown.length === p.receipts.length ? '' : ' (--all for every one)'}`)}\n`);
+    for (const h of shown) printReceipt(h, byHash);
+    return;
+  }
+
+  // Hash-prefix mode (git-style) — for power users and bug reports.
+  const matches = matchReceiptPrefix(store, arg);
+  if (!matches.length) {
+    console.log(`\n  No receipt starts with "${arg}". ${C.dim(`Claim numbers work too: ${hint('stratless receipt 1')}`)}\n`);
+    return;
+  }
+  if (matches.length > 1) {
+    console.log(`\n  "${arg}" matches ${matches.length} receipts:`);
+    for (const m of matches) console.log(`    ${m.hash}  ${C.dim(`(claim ${m.claims.join(', ')})`)}`);
+    console.log('');
+    return;
+  }
+  const m = matches[0];
+  console.log(`\n  ${C.dim(`receipt ${m.hash} · cited by claim ${m.claims.join(', ')}`)}\n`);
+  printReceipt(m.hash, byHash);
 }
 
 /**
@@ -443,18 +567,22 @@ function stop(): void {
  * ASSISTANT's activity in a project): this answers "is stratless on, is my profile loaded, and how
  * much of my own plan has it spent?" Every line is read locally and for free — it spends nothing.
  */
-function status(): void {
-  // 1. Is the after-session refresh installed? (the Stop hook we write into settings.json)
-  const settings = join(homedir(), '.claude', 'settings.json');
-  let refresh = false;
-  try {
-    if (existsSync(settings)) {
-      const s = JSON.parse(readFileSync(settings, 'utf8')) as { hooks?: { Stop?: unknown } };
-      refresh = JSON.stringify(s.hooks?.Stop ?? []).includes('stratless update');
-    }
-  } catch {
-    /* an unreadable settings file reads as off, never a crash */
+async function status(rest: string[] = []): Promise<void> {
+  // `--check` is the everyone-door for version news: user-initiated, on-screen, announced.
+  // Plain `status` stays fully offline — the trust posture is not tunable.
+  if (rest.includes('--check')) {
+    console.log(`\n  ${C.dim('checking npm for a newer version…')}`);
+    const latest = await fetchLatest();
+    const installed = version();
+    if (!latest) console.log(`  ${C.warn('could not reach the registry')} ${C.dim('(offline? try again later)')}\n`);
+    else if (newerThan(latest, installed))
+      console.log(`  installed ${C.b(installed)} · latest ${C.b(latest)} — update: ${C.b('npm i -g stratless')}\n`);
+    else console.log(`  ${C.ok('up to date')} ${C.dim(`(installed ${installed} = latest)`)}\n`);
+    return;
   }
+
+  // 1. Is the after-session refresh installed? (the Stop hook we write into settings.json)
+  const refresh = refreshArmed();
 
   // 2. Is the profile actually loaded? One definition, shared with `profile`'s footer.
   const human = humanMdPath();
@@ -542,7 +670,7 @@ async function main(): Promise<void> {
     console.log(
       `  ${C.dim(
         auto
-          ? `Auto-refresh rebuilds your profile in the background after each session. Turn it off with: ${hint('stratless stop')}`
+          ? `Auto-refresh rebuilds your profile in the background after each session. It also checks npm once a day so you hear about fixes. Turn it all off with: ${hint('stratless stop')}`
           : `Auto-refresh is off. Turn on background updates any time with: ${hint('stratless init --auto')}`,
       )}\n`,
     );
@@ -556,30 +684,35 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (!cmd || cmd === 'help' || cmd === '--help') {
+  if (!cmd || cmd === 'help' || cmd === '--help' || cmd === '-h') {
     console.log(`
   ${C.b('stratless')} — build your AI a model of who you are
 
+    ${C.dim('get started:')}  ${C.b('npx stratless init')}
+
     ${C.b('stratless init')}       ${C.dim('keep your history safe (add --auto for background refresh)')}
-    ${C.b('stratless profile')}    ${C.dim('see the model of you (load it with `stratless update`)')}
-    ${C.b('stratless report')}     ${C.dim('the same picture, written for you to read')}
+    ${C.b('stratless profile')}    ${C.dim('see the model of you — free, instant (--now: rebuild)')}
+    ${C.b('stratless report')}     ${C.dim('the same picture, written for you to read — free (--now: rebuild)')}
     ${C.b('stratless update')}     ${C.dim('judge what is new; mine + rebuild + load the profile when due (--now: always)')}
     ${C.b('stratless patterns')}   ${C.dim('every claim with its receipts: counts, trends, evidence (--all: candidates too)')}
+    ${C.b('stratless receipt')}    ${C.dim('prove a claim: the raw exchanges behind it (receipt 3, or a hash prefix)')}
     ${C.b('stratless stop')}       ${C.dim('turn it off — stop refreshing and unload the profile')}
-    ${C.b('stratless status')}     ${C.dim("stratless's own state: on or off, and what it has cost")}
+    ${C.b('stratless status')}     ${C.dim("stratless's own state and what it has cost (--check: newer version?)")}
     ${C.b('stratless stats')}      ${C.dim("your assistant's activity in a project: raw counts, free")}
 
   ${C.dim('Runs on your machine. Reads your own history. Nothing leaves.')}
+  ${C.dim('docs: https://stratless.com/docs')}
 `);
     return;
   }
 
   if (cmd === 'stats') return stats(cwd);
-  if (cmd === 'status') return status();
-  if (cmd === 'profile') return profiler('profile');
-  if (cmd === 'report') return profiler('report');
+  if (cmd === 'status') return status(args.slice(1));
+  if (cmd === 'profile') return profiler('profile', args.slice(1));
+  if (cmd === 'report') return profiler('report', args.slice(1));
   if (cmd === 'update') return update(args.slice(1));
   if (cmd === 'patterns') return patternsCmd(args.slice(1));
+  if (cmd === 'receipt') return receiptCmd(args.slice(1));
   if (cmd === 'stop') return stop();
 
   console.error(`  unknown command: ${cmd}`);

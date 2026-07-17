@@ -631,6 +631,30 @@ export async function auditPatterns(
   return { store, calls, kept, evicted };
 }
 
+/** The one display order both `patterns` and `receipt` share — kind groups, store order within.
+ *  Receipt numbers are session-scoped by design (a re-mine can renumber); the receipt output
+ *  restates the claim text, so a stale number is visibly wrong, never silently wrong. */
+export function displayOrder(store: PatternStore): Pattern[] {
+  const byKind = new Map<string, Pattern[]>();
+  for (const p of store.patterns) byKind.set(p.kind, [...(byKind.get(p.kind) ?? []), p]);
+  return (KINDS as readonly string[]).flatMap((k) => byKind.get(k) ?? []);
+}
+
+/** Git-style receipt-hash prefix matching across all admitted patterns. Exported for tests. */
+export function matchReceiptPrefix(
+  store: PatternStore,
+  prefix: string,
+): { hash: string; claims: number[] }[] {
+  const order = displayOrder(store);
+  const hits = new Map<string, number[]>();
+  order.forEach((p, i) => {
+    for (const h of p.receipts) {
+      if (h.startsWith(prefix)) hits.set(h, [...(hits.get(h) ?? []), i + 1]);
+    }
+  });
+  return [...hits.entries()].map(([hash, claims]) => ({ hash, claims }));
+}
+
 // ────────────────────────────────────────────────────────────────────────────────────────────────
 // THE GRADER — the fourth mind (0.3.2). Every admitted pattern is a dated prediction: "this will
 // keep happening." Each gate, the window's new evidence grades it. The model does exactly ONE

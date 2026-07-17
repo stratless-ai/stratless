@@ -13,9 +13,14 @@ import { test, before, after } from 'node:test';
 
 import { parseSession, isRealPrompt } from './transcript.js';
 import { runStreamBatch, SENTINEL_PREFIX } from './stream.js';
-import { parseExchanges, loadRecentExchanges } from './exchange.js';
+import { makePalette } from './palette.js';
+import { shouldCheck, newerThan, dailyCheck, readNotify, writeNotify } from './notify.js';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { parseExchanges, loadRecentExchanges, findExchange } from './exchange.js';
 import { injectProfile, removeProfile, ensureLoaded } from './sink.js';
-import { readState, writeState, synthesisDue } from './state.js';
+import { readState, writeState, synthesisDue, readRenders, writeRender } from './state.js';
+import { pendingCount, PIPELINE_V as PV } from './judge.js';
 import {
   aggregate,
   computeTrend,
@@ -28,11 +33,14 @@ import {
   classifyGrade,
   shouldFlag,
   timeTag,
+  displayOrder,
+  matchReceiptPrefix,
   type GradeRecord,
+  type PatternStore,
 } from './miner.js';
 import { readUsage, recordUsage } from './usage.js';
 import { parseJsonResult } from './claude.js';
-import { hasSignal, inventedNumbers, renderPatternSheet, renderSurprises } from './synthesize.js';
+import { hasSignal, inventedNumbers, renderPatternSheet, renderSurprises, stripPreamble } from './synthesize.js';
 import {
   cachedCount,
   judgeInput,
@@ -251,6 +259,158 @@ test('fitAperture sizes the view from the user\'s own window — p90 × 1.2, cla
   const pf = fitAperture(paster);
   assert.equal(pf.prompt, 2400, 'the ceiling clamps a log-paster — worst case stays publishable');
   assert.equal(pf.said, 3500, 'said ceiling holds too');
+});
+
+test('stripPreamble: task meta-chatter never reaches the artifact (caught live, 2026-07-17)', () => {
+  assert.equal(
+    stripPreamble("Good, exactly 350. Here's the profile:\n\nWHAT THEY KNOW\nbackend"),
+    'WHAT THEY KNOW\nbackend',
+    'the literal leak from the dogfood is stripped',
+  );
+  assert.equal(stripPreamble('WHAT THEY KNOW\nbackend'), 'WHAT THEY KNOW\nbackend', 'clean output untouched');
+  assert.equal(
+    stripPreamble('Here is what matters most about them: they verify claims.\nMore prose.'),
+    'Here is what matters most about them: they verify claims.\nMore prose.',
+    'a real first sentence ending mid-line is never stripped — narrow on purpose',
+  );
+});
+
+// ── the notifier: nothing ambient without consent — and the boundary is PROVABLE ───────────────
+
+test('shouldCheck: the once-daily rule, pure, no network anywhere near it', () => {
+  const now = new Date('2026-07-17T12:00:00Z');
+  assert.equal(shouldCheck({}, now), true, 'never checked = check');
+  assert.equal(shouldCheck({ checkedAt: '2026-07-17T02:00:00Z' }, now), false, '10 hours old = fresh, no check');
+  assert.equal(shouldCheck({ checkedAt: '2026-07-16T02:00:00Z' }, now), true, '34 hours old = stale');
+  assert.equal(shouldCheck({ checkedAt: 'garbage' }, now), true, 'unparseable = check (fail open, one lookup)');
+});
+
+test('newerThan: numeric dotted compare; unknowns are never newer', () => {
+  assert.equal(newerThan('0.3.3', '0.3.2'), true);
+  assert.equal(newerThan('0.3.2', '0.3.2'), false);
+  assert.equal(newerThan('0.3.1', '0.3.2'), false, 'older is not newer');
+  assert.equal(newerThan('0.10.0', '0.9.9'), true, 'numeric, not lexicographic');
+  assert.equal(newerThan(undefined, '0.3.2'), false, 'no answer = no nag');
+  assert.equal(newerThan('not-a-version', '0.3.2'), false, 'garbage = no nag');
+});
+
+test('THE CONSENT BOUNDARY: unarmed dailyCheck never touches the network — provably', async () => {
+  const f = join(dir, 'notify-unarmed.json');
+  const tripwire = () => {
+    throw new Error('NETWORK CALL ON THE UNARMED PATH — the posture is broken');
+  };
+  const out = await dailyCheck('0.3.2', false, { fetcher: tripwire as never, file: f });
+  assert.equal(out, undefined, 'unarmed = nothing, instantly');
+  assert.deepEqual(readNotify(f), {}, 'and not even a cache write happened');
+});
+
+test('armed dailyCheck: fetches once a day, serves from cache between, nags only when newer', async () => {
+  const f = join(dir, 'notify-armed.json');
+  const now = new Date('2026-07-17T12:00:00Z');
+  let fetches = 0;
+  const fetcher = (async () => {
+    fetches++;
+    return { ok: true, json: async () => ({ version: '0.9.0' }) };
+  }) as never;
+
+  const first = await dailyCheck('0.3.2', true, { now, fetcher, file: f });
+  assert.equal(first, '0.9.0', 'stale cache = fetch, and 0.9.0 > 0.3.2 nags');
+  assert.equal(fetches, 1);
+
+  const second = await dailyCheck('0.3.2', true, { now: new Date('2026-07-17T13:00:00Z'), fetcher, file: f });
+  assert.equal(second, '0.9.0', 'within the day = served from cache');
+  assert.equal(fetches, 1, 'NO second fetch — once daily means once daily');
+
+  const upToDate = await dailyCheck('0.9.0', true, { now: new Date('2026-07-17T14:00:00Z'), fetcher, file: f });
+  assert.equal(upToDate, undefined, 'already on latest = silence');
+});
+
+// ── the receipt machinery: prove any claim from its raw exchanges (the polish release) ─────────
+
+test('findExchange dereferences a receipt session-targeted; a reaped transcript returns undefined', () => {
+  const root = mkdtempSync(join(tmpdir(), 'stratless-receipt-'));
+  const p = join(root, 'sess-abc123.jsonl');
+  writeFileSync(p, `${[u('why a queue?'), a('because bursts arrive faster than the worker drains'), u('ok that lands')].join('\n')}\n`);
+  const [ex] = parseExchanges(p);
+  assert.ok(ex, 'fixture parsed');
+  const found = findExchange('sess-abc123', ex.hash, [root]);
+  assert.equal(found?.reaction, 'ok that lands', 'the raw exchange comes back readable');
+  assert.equal(findExchange('sess-abc123', 'not-a-real-hash', [root]), undefined, 'wrong hash = nothing invented');
+  assert.equal(findExchange('reaped-session', ex.hash, [root]), undefined, 'missing transcript = the honest-failure path');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('displayOrder + matchReceiptPrefix: one numbering shared by patterns and receipt, git-style prefixes', () => {
+  const pat = (id: string, kind: string, receipts: string[]) => ({
+    id,
+    statement: `claim ${id}`,
+    kind: kind as never,
+    count: receipts.length,
+    window: { from: '2026-07-01', to: '2026-07-17' },
+    trend: 'steady' as const,
+    stability: 'slow' as const,
+    receipts,
+    confidence: 'moderate' as const,
+  });
+  const store: PatternStore = {
+    v: 1,
+    patterns: [pat('t1', 'think', ['aaa111', 'bbb222']), pat('k1', 'know', ['aaa999'])],
+    candidates: [],
+    assignments: {},
+    audited: {},
+    graded: {},
+  };
+  const order = displayOrder(store);
+  assert.deepEqual(order.map((p) => p.id), ['k1', 't1'], 'kind order rules the numbering: know before think');
+  assert.deepEqual(matchReceiptPrefix(store, 'bbb'), [{ hash: 'bbb222', claims: [2] }], 'a unique prefix resolves with its claim number');
+  assert.equal(matchReceiptPrefix(store, 'aaa').length, 2, 'an ambiguous prefix lists every match');
+  assert.equal(matchReceiptPrefix(store, 'zzz').length, 0, 'no match = no invention');
+});
+
+// ── looking is free: the render sidecar and the pre-spend count (the polish release) ───────────
+
+test('renders sidecar: round-trips build facts; missing/corrupt = build path, never a fake header', () => {
+  const f = join(dir, 'renders.json');
+  assert.deepEqual(readRenders(f), {}, 'missing = no cached renderings');
+  writeFileSync(f, 'junk {');
+  assert.deepEqual(readRenders(f), {}, 'corrupt = no cached renderings, never a throw');
+  writeRender('profile', { builtAt: '2026-07-17T10:00:00Z', sessions: 6, exchanges: 119 }, f);
+  writeRender('report', { builtAt: '2026-07-17T11:00:00Z', sessions: 6, exchanges: 120 }, f);
+  const r = readRenders(f);
+  assert.equal(r.profile?.exchanges, 119, "the header's numbers come from the BUILD, stored not recomputed");
+  assert.equal(r.report?.builtAt, '2026-07-17T11:00:00Z', 'each rendering keeps its own build facts');
+});
+
+test('pendingCount: the pre-spend disclosure counts the cache diff, bounded by the budget', () => {
+  const f = join(dir, 'pending-cache.json');
+  process.env.STRATLESS_CACHE = f;
+  try {
+    const ex = (h: string) => ({ prompt: 'p', said: 's', reaction: 'r', ts: '2026-07-01T10:00:00Z', session: 'x', hash: h });
+    writeFileSync(f, JSON.stringify({ h1: { ...j2('none'), hash: 'h1', v: PV } }));
+    assert.equal(pendingCount([ex('h1'), ex('h2'), ex('h3')], 50), 2, 'cached h1 is free; h2+h3 would spend');
+    assert.equal(pendingCount([ex('h1'), ex('h2'), ex('h3')], 1), 1, 'the budget bounds the disclosure');
+    assert.equal(pendingCount([ex('h1')], 50), 0, 'nothing fresh = no pre-spend line at all');
+  } finally {
+    delete process.env.STRATLESS_CACHE;
+  }
+});
+
+// ── the palette: escapes only when a human eye is watching (clig + the NO_COLOR spec) ──────────
+
+test('palette: per-stream TTY, NO_COLOR set-and-non-empty, TERM=dumb — bold/dim stripped too', () => {
+  const clean = {} as NodeJS.ProcessEnv;
+  assert.equal(makePalette({ isTTY: true }, clean).b('x'), '\x1b[1mx\x1b[0m', 'TTY + clean env = styled');
+  assert.equal(makePalette({ isTTY: false }, clean).b('x'), 'x', 'piped = plain — bold stripped too (documented deviation)');
+  assert.equal(makePalette({ isTTY: true }, { NO_COLOR: '1' }).dim('x'), 'x', 'NO_COLOR set-and-non-empty = plain');
+  assert.equal(makePalette({ isTTY: true }, { NO_COLOR: '' }).b('x'), '\x1b[1mx\x1b[0m', 'NO_COLOR="" does NOT disable (spec nuance)');
+  assert.equal(makePalette({ isTTY: true }, { TERM: 'dumb' }).ok('x'), 'x', 'TERM=dumb = plain');
+});
+
+test('a piped `status` run emits zero escape bytes (the audit gap, closed for real)', () => {
+  const bin = fileURLToPath(new URL('./index.js', import.meta.url));
+  const out = execFileSync('node', [bin, 'status'], { encoding: 'utf8' });
+  assert.ok(!out.includes('\x1b'), 'stdout through a pipe carries no escape codes');
+  assert.ok(out.includes('stratless status'), 'and the content itself still arrives');
 });
 
 // ── the streaming Brain (0.3.1): one harness, many verdicts — and never its own exhaust ────────

@@ -42,17 +42,26 @@ useSeo({
           delete. <code>stratless stop</code> unloads the profile in one command.
         </p>
 
-        <h2>The one network call, and it isn't ours</h2>
+        <h2>Network calls, the tiered truth</h2>
         <p>
           To judge your history and write your profile, stratless borrows
           <strong>the coding assistant you already have installed</strong>. It shells out to it
           (<code>claude -p</code>), on your own subscription or key, and that request goes to your
-          assistant's provider exactly as it does when you use it normally.
+          assistant's provider exactly as it does when you use it normally. That is the whole
+          default story: your own claude, doing the reading.
         </p>
         <p>
-          <strong>It never touches us.</strong> We ship no model, hold no key, and run no proxy.
-          And when stratless cannot read your history honestly, it refuses and writes nothing:
-          silence beats a wrong profile.
+          Two things can add one more call, both by your hand:
+          <code>stratless status --check</code> asks the npm registry whether a newer version
+          exists, when you run it, on screen. And turning on <code>--auto</code> — explicit consent
+          to background activity — adds a once-daily version check to npm during the background
+          refresh, so you hear about fixes; <code>init --auto</code> tells you this at the moment
+          you arm it. Plain-<code>init</code> users get nothing ambient, ever.
+        </p>
+        <p>
+          <strong>None of it touches us.</strong> We ship no model, hold no key, and run no proxy;
+          the version check carries no payload. And when stratless cannot read your history
+          honestly, it refuses and writes nothing: silence beats a wrong profile.
         </p>
 
         <h2>What we collect</h2>
@@ -61,7 +70,8 @@ useSeo({
           no phone-home of any kind. This is not a promise we're asking you to take on trust:
           <a :href="legal.source" target="_blank" rel="noopener">the source is public and it is
           about {{ cliLines }} lines</a>. You can read the whole thing in an afternoon and confirm
-          there is no network code in it.
+          the only network code in it is the opt-in version check described above — one file, one
+          URL, no payload.
         </p>
 
         <h2>This website</h2>

@@ -237,7 +237,9 @@ Hard rules:
 - Ground every claim in the evidence. Invent nothing. Thin evidence means say less, don't pad.
 - Never use an em dash or en dash (— or –). Use a comma, a colon, a period, or parentheses instead.
 - Second person, addressed to the assistant about the person. Under 350 words total. Lead each
-  section with what matters most.`;
+  section with what matters most.
+- Output the document text ONLY, starting with its first heading. No preamble, no commentary, no
+  word counts, nothing about this task — the output IS the file.`;
 
 const PATTERNS_REPORT_PROMPT = `You are writing a short, honest note to a PERSON about their own
 pattern of working with an AI coding assistant. The reader is that person — not their assistant.
@@ -262,7 +264,8 @@ Hard rules:
 - NUMBERS: only as they appear in the evidence. Never compute, round, or invent one.
 - Ground every claim in the evidence. Invent nothing.
 - Never use an em dash or en dash (— or –). Use a comma, a colon, a period, or parentheses instead.
-- Second person ("you"), plain and kind, no headings, under 220 words.`;
+- Second person ("you"), plain and kind, no headings, under 220 words.
+- Output the note text ONLY. No preamble, no commentary, nothing about this task.`;
 
 /** Shared assembly for the two pattern-grounded renderings — one evidence block, two audiences. */
 function synthesizeFromPatterns(
@@ -288,10 +291,25 @@ function synthesizeFromPatterns(
   ].join('\n');
   const out = runClaude(bin, input, synthModel(), 'synthesis');
   if (!out) return {};
-  const text = deDash(out);
+  const text = deDash(stripPreamble(out));
   const invented = inventedNumbers(text, input);
   if (invented.length) return { invented }; // the promise layer: refuse, don't lie
   return { text };
+}
+
+/**
+ * Strip a leading line of task meta-chatter ("Good, exactly 350. Here's the profile:") — caught
+ * live in the polish dogfood, where it reached the saved artifact. The numbers-lint could not
+ * catch it: the numeral came from the prompt itself. Narrow on purpose: only ONE leading line,
+ * only when it reads as the model addressing its task. The prompt also forbids it; this is the
+ * promise. Exported for tests.
+ */
+export function stripPreamble(s: string): string {
+  const lines = s.split('\n');
+  if (lines.length > 1 && /^(good|sure|okay|ok|here|certainly|alright|done)\b.*:\s*$/i.test(lines[0].trim())) {
+    return lines.slice(1).join('\n').replace(/^\s+/, '');
+  }
+  return s;
 }
 
 /**
