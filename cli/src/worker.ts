@@ -25,6 +25,7 @@ import { linkSync, readFileSync, renameSync, unlinkSync, writeFileSync, mkdirSyn
 import { execFileSync, spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { readProgress, writeProgress } from './progress.js';
 
 /** Where the lock lives. Override with STRATLESS_LOCK (tests). Exported so refusal messages can
  *  name the exact file a stuck user should inspect. */
@@ -154,6 +155,55 @@ export function releaseLock(file: string = lockFilePath()): void {
   } catch {
     /* already gone */
   }
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Kill a running worker (C7 — `stop` is total): SIGTERM first so it can label itself and die at a
+ * checkpoint, a short grace, then SIGKILL. Whatever it leaves behind is cleaned: its lock removed,
+ * its progress labeled "stopped by you" if it died too fast to say so itself. Returns whether a
+ * worker was actually there to kill. Stopping never wastes paid work — the hash-keyed cache means
+ * the next run re-asks at most one chunk.
+ */
+export async function stopWorker(graceMs = 3000): Promise<{ killed: boolean; pid?: number }> {
+  const holder = readLock();
+  if (!holder || lockIsStale(holder)) return { killed: false };
+  try {
+    process.kill(holder.pid, 'SIGTERM');
+  } catch {
+    return { killed: false }; // died between the read and the signal — nothing to stop
+  }
+  const deadline = Date.now() + graceMs;
+  while (Date.now() < deadline && isAlive(holder.pid)) await sleep(100);
+  if (isAlive(holder.pid)) {
+    try {
+      process.kill(holder.pid, 'SIGKILL');
+    } catch {
+      /* it beat us to the exit */
+    }
+    await sleep(200);
+  }
+  // The dead worker's leftovers: its lock (a SIGKILL skips its cleanup)…
+  if (readLock()?.pid === holder.pid) {
+    try {
+      unlinkSync(lockFilePath());
+    } catch {
+      /* already gone */
+    }
+  }
+  // …and its narration — the state must say what happened, in the person's terms.
+  const p = readProgress();
+  if (!p || p.pid !== holder.pid || !['done', 'failed', 'stopped'].includes(p.phase)) {
+    writeProgress({
+      pid: holder.pid,
+      phase: 'stopped',
+      ok: false,
+      startedAt: p?.pid === holder.pid ? p.startedAt : new Date().toISOString(),
+      summary: ['stopped by you — everything already judged is banked; the next run re-reads at most one chunk'],
+    });
+  }
+  return { killed: true, pid: holder.pid };
 }
 
 /**

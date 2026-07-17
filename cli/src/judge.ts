@@ -321,6 +321,8 @@ export async function judgeAll(
 
   // Rung 1 — the stream: one harness, many verdicts. Progress ticks LIVE, per turn — a streamed
   // batch is minutes of otherwise-silent work, and silence reads as a hang (learned by watching).
+  // Results are BANKED PER SESSION as they land (C3): a death mid-batch loses at most the chunk
+  // in flight, never the paid-for verdicts of the sessions before it.
   const byHash = new Map(toJudge.map((e) => [e.hash, e]));
   const stream = await runStreamBatch(bin, {
     systemPrompt: JUDGE_RULES,
@@ -329,11 +331,14 @@ export async function judgeAll(
     feature: 'judge',
     items: toJudge.map((e) => ({ id: e.hash, prompt: judgeTurnBody(e, opts.aperture) })),
     onTurn: (done, total) => opts.onProgress?.(done, total),
+    onSessionResults: (chunk) => {
+      for (const [hash, text] of chunk) {
+        const ex = byHash.get(hash);
+        if (ex) accept(ex, toJudgment(ex, text));
+      }
+      saveCache(cache); // the checkpoint: this chunk's spend is now on disk, kill-safe
+    },
   });
-  for (const [hash, text] of stream.results) {
-    const ex = byHash.get(hash);
-    if (ex) accept(ex, toJudgment(ex, text));
-  }
 
   // Rung 2 — the per-call fallback for whatever the stream left behind.
   const turnsMs = [...stream.turnsMs];

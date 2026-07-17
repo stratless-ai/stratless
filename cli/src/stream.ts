@@ -85,6 +85,9 @@ export interface StreamOpts {
   /** base of the exponential backoff (default 1000ms; STRATLESS_BACKOFF_BASE_MS overrides — tests) */
   backoffBaseMs?: number;
   onTurn?: (done: number, total: number) => void;
+  /** called after EACH session with that session's results — the caller's checkpoint moment (C3:
+   *  bank per chunk, so a death loses at most one chunk, never the whole batch) */
+  onSessionResults?: (results: Map<string, string>) => void;
 }
 
 interface TurnUsage {
@@ -145,11 +148,13 @@ function runSession(bin: string, opts: StreamOpts, items: StreamItem[]): Promise
       ],
       { stdio: ['pipe', 'pipe', 'pipe'], env },
     );
+    activeChild = child; // the kill hook's target while this session runs
 
     const finish = () => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      if (activeChild === child) activeChild = undefined;
       try {
         child.kill();
       } catch {
@@ -271,6 +276,21 @@ function runSession(bin: string, opts: StreamOpts, items: StreamItem[]): Promise
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
+// ── the worker's kill hook (Phase 2, C7) ───────────────────────────────────────────────────────
+// The one active borrowed child, tracked so `stop` can end a run in seconds: SIGTERM lands, the
+// worker kills the in-flight session (completed turns are already banked; the rest re-asks next
+// wake — C3 bounds the loss to one chunk), and exits at once.
+let activeChild: ReturnType<typeof spawn> | undefined;
+
+/** Kill the in-flight streamed session, if any. Safe to call from a signal handler. */
+export function killActiveSession(): void {
+  try {
+    activeChild?.kill('SIGKILL');
+  } catch {
+    /* already gone */
+  }
+}
+
 /**
  * Run a batch of one-liner items through streamed sessions, rotating every `maxTurnsPerSession`.
  * Records ONE meter entry per session (a session is one borrowed process — `calls` counts
@@ -316,6 +336,7 @@ export async function runStreamBatch(bin: string, opts: StreamOpts): Promise<Str
       anyStreamed = true;
       zeroRuns = 0;
       recordUsage({ ...session.usage, feature: opts.feature });
+      opts.onSessionResults?.(session.results); // the checkpoint moment — bank this chunk NOW (C3)
     } else if (session.failure) {
       // The session booted a whole harness (~17–24k tokens, measured) and died before its first
       // receipt — the meter must not record that as free (C11). An unmetered call is the honest

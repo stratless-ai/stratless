@@ -184,6 +184,50 @@ export function sessionCount(exchanges: Exchange[]): number {
   return new Set(exchanges.map((e) => e.session)).size;
 }
 
+/** Refuse to slurp any single pathological file — C1's per-file cap, applied at the iterator. */
+const SINGLE_FILE_CAP = 96 * 1024 * 1024;
+
+/**
+ * THE FLAT-MEMORY WALK (Phase 2, C1) — every exchange, newest files first, ONE file in memory at
+ * a time. `loadRecentExchanges` above bounds a WINDOW read; this is the unbounded walk the
+ * cold-start read (newest-first to the floor, Phase 3) and the backfill cursor (Phase 4) consume:
+ * RSS stays flat whether the archive holds 200 exchanges or 20,000, because nothing ever holds
+ * more than one parsed transcript plus the dedup set of seen hashes. Order is newest-first by
+ * file mtime, then newest-first within each file — the same approximation the window loader
+ * trusts, exact enough for evidence that is keyed by its own timestamp anyway.
+ */
+export function* iterateExchangesNewestFirst(roots: string[] = [PROJECTS, ARCHIVE]): Generator<Exchange> {
+  const files = roots
+    .flatMap((r) => allJsonl(r))
+    .map((p) => {
+      try {
+        const s = statSync(p);
+        return { p, mtime: s.mtimeMs, size: s.size };
+      } catch {
+        return { p, mtime: 0, size: 0 };
+      }
+    })
+    .sort((a, b) => b.mtime - a.mtime);
+
+  const seen = new Set<string>();
+  for (const f of files) {
+    if (f.size > SINGLE_FILE_CAP) continue; // a 100MB "transcript" is not a transcript
+    let ex: Exchange[];
+    try {
+      ex = parseExchanges(f.p);
+    } catch {
+      continue; // one unreadable file must not sink the walk
+    }
+    for (let i = ex.length - 1; i >= 0; i--) {
+      // within a file, newest exchanges are last — yield them first
+      const e = ex[i];
+      if (seen.has(e.hash)) continue;
+      seen.add(e.hash);
+      yield e;
+    }
+  }
+}
+
 /**
  * Dereference one receipt back to its raw exchange — the `stratless receipt` machinery.
  *
