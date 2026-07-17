@@ -316,8 +316,15 @@ test('review: update respects a foreground COMMAND lock — no tail, no spawn, h
   await sleep(80);
   try {
     writeFileSync(env.STRATLESS_LOCK, `${JSON.stringify({ pid: holder.pid, startedAt: new Date().toISOString(), kind: 'command' })}\n`);
+    // Pin a bin that EXISTS (never invoked — update refuses at the lock) so this test does not
+    // secretly depend on the machine having a real `claude` on PATH. CI caught exactly that.
     const out = await new Promise<string>((resolve) => {
-      execFile(process.execPath, [cli, 'update'], { env: { ...process.env, ...env }, timeout: 15_000 }, (_e, stdout) => resolve(stdout));
+      execFile(
+        process.execPath,
+        [cli, 'update'],
+        { env: { ...process.env, ...env, STRATLESS_CLAUDE_BIN: process.execPath }, timeout: 15_000 },
+        (_e, stdout) => resolve(stdout),
+      );
     });
     assert.ok(out.includes('another stratless command is running'), 'the command holder is named, not tailed');
     assert.equal(readProgress(env.STRATLESS_PROGRESS), undefined, 'and no worker was spawned over it');
