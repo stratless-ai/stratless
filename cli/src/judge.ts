@@ -234,6 +234,14 @@ export function allJudgments(): Judgment[] {
   return Object.values(loadCache()).filter((j) => currentJudgment(j));
 }
 
+/** How many FRESH judge calls a run over these exchanges would make (the pre-spend disclosure:
+ *  the person hears the bill before the first call, not after). Free — a cache read. */
+export function pendingCount(exchanges: Exchange[], limit: number): number {
+  const cache = loadCache();
+  const unjudged = exchanges.filter((e) => !currentJudgment(cache[e.hash])).length;
+  return Math.min(unjudged, limit);
+}
+
 function loadCache(): Cache {
   const file = cachePath();
   if (!existsSync(file)) return {};

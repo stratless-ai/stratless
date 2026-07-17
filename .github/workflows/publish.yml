@@ -59,6 +59,16 @@ jobs:
           echo "tag: cli-v$tag   package.json: $pkg"
           [ "$tag" = "$pkg" ] || { echo "::error::tag cli-v$tag ≠ package.json $pkg"; exit 1; }
 
+      # Two releases shipped with their CHANGELOG date still "unreleased" (0.3.1, 0.3.2 — both
+      # caught after the fact). Dates are gated now, never remembered.
+      - name: the changelog must carry a date for this version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          v="${GITHUB_REF_NAME#cli-v}"
+          grep -qE "^## \[$v\] — [0-9]{4}-[0-9]{2}-[0-9]{2}" cli/CHANGELOG.md \
+            || { echo "::error::CHANGELOG [$v] has no release date — still 'unreleased'"; exit 1; }
+
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter ./cli exec tsc --noEmit
       - run: pnpm --filter ./cli build

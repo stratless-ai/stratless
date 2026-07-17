@@ -71,6 +71,54 @@ export function writeState(s: SynthState, file: string = statePath()): void {
   }
 }
 
+// ── the render sidecar (the polish release): looking is free, and the header stays honest ──────
+
+/** What one cached rendering knows about its own build — the header's numbers come from the
+ *  BUILD, never recomputed at print time (numbers computed, never typed — and never faked). */
+export interface RenderMeta {
+  builtAt: string;
+  sessions: number;
+  exchanges: number;
+}
+
+export interface Renders {
+  profile?: RenderMeta;
+  report?: RenderMeta;
+}
+
+/** Where the sidecar lives. Override with STRATLESS_RENDERS (tests). */
+const rendersPath = (): string => process.env.STRATLESS_RENDERS || join(homedir(), '.stratless', 'renders.json');
+
+/** Missing or corrupt reads as no-cached-renderings — the look falls back to a build. */
+export function readRenders(file: string = rendersPath()): Renders {
+  try {
+    if (!existsSync(file)) return {};
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as Partial<Record<'profile' | 'report', Partial<RenderMeta>>>;
+    const out: Renders = {};
+    for (const k of ['profile', 'report'] as const) {
+      const m = raw[k];
+      if (m && typeof m.builtAt === 'string' && Number.isFinite(Number(m.sessions)) && Number.isFinite(Number(m.exchanges))) {
+        out[k] = { builtAt: m.builtAt, sessions: Number(m.sessions), exchanges: Number(m.exchanges) };
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** Record one rendering's build facts. Best-effort — a lost sidecar costs one rebuild, never a lie. */
+export function writeRender(kind: 'profile' | 'report', meta: RenderMeta, file: string = rendersPath()): void {
+  try {
+    const all = readRenders(file);
+    all[kind] = meta;
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, `${JSON.stringify(all)}\n`);
+  } catch {
+    /* best-effort by design */
+  }
+}
+
 export interface GateDecision {
   due: boolean;
   /** the honest one-phrase why, for the receipt ('' when not due) */

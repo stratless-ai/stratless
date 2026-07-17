@@ -4,7 +4,36 @@ All notable changes to `stratless` are recorded here — written by hand, for th
 not scraped from commits. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and each version matches its `cli-v*` git tag.
 
-## [0.3.2] — unreleased
+## [0.3.3] — unreleased — looking is free, evidence is readable, and the tool talks properly through a pipe
+
+### Changed
+- **Looking is free.** `stratless profile` and `stratless report` now print the last built
+  rendering instantly, at zero spend, under a header carrying the build's own date and numbers.
+  Only `update` — and an explicit `--now`, or a first-ever look — spends. One word keeps one
+  meaning: `--now` = spend now, skip nothing.
+- **The bill is announced, never discovered.** Before any run makes a fresh read, it says so
+  first: `about to read 37 new exchanges on your own claude (each read once, cached forever)`.
+- **Clean pipes.** Output through a pipe, with `NO_COLOR` set (and non-empty, per the spec), or
+  under `TERM=dumb` carries zero escape codes — bold and dim stripped too, stricter than the
+  NO_COLOR spec on purpose. `stratless status | grep loaded` finally behaves.
+- `-h` now works alongside `--help` and `help`; the help screen leads with the getting-started
+  line and ends with the docs link; `report` closes by pointing at its evidence.
+
+### Added
+- **`stratless receipt <n>` — prove any claim.** `patterns` now numbers every claim and each one
+  says `prove it: stratless receipt 3`. The receipt command dereferences a claim back to the raw
+  exchanges behind it — what you asked, what it said, how you reacted — re-read from your own
+  transcripts (archive first). Hash prefixes work git-style. Free; zero model calls. And when a
+  receipt points at a transcript the 30-day cleanup deleted before your archive existed, it says
+  exactly that: the honest failure is the `init` lesson.
+- **A version check you consented to, and nothing ambient.** `stratless status --check` asks npm
+  for the latest version — user-initiated, on-screen, for everyone; plain `status` stays fully
+  offline. `--auto` users (who explicitly armed background activity) get a cached once-daily check
+  riding the background refresh, disclosed at arming time. Plain-`init` users make zero registry
+  calls, ever — and the test suite proves the unarmed path can't reach the network. The privacy
+  page now tells this tiered truth in full.
+
+## [0.3.2] — 2026-07-17
 
 The self-correction release. Until now the profile asserted its confidence; from here it earns it.
 

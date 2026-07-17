@@ -63,6 +63,14 @@ export function readSettings(path: string): { ok: boolean; settings: any } {
   }
 }
 
+/** Is the after-session refresh armed? The installed hook IS the consent artifact — the daily
+ *  version check (notify.ts) gates on this, and `status` reports it. */
+export function refreshArmed(path: string = SETTINGS): boolean {
+  const read = readSettings(path);
+  if (!read.ok || !read.settings) return false;
+  return JSON.stringify(read.settings.hooks?.Stop ?? []).includes('stratless update');
+}
+
 /**
  * Turn the after-session refresh OFF — remove our Stop hook. Leaves the reaper, the archive, and the
  * profile untouched: the off switch stops the *automatic* updates, nothing else. Returns whether a

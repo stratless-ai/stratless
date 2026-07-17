@@ -183,3 +183,31 @@ export function loadRecentExchanges(
 export function sessionCount(exchanges: Exchange[]): number {
   return new Set(exchanges.map((e) => e.session)).size;
 }
+
+/**
+ * Dereference one receipt back to its raw exchange — the `stratless receipt` machinery.
+ *
+ * Exchange TEXT is not in judgments.json (only the hash and the session id are), so we re-derive:
+ * find the transcript file whose name carries the session id — ARCHIVE FIRST (reaper-proof), then
+ * the live projects — and re-parse it to the matching hash. Session-targeted, never a full-corpus
+ * scan. Returns undefined when the transcript no longer exists anywhere: the honest-failure case
+ * the receipt command turns into an init lesson (this is exactly what init protects against).
+ */
+export function findExchange(
+  session: string,
+  hash: string,
+  roots: string[] = [ARCHIVE, PROJECTS],
+): Exchange | undefined {
+  for (const root of roots) {
+    for (const file of allJsonl(root)) {
+      if (!basename(file).includes(session)) continue;
+      try {
+        const hit = parseExchanges(file).find((e) => e.hash === hash);
+        if (hit) return hit;
+      } catch {
+        /* an unreadable candidate must not sink the lookup — keep searching */
+      }
+    }
+  }
+  return undefined;
+}
