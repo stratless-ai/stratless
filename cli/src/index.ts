@@ -27,7 +27,7 @@ import {
   hasSignal,
   type Corpus,
 } from './synthesize.js';
-import { mine, auditPatterns, loadPatterns, MIN_RECEIPTS } from './miner.js';
+import { mine, auditPatterns, gradePatterns, loadPatterns, MIN_RECEIPTS } from './miner.js';
 import { injectProfile, removeProfile, ensureLoaded, humanMdPath, claudeMdPath } from './sink.js';
 import { readState, writeState, synthesisDue, SYNTH_EVERY } from './state.js';
 import { readUsage } from './usage.js';
@@ -332,6 +332,10 @@ async function update(rest: string[]): Promise<void> {
   process.stderr.write(`  ${C.dim('mining patterns…')}   `);
   const mined = mine(pile, bin);
   const audited = await auditPatterns(pile, bin);
+  // THE GRADER (0.3.2) — every admitted pattern is a dated prediction; the window's new evidence
+  // grades it: confirmed / silent / surprised. Runs after mine (receipts current) and audit
+  // (padding evicted), so it grades clean claims against fresh reality.
+  const graded = await gradePatterns(pile, bin);
   process.stderr.write(`\r${' '.repeat(24)}\r`);
 
   const text = buildRenderedText('profile', signal, corpus, bin);
@@ -352,9 +356,12 @@ async function update(rest: string[]): Promise<void> {
   const why = force ? 'forced with --now' : noProfile ? 'first load' : gate.reason;
   const spend = run.fresh ? `${run.fresh} new, ${run.cached} from cache` : `all ${run.cached} from cache`;
   const more = run.deferred ? ` · ${run.deferred} left for next run` : '';
-  const mineNote = mined.mined
-    ? ` · mined ${mined.assigned} → ${audited.store.patterns.length} patterns${audited.evicted ? `, ${audited.evicted} receipts evicted` : ''}`
+  const gradeNote = graded.graded
+    ? ` · graded ${graded.graded}${graded.surprised ? ` (${graded.surprised} surprised${graded.flagged ? `, ${graded.flagged} flagged` : ''})` : ''}`
     : '';
+  const mineNote = mined.mined
+    ? ` · mined ${mined.assigned} → ${audited.store.patterns.length} patterns${audited.evicted ? `, ${audited.evicted} receipts evicted` : ''}${gradeNote}`
+    : gradeNote;
   console.log(`\n  ${C.ok('profile refreshed and loaded')}  ${C.dim(`(${why} · ${spend}${more}${mineNote})`)}`);
   console.log(`  ${C.dim(`wrote ${humanMd}`)}`);
   console.log(`  ${C.dim(`pointed ${claudeMd} at it (via @import)`)}\n`);
@@ -472,7 +479,7 @@ function status(): void {
     t >= 1e6 ? `${(t / 1e6).toFixed(1)}M` : t >= 1000 ? `${Math.round(t / 1000)}k` : String(t);
   const spend = `${fmtTok(tokens)} tokens across ${u.calls.toLocaleString()} read${u.calls === 1 ? '' : 's'}`;
   const api = `≈ $${u.costUsd.toFixed(2)} at API rates, on your own claude`;
-  const FEATURE_LABEL: Record<string, string> = { judge: 'judging', synthesis: 'profile builds', miner: 'mining', audit: 'audits' };
+  const FEATURE_LABEL: Record<string, string> = { judge: 'judging', synthesis: 'profile builds', miner: 'mining', audit: 'audits', grade: 'grading' };
   const byFeature = Object.entries(u.byFeature)
     .map(([f, t]) => `${FEATURE_LABEL[f] ?? f} $${t.costUsd.toFixed(2)} (${t.calls.toLocaleString()})`)
     .join(' · ');

@@ -157,9 +157,28 @@ export function renderPatternSheet(patterns: Pattern[]): string {
   return patterns
     .map((p) => {
       const audit = p.audit ? ` · audited ${p.audit.kept}/${p.audit.kept + p.audit.evicted}` : '';
-      return `[${p.kind} · ${p.count}x · ${p.window.from} → ${p.window.to} · ${p.trend} · ${p.stability} · ${p.confidence}${audit}] ${p.statement}`;
+      const flagged = p.flagged ? ' · CONTRADICTED (hold very lightly)' : '';
+      return `[${p.kind} · ${p.count}x · ${p.window.from} → ${p.window.to} · ${p.trend} · ${p.stability} · ${p.confidence}${audit}${flagged}] ${p.statement}`;
     })
     .join('\n');
+}
+
+/**
+ * The grader's recent misses, rendered for the REPORT only (Sun's rule: HUMAN.md carries no
+ * receipts, no bookkeeping — the AI reads current truth, the human reads the diary). Exported for
+ * tests.
+ */
+export function renderSurprises(patterns: Pattern[], now: Date, windowDays = 14): string {
+  const cutoff = now.getTime() - windowDays * 86_400_000;
+  const items: string[] = [];
+  for (const p of patterns) {
+    for (const s of p.record?.surprises ?? []) {
+      if (new Date(s.at).getTime() >= cutoff) {
+        items.push(`- claimed: "${p.statement}" · contradicted ${s.at.slice(0, 10)}${p.flagged ? ' · now under revision' : ''}`);
+      }
+    }
+  }
+  return items.join('\n');
 }
 
 /**
@@ -207,8 +226,14 @@ plain prose beneath, no other markdown.
 
 Hard rules:
 - SPECIFIC or nothing. A sentence that could describe anyone is a failure, so cut it.
-- NUMBERS: cite counts, dates and trends ONLY as they appear in your evidence. Never compute, round,
-  or invent a number.
+- THE METADATA IS FOR WEIGHING, NEVER FOR QUOTING. The bracketed tags on each pattern (counts,
+  windows, trend, stability, confidence, audit) tell you what to say and how firmly — they never
+  appear in your text. No "12x", no "audited 5/5", no "rising/fading/bedrock/thin". Express weight
+  as calibrated language: "reliably", "consistently this month", "early signs of", "this has
+  softened lately". A pattern marked CONTRADICTED is barely worth a hedge, or nothing.
+- Real frequencies of the PERSON'S OWN behavior may be narrated as facts ("caught you nine times in
+  one day") when the number itself tells the assistant something. Numbers only as they appear in
+  your evidence; never compute, round, or invent one.
 - Ground every claim in the evidence. Invent nothing. Thin evidence means say less, don't pad.
 - Never use an em dash or en dash (— or –). Use a comma, a colon, a period, or parentheses instead.
 - Second person, addressed to the assistant about the person. Under 350 words total. Lead each
@@ -226,6 +251,11 @@ Tell them, warmly and without flattery:
 - the TRAJECTORY — the heart of this note, the thing only time can show: what stopped ("you used to
   bounce on X; it faded in July"), what holds ("Y has held for two months"), what is new this week
 - if a pattern is time-conditioned (mornings vs late nights), name it kindly as a mode
+- if block C (SURPRISES) is present: these are claims this file made about them that new evidence
+  CONTRADICTED. Narrate honestly, never as apology — and SCALE the language to the weight: a single
+  counter-example means "took its first exception this week, still holds" (light, one clause); only
+  a claim marked "now under revision" gets the full "this file thought X; it's revising" treatment.
+  Self-correction is the point, not a drama.
 
 Hard rules:
 - SPECIFIC or nothing: real topics, real frequencies. No horoscope, no generic praise.
@@ -241,6 +271,7 @@ function synthesizeFromPatterns(
   recent: Judgment[],
   corpus: Corpus,
   bin: string,
+  extraBlock?: string,
 ): { text?: string; invented?: string[] } {
   if (!patterns.length && !recent.length) return {};
   const input = [
@@ -253,6 +284,7 @@ function synthesizeFromPatterns(
     '',
     'B — MOST RECENT raw observations:',
     recent.length ? recent.map((j) => j.line).join('\n') : '(none)',
+    ...(extraBlock ? ['', extraBlock] : []),
   ].join('\n');
   const out = runClaude(bin, input, synthModel(), 'synthesis');
   if (!out) return {};
@@ -288,7 +320,9 @@ export function synthesizeReportFromPatterns(
   corpus: Corpus,
   bin: string,
 ): { text?: string; invented?: string[] } {
-  return synthesizeFromPatterns(PATTERNS_REPORT_PROMPT, patterns, recent, corpus, bin);
+  const surprises = renderSurprises(patterns, new Date());
+  const extra = surprises ? `C — SURPRISES (claims this file recently got wrong):\n${surprises}` : undefined;
+  return synthesizeFromPatterns(PATTERNS_REPORT_PROMPT, patterns, recent, corpus, bin, extra);
 }
 
 /** The AI's copy — what loads into its context. Returns undefined if the read couldn't be done. */

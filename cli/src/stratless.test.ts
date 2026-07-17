@@ -24,11 +24,15 @@ import {
   savePatterns,
   parseMineOutput,
   parseAuditOutput,
+  parseGradeOutput,
+  classifyGrade,
+  shouldFlag,
   timeTag,
+  type GradeRecord,
 } from './miner.js';
 import { readUsage, recordUsage } from './usage.js';
 import { parseJsonResult } from './claude.js';
-import { hasSignal, inventedNumbers, renderPatternSheet } from './synthesize.js';
+import { hasSignal, inventedNumbers, renderPatternSheet, renderSurprises } from './synthesize.js';
 import {
   cachedCount,
   judgeInput,
@@ -434,6 +438,39 @@ test('parseAuditOutput: the auditor may only remove what it explicitly rejected'
   assert.ok(both?.evict.has('h1'), 'listed in both = evicted — uncertain means evict');
 });
 
+// ── the grader (0.3.2): every pattern is a dated prediction; misses are the best signal ────────
+
+test('parseGradeOutput: the grader cannot mint contradictions', () => {
+  const offered = new Set(['h1', 'h2']);
+  const cited = parseGradeOutput('{"contradicts":["h1","PHANTOM"]}', offered);
+  assert.ok(cited?.has('h1'), 'a real contradiction lands');
+  assert.ok(!cited?.has('PHANTOM'), 'a hash outside the offered evidence is dropped');
+  assert.equal(parseGradeOutput('{"contradicts":[]}', offered)?.size, 0, 'an empty list is honest work');
+  assert.equal(parseGradeOutput('no json', offered), undefined, 'unparseable = refuse; re-grades next gate');
+});
+
+test('classifyGrade: surprised beats confirmed; silence is never a miss; own receipts never contradict', () => {
+  const batch = ['h1', 'h2', 'h3'];
+  assert.equal(classifyGrade(new Set(['h3']), batch, ['h1']).verdict, 'surprised', 'a contradiction outranks everything');
+  assert.equal(classifyGrade(new Set(), batch, ['h1']).verdict, 'confirmed', 'new receipts landed = reality agreed');
+  assert.equal(classifyGrade(new Set(), batch, ['h9']).verdict, 'silent', 'topic never came up = costs nothing');
+  assert.equal(classifyGrade(new Set(['h1']), batch, ['h1']).verdict, 'confirmed', "citing the pattern's OWN receipt is the auditor's domain, not a surprise");
+  assert.deepEqual(classifyGrade(new Set(['h3']), batch, ['h1']).evidence, ['h3'], 'the mistake carries receipts too');
+});
+
+test('shouldFlag: balanced demotion — two surprises inside 14 days, one anomaly never', () => {
+  const now = new Date('2026-07-17T12:00:00Z');
+  const rec = (ats: string[]): GradeRecord => ({
+    confirmed: 0,
+    silent: 0,
+    surprised: ats.length,
+    surprises: ats.map((at) => ({ at, evidence: ['x'] })),
+  });
+  assert.equal(shouldFlag(rec(['2026-07-16T12:00:00Z']), now), false, 'one weird Tuesday costs confidence, not standing');
+  assert.equal(shouldFlag(rec(['2026-07-10T12:00:00Z', '2026-07-16T12:00:00Z']), now), true, 'a repeat inside the window = the model of the person is wrong there');
+  assert.equal(shouldFlag(rec(['2026-06-01T12:00:00Z', '2026-07-16T12:00:00Z']), now), false, 'an old surprise aged out — only the window counts');
+});
+
 test('timeTag: code hands the model structured local time, never a raw timestamp', () => {
   assert.equal(timeTag('2026-07-17T09:14:00'), '[Fri 09:14] ', 'weekday + wall clock, computed in code');
   assert.equal(timeTag('garbage'), '', 'an unparseable ts yields no tag, never a crash');
@@ -453,7 +490,7 @@ test('loadPatterns: missing, corrupt, or version-mismatched store reads as empty
   assert.deepEqual(loadPatterns(f).patterns, [], 'corrupt = empty, never a throw');
   writeFileSync(f, JSON.stringify({ v: 999, patterns: [{ id: 'x' }] }));
   assert.deepEqual(loadPatterns(f).patterns, [], 'a foreign MINER_V = re-mine; the judgment pile is the permanent layer');
-  savePatterns({ v: 1, patterns: [], candidates: [], assignments: { abc: ['p1'] }, audited: {} }, f);
+  savePatterns({ v: 1, patterns: [], candidates: [], assignments: { abc: ['p1'] }, audited: {}, graded: {} }, f);
   assert.deepEqual(loadPatterns(f).assignments, { abc: ['p1'] }, 'a current store round-trips');
 });
 
@@ -486,6 +523,27 @@ test('renderPatternSheet shows the model exactly the numbers the lint will allow
   assert.ok(sheet.includes('audited 22/24'), 'the audit tally is shown as kept/total');
   assert.ok(sheet.includes('fading'), 'the trend rides along');
   assert.deepEqual(inventedNumbers('24 times, 22 of 24 audited, since 2026-06-09', sheet), [], 'sheet and lint agree by construction');
+});
+
+test('renderSurprises: the diary is for the report; recency-windowed; flags shown as revisions', () => {
+  const now = new Date('2026-07-17T12:00:00Z');
+  const p = (statement: string, ats: string[], flagged?: boolean) => ({
+    id: 'x',
+    statement,
+    kind: 'work' as const,
+    count: 6,
+    window: { from: '2026-07-01', to: '2026-07-16' },
+    trend: 'steady' as const,
+    stability: 'slow' as const,
+    receipts: [],
+    confidence: 'moderate' as const,
+    record: { confirmed: 1, silent: 2, surprised: ats.length, surprises: ats.map((at) => ({ at, evidence: ['h'] })) },
+    flagged,
+  });
+  const out = renderSurprises([p('always says go', ['2026-07-16T09:00:00Z'], true)], now);
+  assert.ok(out.includes('always says go'), 'the wrong claim is named');
+  assert.ok(out.includes('now under revision'), 'a flagged claim says so');
+  assert.equal(renderSurprises([p('old miss', ['2026-06-01T09:00:00Z'])], now), '', 'old surprises age out of the diary');
 });
 
 // ── sink: the load step ─────────────────────────────────────────────────────────────────────
