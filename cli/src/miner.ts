@@ -18,9 +18,10 @@
  * witnessed it — so any claim can be audited back to replies that could have gone the other way
  * (Law 2, falsifiable per claim).
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
+import { atomicWriteFileSync, CorruptStoreError } from './atomic.js';
 import { runClaude } from './claude.js';
 import { runStreamBatch } from './stream.js';
 import type { Judgment } from './judge.js';
@@ -122,33 +123,43 @@ const emptyStore = (): PatternStore => ({
   graded: {},
 });
 
-/** Load the store. Missing, corrupt, or version-mismatched reads as empty — rebuilt from the pile. */
+/**
+ * Load the store. Missing reads as empty; a VERSION MISMATCH reads as empty deliberately (the
+ * schema moved — re-mining from the permanent pile is the upgrade path, announced by MINER_V);
+ * but a DAMAGED file throws CorruptStoreError (C2) — the mine is the bigger half of the bill,
+ * and re-running it over corruption would be the same silent re-bill the judgment cache forbids.
+ */
 export function loadPatterns(file: string = storePath()): PatternStore {
+  if (!existsSync(file)) return emptyStore();
+  let parsed: unknown;
   try {
-    if (!existsSync(file)) return emptyStore();
-    const raw = JSON.parse(readFileSync(file, 'utf8')) as Partial<PatternStore>;
-    if (raw.v !== MINER_V) return emptyStore(); // schema moved — re-mine from the permanent pile
-    return {
-      v: MINER_V,
-      minedAt: typeof raw.minedAt === 'string' ? raw.minedAt : undefined,
-      judgedAtLastMine: Number.isFinite(Number(raw.judgedAtLastMine)) ? Number(raw.judgedAtLastMine) : undefined,
-      patterns: Array.isArray(raw.patterns) ? (raw.patterns as Pattern[]) : [],
-      candidates: Array.isArray(raw.candidates) ? (raw.candidates as Pattern[]) : [],
-      assignments: raw.assignments && typeof raw.assignments === 'object' ? (raw.assignments as Record<string, string[]>) : {},
-      audited: raw.audited && typeof raw.audited === 'object' ? (raw.audited as Record<string, 1>) : {},
-      graded: raw.graded && typeof raw.graded === 'object' ? (raw.graded as Record<string, 1>) : {},
-    };
+    parsed = JSON.parse(readFileSync(file, 'utf8'));
   } catch {
-    return emptyStore();
+    throw new CorruptStoreError(file);
   }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new CorruptStoreError(file);
+  const raw = parsed as Partial<PatternStore>;
+  if (raw.v !== MINER_V) return emptyStore(); // schema moved — re-mine from the permanent pile
+  return {
+    v: MINER_V,
+    minedAt: typeof raw.minedAt === 'string' ? raw.minedAt : undefined,
+    judgedAtLastMine: Number.isFinite(Number(raw.judgedAtLastMine)) ? Number(raw.judgedAtLastMine) : undefined,
+    patterns: Array.isArray(raw.patterns) ? (raw.patterns as Pattern[]) : [],
+    candidates: Array.isArray(raw.candidates) ? (raw.candidates as Pattern[]) : [],
+    assignments: raw.assignments && typeof raw.assignments === 'object' ? (raw.assignments as Record<string, string[]>) : {},
+    audited: raw.audited && typeof raw.audited === 'object' ? (raw.audited as Record<string, 1>) : {},
+    graded: raw.graded && typeof raw.graded === 'object' ? (raw.graded as Record<string, 1>) : {},
+  };
 }
 
+/** Save the store atomically (C2). Still best-effort on FAILURE: a failed save leaves the old
+ *  store intact on disk (that is what atomic buys) and costs a re-offer next gate, never a crash
+ *  mid-pipeline after real spend. */
 export function savePatterns(store: PatternStore, file: string = storePath()): void {
   try {
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, `${JSON.stringify(store)}\n`);
+    atomicWriteFileSync(file, `${JSON.stringify(store)}\n`);
   } catch {
-    /* best-effort — a failed save costs a re-mine, never a crash */
+    /* best-effort — the old store survives; the next gate re-offers */
   }
 }
 

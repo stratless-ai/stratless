@@ -18,7 +18,7 @@ import { init as doInit, ARCHIVE, stopRefresh, refreshArmed, type InitResult } f
 import { dailyCheck, fetchLatest, newerThan } from './notify.js';
 import { health } from './canary.js';
 import { loadRecentExchanges, sessionCount, findExchange } from './exchange.js';
-import { judgeAll, cachedCount, fitAperture, allJudgments, pendingCount, type Judgment } from './judge.js';
+import { judgeAll, cachedCount, cacheHealth, fitAperture, allJudgments, pendingCount, type Judgment } from './judge.js';
 import {
   synthesizeProfile,
   synthesizeReport,
@@ -26,14 +26,18 @@ import {
   synthesizeReportFromPatterns,
   topTopics,
   hasSignal,
+  mostRecent,
   type Corpus,
 } from './synthesize.js';
-import { mine, auditPatterns, gradePatterns, loadPatterns, displayOrder, matchReceiptPrefix, MIN_RECEIPTS } from './miner.js';
+import { mine, auditPatterns, gradePatterns, loadPatterns, displayOrder, matchReceiptPrefix, MIN_RECEIPTS, type PatternStore } from './miner.js';
 import { injectProfile, removeProfile, ensureLoaded, humanMdPath, claudeMdPath } from './sink.js';
 import { readState, writeState, synthesisDue, readRenders, writeRender, SYNTH_EVERY } from './state.js';
 import { readUsage } from './usage.js';
+import { atomicWriteFileSync, CorruptStoreError } from './atomic.js';
+import { acquireLock, releaseLock, readLock, lockFilePath } from './worker.js';
+import { startRun, type Stopwatch } from './stopwatch.js';
 import { makePalette } from './palette.js';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -146,17 +150,26 @@ function profileLoaded(): boolean {
  * BOTH audiences: a rendering with an invented numeral is REFUSED, not delivered — a wrong
  * frequency is a lie wearing precision, and silence beats it.
  */
-function buildRenderedText(kind: 'profile' | 'report', signal: Judgment[], corpus: Corpus, bin: string): string | undefined {
+function buildRenderedText(
+  kind: 'profile' | 'report',
+  signal: Judgment[],
+  corpus: Corpus,
+  bin: string,
+  sw?: Stopwatch,
+): string | undefined {
   const store = loadPatterns();
   if (!store.patterns.length) {
     // pre-miner fallback — the 0.2.x flat read
     return kind === 'profile' ? synthesizeProfile(signal, corpus, bin) : synthesizeReport(signal, corpus, bin);
   }
   const synth = kind === 'profile' ? synthesizeProfileFromPatterns : synthesizeReportFromPatterns;
-  const built = synth(store.patterns, signal.slice(-25), corpus, bin);
+  // C10 (Phase 0's B2): the newest 25 BY TIMESTAMP — this was `signal.slice(-25)`, the oldest 25
+  // of a newest-first list, labelled "MOST RECENT" since 0.3.1. mostRecent() sorts; a test pins it.
+  const built = synth(store.patterns, mostRecent(signal, 25), corpus, bin);
   if (built.invented?.length) {
     console.error(`\n  ${C.bad('Refused: the writer invented numbers.')} ${C.dim(`(${built.invented.join(', ')})`)}`);
     console.error(`  ${C.dim('Nothing was written or loaded — this build is discarded. Try again with `' + hint('stratless update --now') + '`.')}\n`);
+    sw?.record(); // the stages already paid for are measured truth — a refused build must not erase them (C8)
     process.exit(1);
   }
   return built.text;
@@ -174,6 +187,28 @@ function lookFooter(kind: 'profile' | 'report'): void {
     // The evidence loop closes: every report points at the receipts behind it (clig: next command).
     console.log(`  ${C.dim(`the evidence behind this: ${hint('stratless patterns')}`)}\n`);
   }
+}
+
+/**
+ * THE LOCK AT THE DOOR (C4): every spending command holds the one lock while it works — the
+ * after-session hook and a hand-run `update` firing together used to race read-modify-write over
+ * judgments.json, the last writer silently discarding the other's paid-for judgments. A second
+ * runner says so and leaves; the hook case simply catches up on the next session.
+ */
+function claimLockOrSay(): boolean {
+  if (acquireLock()) {
+    // Release on ANY exit — including the refusal paths that call process.exit(1), which skip
+    // `finally` blocks. releaseLock only unlinks its own pid, so double-release is a no-op.
+    process.once('exit', () => releaseLock());
+    return true;
+  }
+  const holder = readLock();
+  console.log(
+    `\n  ${C.it('another stratless run is active')}${holder ? C.dim(` (pid ${holder.pid})`) : ''} ${C.dim('— nothing was spent; try again when it finishes.')}`,
+  );
+  // The honest remedy for a wedged lock (a recycled PID can hold it hostage) — named, not hidden.
+  console.log(`  ${C.dim(`stuck, with no stratless actually running? remove the lock: rm ${lockFilePath()}`)}\n`);
+  return false;
 }
 
 /** The pre-spend disclosure — the person hears the bill BEFORE the first fresh call, never after.
@@ -228,60 +263,72 @@ async function profiler(kind: 'profile' | 'report', rest: string[] = []): Promis
     return;
   }
 
-  const sessions = sessionCount(window);
-  // The aperture: the judge's view sizes, fitted to THIS user's window (p90 × 1.2, clamped) —
-  // computed in code, costs nothing, never part of the cache identity.
-  const aperture = fitAperture(window);
-  preSpend(pendingCount([...window].reverse(), judgeLimit()));
-  process.stderr.write(`\n  ${CE.dim(`reading ${window.length.toLocaleString()} recent exchanges across ${sessions} sessions…`)}\n`);
-  const run = await judgeAll([...window].reverse(), bin, {
-    limit: judgeLimit(),
-    aperture,
-    onProgress: (done, total) => process.stderr.write(`\r  ${CE.dim(`judging ${done}/${total} new…`)}   `),
-  });
-  process.stderr.write(`\r${' '.repeat(44)}\r`);
+  if (!claimLockOrSay()) return; // C4: one spender at a time
+  try {
+    const sw = startRun(); // C8: the stopwatch runs wherever money runs
+    const sessions = sessionCount(window);
+    // The aperture: the judge's view sizes, fitted to THIS user's window (p90 × 1.2, clamped) —
+    // computed in code, costs nothing, never part of the cache identity.
+    const aperture = fitAperture(window);
+    preSpend(pendingCount([...window].reverse(), judgeLimit()));
+    process.stderr.write(`\n  ${CE.dim(`reading ${window.length.toLocaleString()} recent exchanges across ${sessions} sessions…`)}\n`);
+    const tJudge = Date.now();
+    const run = await judgeAll([...window].reverse(), bin, {
+      limit: judgeLimit(),
+      aperture,
+      onProgress: (done, total) => process.stderr.write(`\r  ${CE.dim(`judging ${done}/${total} new…`)}   `),
+    });
+    sw.stage('judge', Date.now() - tJudge, run.fresh, run.turnsMs);
+    process.stderr.write(`\r${' '.repeat(44)}\r`);
 
-  if (!run.judgments.length) {
-    console.error(`\n  ${C.bad('Could not read a single exchange.')} ${C.dim('Is `claude -p` working? Try:  claude -p hello')}\n`);
-    process.exit(1);
+    if (!run.judgments.length) {
+      console.error(`\n  ${C.bad('Could not read a single exchange.')} ${C.dim('Is `claude -p` working? Try:  claude -p hello')}\n`);
+      sw.record(); // whatever was measured before the refusal is still measured truth (C8)
+      process.exit(1);
+    }
+
+    // Only judgments that carry signal reach the writer — a `none` line is, by definition, nothing
+    // to reason from. The corpus counts what the writer actually sees, so the numbers stay honest.
+    const signal = run.judgments.filter(hasSignal);
+    const corpus: Corpus = {
+      sessions,
+      exchanges: signal.length,
+      topics: topTopics(signal),
+      from: window[0].ts.slice(0, 10),
+      to: window[window.length - 1].ts.slice(0, 10),
+    };
+
+    const tSynth = Date.now();
+    const text = buildRenderedText(kind, signal, corpus, bin, sw);
+    sw.stage('synthesis', Date.now() - tSynth, text ? 1 : 0);
+
+    if (!text) {
+      console.error(`\n  ${C.bad(`Could not build your ${kind}.`)} ${C.dim('The assistant returned nothing — silence beats a guess.')}\n`);
+      sw.record(); // the judge stage's rates survive the refusal (C8)
+      process.exit(1);
+    }
+
+    atomicWriteFileSync(cachedFile, `${text}\n`);
+    writeRender(kind, { builtAt: new Date().toISOString(), sessions, exchanges: signal.length });
+    sw.record();
+
+    const header = kind === 'profile' ? "WHO YOU'RE WORKING WITH" : 'YOUR PATTERN — what stratless sees';
+    console.log(`\n  ${C.b(header)}   ${C.dim(`(stratless · ${sessions} sessions · ${signal.length} exchanges)`)}\n`);
+    console.log(
+      text
+        .split('\n')
+        .map((l) => `  ${l}`)
+        .join('\n'),
+    );
+    const spend = run.fresh
+      ? `${run.fresh} new read${run.fresh === 1 ? '' : 's'}, ${run.cached} from cache`
+      : `all ${run.cached} from cache`;
+    const more = run.deferred ? C.dim(` · ${run.deferred} left for next run`) : '';
+    console.log(`\n  ${C.dim(`${spend} · saved to ${cachedFile}`)}${more}`);
+    lookFooter(kind);
+  } finally {
+    releaseLock();
   }
-
-  // Only judgments that carry signal reach the writer — a `none` line is, by definition, nothing
-  // to reason from. The corpus counts what the writer actually sees, so the numbers stay honest.
-  const signal = run.judgments.filter(hasSignal);
-  const corpus: Corpus = {
-    sessions,
-    exchanges: signal.length,
-    topics: topTopics(signal),
-    from: window[0].ts.slice(0, 10),
-    to: window[window.length - 1].ts.slice(0, 10),
-  };
-
-  const text = buildRenderedText(kind, signal, corpus, bin);
-
-  if (!text) {
-    console.error(`\n  ${C.bad(`Could not build your ${kind}.`)} ${C.dim('The assistant returned nothing — silence beats a guess.')}\n`);
-    process.exit(1);
-  }
-
-  mkdirSync(STRATLESS, { recursive: true });
-  writeFileSync(cachedFile, `${text}\n`);
-  writeRender(kind, { builtAt: new Date().toISOString(), sessions, exchanges: signal.length });
-
-  const header = kind === 'profile' ? "WHO YOU'RE WORKING WITH" : 'YOUR PATTERN — what stratless sees';
-  console.log(`\n  ${C.b(header)}   ${C.dim(`(stratless · ${sessions} sessions · ${signal.length} exchanges)`)}\n`);
-  console.log(
-    text
-      .split('\n')
-      .map((l) => `  ${l}`)
-      .join('\n'),
-  );
-  const spend = run.fresh
-    ? `${run.fresh} new read${run.fresh === 1 ? '' : 's'}, ${run.cached} from cache`
-    : `all ${run.cached} from cache`;
-  const more = run.deferred ? C.dim(` · ${run.deferred} left for next run`) : '';
-  console.log(`\n  ${C.dim(`${spend} · saved to ${cachedFile}`)}${more}`);
-  lookFooter(kind);
 }
 
 /**
@@ -310,103 +357,124 @@ async function update(rest: string[]): Promise<void> {
     return;
   }
 
-  const sessions = sessionCount(window);
-  // The aperture: the judge's view sizes, fitted to THIS user's window (p90 × 1.2, clamped) —
-  // computed in code, costs nothing, never part of the cache identity.
-  const aperture = fitAperture(window);
-  preSpend(pendingCount([...window].reverse(), judgeLimit()));
-  process.stderr.write(`\n  ${CE.dim(`reading ${window.length.toLocaleString()} recent exchanges across ${sessions} sessions…`)}\n`);
-  const run = await judgeAll([...window].reverse(), bin, {
-    limit: judgeLimit(),
-    aperture,
-    onProgress: (done, total) => process.stderr.write(`\r  ${CE.dim(`judging ${done}/${total} new…`)}   `),
-  });
-  process.stderr.write(`\r${' '.repeat(44)}\r`);
+  if (!claimLockOrSay()) return; // C4: the hook and a hand-run update no longer race the cache
+  try {
+    const sw = startRun(); // C8: the stopwatch runs wherever money runs
+    const sessions = sessionCount(window);
+    // The aperture: the judge's view sizes, fitted to THIS user's window (p90 × 1.2, clamped) —
+    // computed in code, costs nothing, never part of the cache identity.
+    const aperture = fitAperture(window);
+    preSpend(pendingCount([...window].reverse(), judgeLimit()));
+    process.stderr.write(`\n  ${CE.dim(`reading ${window.length.toLocaleString()} recent exchanges across ${sessions} sessions…`)}\n`);
+    const tJudge = Date.now();
+    const run = await judgeAll([...window].reverse(), bin, {
+      limit: judgeLimit(),
+      aperture,
+      onProgress: (done, total) => process.stderr.write(`\r  ${CE.dim(`judging ${done}/${total} new…`)}   `),
+    });
+    sw.stage('judge', Date.now() - tJudge, run.fresh, run.turnsMs);
+    process.stderr.write(`\r${' '.repeat(44)}\r`);
 
-  if (!run.judgments.length) {
-    console.error(`\n  ${C.bad('Could not read a single exchange.')} ${C.dim('Is `claude -p` working?')}\n`);
-    process.exit(1);
-  }
+    if (!run.judgments.length) {
+      console.error(`\n  ${C.bad('Could not read a single exchange.')} ${C.dim('Is `claude -p` working?')}\n`);
+      sw.record(); // whatever was measured before the refusal is still measured truth (C8)
+      process.exit(1);
+    }
 
-  // THE GATE — decide before spending the expensive read. cachedCount() runs after judging, so this
-  // session's fresh judgments count toward the gate. `--now`, a missing HUMAN.md, or a due verdict
-  // (K reached / backstop / cache reset / first build) all open it; otherwise the cheap path.
-  const state = readState();
-  const gate = synthesisDue(state, cachedCount(), new Date(), { every: synthEvery() });
-  const noProfile = !existsSync(humanMdPath());
-  // The daily version line rides ONLY on --auto consent (the installed hook is the consent
-  // artifact) — a plain-init user's update makes zero registry calls, provably (notify tests).
-  const versionLine = async (): Promise<void> => {
-    const newer = await dailyCheck(version(), refreshArmed());
-    if (newer) console.log(`  ${C.dim(`stratless ${newer} available: npm i -g stratless`)}`);
-  };
+    // THE GATE — decide before spending the expensive read. cachedCount() runs after judging, so this
+    // session's fresh judgments count toward the gate. `--now`, a missing HUMAN.md, or a due verdict
+    // (K reached / backstop / cache reset / first build) all open it; otherwise the cheap path.
+    const state = readState();
+    const gate = synthesisDue(state, cachedCount(), new Date(), { every: synthEvery() });
+    const noProfile = !existsSync(humanMdPath());
+    // The daily version line rides ONLY on --auto consent (the installed hook is the consent
+    // artifact) — a plain-init user's update makes zero registry calls, provably (notify tests).
+    const versionLine = async (): Promise<void> => {
+      const newer = await dailyCheck(version(), refreshArmed());
+      if (newer) console.log(`  ${C.dim(`stratless ${newer} available: npm i -g stratless`)}`);
+    };
 
-  if (!force && !noProfile && !gate.due) {
-    // Record the fitted aperture even on the cheap path — state.json is where it's visible.
-    writeState({ ...state, aperture: { ...aperture, computedAt: new Date().toISOString() } });
-    const ensured = ensureLoaded();
-    const judged = run.fresh ? `judged ${run.fresh} new` : 'nothing new to judge';
-    console.log(`\n  ${C.ok('profile is fresh enough')}  ${C.dim(`(${judged} · ${gate.newSince}/${synthEvery()} toward the next build)`)}`);
-    if (ensured) console.log(`  ${C.dim(`loaded: ${humanMdPath()}`)}`);
-    console.log(`  ${C.dim(`rebuild now with \`${hint('stratless update --now')}\``)}`);
+    if (!force && !noProfile && !gate.due) {
+      // Record the fitted aperture even on the cheap path — state.json is where it's visible.
+      writeState({ ...state, aperture: { ...aperture, computedAt: new Date().toISOString() } });
+      if (run.fresh) sw.record(); // the cheap path still measured fresh judging — keep the rate data
+      const ensured = ensureLoaded();
+      const judged = run.fresh ? `judged ${run.fresh} new` : 'nothing new to judge';
+      console.log(`\n  ${C.ok('profile is fresh enough')}  ${C.dim(`(${judged} · ${gate.newSince}/${synthEvery()} toward the next build)`)}`);
+      if (ensured) console.log(`  ${C.dim(`loaded: ${humanMdPath()}`)}`);
+      console.log(`  ${C.dim(`rebuild now with \`${hint('stratless update --now')}\``)}`);
+      await versionLine();
+      console.log('');
+      return;
+    }
+
+    // Same signal filter as `profile` — `none` lines never reach the writer (see profiler()).
+    const signal = run.judgments.filter(hasSignal);
+    const corpus: Corpus = {
+      sessions,
+      exchanges: signal.length,
+      topics: topTopics(signal),
+      from: window[0].ts.slice(0, 10),
+      to: window[window.length - 1].ts.slice(0, 10),
+    };
+
+    // THE MINER + THE AUDITOR — behind the same gate as the synthesis, so the expensive passes all
+    // ride one cadence. The analyst assigns the un-mined judgments (whole pile, batched); a separate
+    // mind then checks every fresh receipt against its statement before the writer may lean on it.
+    const pile = allJudgments();
+    process.stderr.write(`  ${CE.dim('mining patterns…')}   `);
+    const tMine = Date.now();
+    const mined = mine(pile, bin);
+    sw.stage('mine', Date.now() - tMine, mined.assigned);
+    const tAudit = Date.now();
+    const audited = await auditPatterns(pile, bin);
+    sw.stage('audit', Date.now() - tAudit, audited.calls);
+    // THE GRADER (0.3.2) — every admitted pattern is a dated prediction; the window's new evidence
+    // grades it: confirmed / silent / surprised. Runs after mine (receipts current) and audit
+    // (padding evicted), so it grades clean claims against fresh reality.
+    const tGrade = Date.now();
+    const graded = await gradePatterns(pile, bin);
+    sw.stage('grade', Date.now() - tGrade, graded.graded);
+    process.stderr.write(`\r${' '.repeat(24)}\r`);
+
+    const tSynth = Date.now();
+    const text = buildRenderedText('profile', signal, corpus, bin, sw);
+    sw.stage('synthesis', Date.now() - tSynth, text ? 1 : 0);
+    if (!text) {
+      console.error(`\n  ${C.bad('Could not build your profile.')} ${C.dim('The assistant returned nothing — silence beats a guess.')}\n`);
+      sw.record(); // the judge/mine/audit/grade walls survive the refusal (C8)
+      process.exit(1);
+    }
+
+    atomicWriteFileSync(join(STRATLESS, 'profile.txt'), `${text}\n`);
+    writeRender('profile', { builtAt: new Date().toISOString(), sessions, exchanges: signal.length });
+    const { humanMd, claudeMd } = injectProfile(text);
+    // Spread the CURRENT state so bookkeeping the build didn't touch (the stopwatch ring) survives.
+    writeState({
+      ...readState(),
+      lastSynthesisAt: new Date().toISOString(),
+      judgmentsAtLastSynthesis: cachedCount(),
+      aperture: { ...aperture, computedAt: new Date().toISOString() },
+    });
+    sw.record();
+
+    const why = force ? 'forced with --now' : noProfile ? 'first load' : gate.reason;
+    const spend = run.fresh ? `${run.fresh} new, ${run.cached} from cache` : `all ${run.cached} from cache`;
+    const more = run.deferred ? ` · ${run.deferred} left for next run` : '';
+    const gradeNote = graded.graded
+      ? ` · graded ${graded.graded}${graded.surprised ? ` (${graded.surprised} surprised${graded.flagged ? `, ${graded.flagged} flagged` : ''})` : ''}`
+      : '';
+    const mineNote = mined.mined
+      ? ` · mined ${mined.assigned} → ${audited.store.patterns.length} patterns${audited.evicted ? `, ${audited.evicted} receipts evicted` : ''}${gradeNote}`
+      : gradeNote;
+    console.log(`\n  ${C.ok('profile refreshed and loaded')}  ${C.dim(`(${why} · ${spend}${more}${mineNote})`)}`);
+    console.log(`  ${C.dim(`wrote ${humanMd}`)}`);
+    console.log(`  ${C.dim(`pointed ${claudeMd} at it (via @import)`)}`);
     await versionLine();
     console.log('');
-    return;
+  } finally {
+    releaseLock();
   }
-
-  // Same signal filter as `profile` — `none` lines never reach the writer (see profiler()).
-  const signal = run.judgments.filter(hasSignal);
-  const corpus: Corpus = {
-    sessions,
-    exchanges: signal.length,
-    topics: topTopics(signal),
-    from: window[0].ts.slice(0, 10),
-    to: window[window.length - 1].ts.slice(0, 10),
-  };
-
-  // THE MINER + THE AUDITOR — behind the same gate as the synthesis, so the expensive passes all
-  // ride one cadence. The analyst assigns the un-mined judgments (whole pile, batched); a separate
-  // mind then checks every fresh receipt against its statement before the writer may lean on it.
-  const pile = allJudgments();
-  process.stderr.write(`  ${CE.dim('mining patterns…')}   `);
-  const mined = mine(pile, bin);
-  const audited = await auditPatterns(pile, bin);
-  // THE GRADER (0.3.2) — every admitted pattern is a dated prediction; the window's new evidence
-  // grades it: confirmed / silent / surprised. Runs after mine (receipts current) and audit
-  // (padding evicted), so it grades clean claims against fresh reality.
-  const graded = await gradePatterns(pile, bin);
-  process.stderr.write(`\r${' '.repeat(24)}\r`);
-
-  const text = buildRenderedText('profile', signal, corpus, bin);
-  if (!text) {
-    console.error(`\n  ${C.bad('Could not build your profile.')} ${C.dim('The assistant returned nothing — silence beats a guess.')}\n`);
-    process.exit(1);
-  }
-
-  mkdirSync(STRATLESS, { recursive: true });
-  writeFileSync(join(STRATLESS, 'profile.txt'), `${text}\n`);
-  writeRender('profile', { builtAt: new Date().toISOString(), sessions, exchanges: signal.length });
-  const { humanMd, claudeMd } = injectProfile(text);
-  writeState({
-    lastSynthesisAt: new Date().toISOString(),
-    judgmentsAtLastSynthesis: cachedCount(),
-    aperture: { ...aperture, computedAt: new Date().toISOString() },
-  });
-
-  const why = force ? 'forced with --now' : noProfile ? 'first load' : gate.reason;
-  const spend = run.fresh ? `${run.fresh} new, ${run.cached} from cache` : `all ${run.cached} from cache`;
-  const more = run.deferred ? ` · ${run.deferred} left for next run` : '';
-  const gradeNote = graded.graded
-    ? ` · graded ${graded.graded}${graded.surprised ? ` (${graded.surprised} surprised${graded.flagged ? `, ${graded.flagged} flagged` : ''})` : ''}`
-    : '';
-  const mineNote = mined.mined
-    ? ` · mined ${mined.assigned} → ${audited.store.patterns.length} patterns${audited.evicted ? `, ${audited.evicted} receipts evicted` : ''}${gradeNote}`
-    : gradeNote;
-  console.log(`\n  ${C.ok('profile refreshed and loaded')}  ${C.dim(`(${why} · ${spend}${more}${mineNote})`)}`);
-  console.log(`  ${C.dim(`wrote ${humanMd}`)}`);
-  console.log(`  ${C.dim(`pointed ${claudeMd} at it (via @import)`)}`);
-  await versionLine();
-  console.log('');
 }
 
 /**
@@ -597,7 +665,8 @@ async function status(rest: string[] = []): Promise<void> {
     /* leave as "never" */
   }
 
-  const judged = cachedCount();
+  // C2: `status` is the truth surface — a damaged cache is LABELLED, never shown as a confident 0.
+  const cache = cacheHealth();
   const u = readUsage();
   // Tokens are the honest unit — a subscription spends quota, not dollars — and the cache tokens
   // (the ~17–24k harness overhead every borrowed call carries) ARE the consumption, so they count.
@@ -615,9 +684,19 @@ async function status(rest: string[] = []): Promise<void> {
   console.log(`\n  ${C.b('stratless status')}\n`);
   console.log(`    after-session refresh   ${refresh ? C.ok('on') : C.dim('off')}`);
   console.log(`    profile loaded          ${loaded ? C.ok('yes') : C.dim('no')}${humanExists ? `  ${C.dim(human)}` : ''}`);
-  console.log(`    exchanges judged        ${C.b(judged.toLocaleString())}`);
-  const store = loadPatterns();
-  if (store.patterns.length || store.candidates.length) {
+  if (cache.ok) {
+    console.log(`    exchanges judged        ${C.b(cache.count.toLocaleString())}`);
+  } else {
+    console.log(`    exchanges judged        ${C.warn('unreadable — the judgment cache is damaged')}`);
+    console.log(`                            ${C.dim(`move it aside to rebuild: mv ${cache.file} ${cache.file}.damaged`)}`);
+  }
+  let store: PatternStore | undefined;
+  try {
+    store = loadPatterns();
+  } catch {
+    console.log(`    patterns mined          ${C.warn('unreadable — the pattern store is damaged')}`);
+  }
+  if (store && (store.patterns.length || store.candidates.length)) {
     console.log(
       `    patterns mined          ${C.b(String(store.patterns.length))}${store.candidates.length ? C.dim(`  (+${store.candidates.length} candidates)`) : ''}`,
     );
@@ -625,6 +704,11 @@ async function status(rest: string[] = []): Promise<void> {
   console.log(`    last refresh            ${C.dim(last)}`);
   console.log(`    spent so far            ${C.b(spend)}  ${C.dim(api)}`);
   if (byFeature) console.log(`                            ${C.dim(byFeature)}`);
+  // C11: the meter's own blind spots, shown the moment they exist — silent accounting is the bug.
+  const gaps: string[] = [];
+  if (u.unmeteredCalls) gaps.push(`${u.unmeteredCalls} call${u.unmeteredCalls === 1 ? '' : 's'} unmetered (no receipt — true cost unknown)`);
+  if (u.pinEscapedCalls) gaps.push(`${u.pinEscapedCalls} ran on your default model (pin dropped)`);
+  if (gaps.length) console.log(`    fallback calls          ${C.warn(gaps.join(' · '))}`);
   if (!refresh) console.log(`\n  ${C.dim(`Run \`${hint('stratless init --auto')}\` to turn the after-session refresh on.`)}`);
   console.log('');
 }
@@ -706,14 +790,27 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (cmd === 'stats') return stats(cwd);
-  if (cmd === 'status') return status(args.slice(1));
-  if (cmd === 'profile') return profiler('profile', args.slice(1));
-  if (cmd === 'report') return profiler('report', args.slice(1));
-  if (cmd === 'update') return update(args.slice(1));
-  if (cmd === 'patterns') return patternsCmd(args.slice(1));
-  if (cmd === 'receipt') return receiptCmd(args.slice(1));
-  if (cmd === 'stop') return stop();
+  // C2's command-layer half: a damaged spend-cache surfaces as ONE clear refusal, wherever it was
+  // hit. Reading corruption as "empty" would re-bill the person's whole history without a word.
+  try {
+    if (cmd === 'stats') return stats(cwd);
+    if (cmd === 'status') return await status(args.slice(1));
+    if (cmd === 'profile') return await profiler('profile', args.slice(1));
+    if (cmd === 'report') return await profiler('report', args.slice(1));
+    if (cmd === 'update') return await update(args.slice(1));
+    if (cmd === 'patterns') return patternsCmd(args.slice(1));
+    if (cmd === 'receipt') return receiptCmd(args.slice(1));
+    if (cmd === 'stop') return stop();
+  } catch (err) {
+    if (err instanceof CorruptStoreError) {
+      console.error(`\n  ${C.bad('stratless cannot read its own cache — and will not re-bill you over it.')}`);
+      console.error(`  ${C.dim(`${err.file} is damaged. Everything in it was paid for on your claude; reading it`)}`);
+      console.error(`  ${C.dim('as empty would silently re-spend your whole history. Move it aside, then rerun:')}`);
+      console.error(`\n    mv ${err.file} ${err.file}.damaged\n`);
+      process.exit(1);
+    }
+    throw err;
+  }
 
   console.error(`  unknown command: ${cmd}`);
   process.exit(1);

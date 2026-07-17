@@ -12,9 +12,10 @@
  * the "least wasteful" pitch is true. A v1 file reads cleanly: missing fields are zero, missing
  * buckets are empty — the tally is never lost on upgrade.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
+import { atomicWriteFileSync } from './atomic.js';
 
 /** Where the tally lives. Override with STRATLESS_USAGE (tests). */
 function usagePath(): string {
@@ -29,6 +30,10 @@ export interface Tally {
   outputTokens: number;
   cacheCreationTokens: number;
   cacheReadTokens: number;
+  /** calls that returned WITHOUT a receipt (the plain-text rung) — counted, never faked as zero-cost (C11) */
+  unmeteredCalls: number;
+  /** calls where a requested model pin was dropped and the account default ran instead (C11) */
+  pinEscapedCalls: number;
 }
 
 export interface UsageTotals extends Tally {
@@ -45,6 +50,10 @@ export interface CallCost {
   outputTokens?: number;
   cacheCreationTokens?: number;
   cacheReadTokens?: number;
+  /** this call has no receipt — its true cost is invisible to the meter (C11) */
+  unmetered?: boolean;
+  /** this call dropped its requested model pin and ran on the account default (C11) */
+  pinEscaped?: boolean;
 }
 
 const num = (v: unknown): number => Number(v) || 0;
@@ -56,9 +65,11 @@ const zeroTally = (): Tally => ({
   outputTokens: 0,
   cacheCreationTokens: 0,
   cacheReadTokens: 0,
+  unmeteredCalls: 0,
+  pinEscapedCalls: 0,
 });
 
-/** Coerce whatever is on disk into a sound Tally — a v1 file's missing fields read as zero. */
+/** Coerce whatever is on disk into a sound Tally — an older file's missing fields read as zero. */
 function readTally(u: Partial<Tally> | undefined): Tally {
   return {
     calls: num(u?.calls),
@@ -67,6 +78,8 @@ function readTally(u: Partial<Tally> | undefined): Tally {
     outputTokens: num(u?.outputTokens),
     cacheCreationTokens: num(u?.cacheCreationTokens),
     cacheReadTokens: num(u?.cacheReadTokens),
+    unmeteredCalls: num(u?.unmeteredCalls),
+    pinEscapedCalls: num(u?.pinEscapedCalls),
   };
 }
 
@@ -96,6 +109,8 @@ function add(t: Tally, d: CallCost): void {
   t.outputTokens += num(d.outputTokens);
   t.cacheCreationTokens += num(d.cacheCreationTokens);
   t.cacheReadTokens += num(d.cacheReadTokens);
+  if (d.unmetered) t.unmeteredCalls += 1;
+  if (d.pinEscaped) t.pinEscapedCalls += 1;
 }
 
 /** Add one borrowed call to the running total. Best-effort: never throws into the caller. */
@@ -108,8 +123,7 @@ export function recordUsage(
     add(t, delta);
     if (delta.feature) add((t.byFeature[delta.feature] ??= zeroTally()), delta);
     for (const [model, d] of Object.entries(delta.byModel ?? {})) add((t.byModel[model] ??= zeroTally()), d);
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, `${JSON.stringify(t)}\n`);
+    atomicWriteFileSync(file, `${JSON.stringify(t)}\n`);
   } catch {
     /* usage is a nicety; never break a judge over it */
   }

@@ -14,9 +14,10 @@
  *   1. sets `cleanupPeriodDays` so the reaper stops
  *   2. copies every transcript into ~/.stratless/archive — outside its reach, forever
  */
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { atomicWriteFileSync } from './atomic.js';
 
 const HOME = homedir();
 const SETTINGS = join(HOME, '.claude', 'settings.json');
@@ -86,7 +87,7 @@ export function stopRefresh(): boolean {
   const kept = stop.filter((g) => !JSON.stringify(g).includes('stratless update'));
   if (kept.length === stop.length) return false;
   settings.hooks.Stop = kept;
-  writeFileSync(SETTINGS, `${JSON.stringify(settings, null, 2)}\n`);
+  atomicWriteFileSync(SETTINGS, `${JSON.stringify(settings, null, 2)}\n`);
   return true;
 }
 
@@ -117,8 +118,7 @@ export function init(opts: { auto?: boolean } = {}): InitResult {
   // The after-session auto-refresh is OPT-IN (`init --auto`). A tool that reads everything must not
   // silently arm a background job that reads your history on every session — you turn that on yourself.
   const hookInstalled = opts.auto ? installStopHook(settings) : false;
-  mkdirSync(join(HOME, '.claude'), { recursive: true });
-  writeFileSync(SETTINGS, `${JSON.stringify(settings, null, 2)}\n`);
+  atomicWriteFileSync(SETTINGS, `${JSON.stringify(settings, null, 2)}\n`);
 
   // 2. put a copy beyond its reach. flat, deduped by project + filename.
   let copied = 0;

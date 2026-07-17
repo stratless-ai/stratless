@@ -15,9 +15,10 @@
  * left exactly as it was. HUMAN.md is written FIRST, so the import never points at a missing file. The
  * privacy rule holds: these files are visible to your assistant, never networked, never committed by us.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, sep } from 'node:path';
+import { join, sep } from 'node:path';
+import { atomicWriteFileSync } from './atomic.js';
 
 /** The global file Claude Code loads every session. Override with STRATLESS_CLAUDE_MD (tests). */
 export function claudeMdPath(): string {
@@ -66,8 +67,7 @@ export function injectProfile(
     text.trim(),
     '',
   ].join('\n');
-  mkdirSync(dirname(humanTarget), { recursive: true });
-  writeFileSync(humanTarget, human);
+  atomicWriteFileSync(humanTarget, human);
 
   // 2. Point CLAUDE.md at it, inside our managed block — the person's own content is never touched.
   upsertBlock(humanTarget, claudeTarget);
@@ -95,8 +95,7 @@ function upsertBlock(humanTarget: string, claudeTarget: string): void {
     // No block yet: append after their content (blank line between), or start the file.
     doc = doc.trim() ? `${doc.trimEnd()}\n\n${block}\n` : `${block}\n`;
   }
-  mkdirSync(dirname(claudeTarget), { recursive: true });
-  writeFileSync(claudeTarget, doc);
+  atomicWriteFileSync(claudeTarget, doc);
 }
 
 /**
@@ -127,6 +126,6 @@ export function removeProfile(claudeTarget: string = claudeMdPath()): boolean {
   const before = doc.slice(0, s).replace(/\s+$/, '');
   const after = doc.slice(e + END.length).replace(/^\s+/, '').replace(/\s+$/, '');
   const parts = [before, after].filter(Boolean);
-  writeFileSync(claudeTarget, parts.length ? `${parts.join('\n\n')}\n` : '');
+  atomicWriteFileSync(claudeTarget, parts.length ? `${parts.join('\n\n')}\n` : '');
   return true;
 }

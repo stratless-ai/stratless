@@ -7,9 +7,10 @@
  * profile consumes them in batches. Missing or corrupt state reads as "never synthesized", which
  * fails OPEN: one possibly-unneeded synthesis, never a stuck-stale profile.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
+import { atomicWriteFileSync } from './atomic.js';
 
 /** Where the state lives. Override with STRATLESS_STATE (tests). */
 function statePath(): string {
@@ -26,6 +27,32 @@ export const SYNTH_EVERY = 25;
  */
 export const SYNTH_MAX_AGE_DAYS = 7;
 
+// ── the stopwatch's shapes (C8) — declared here so state.ts owns everything it persists ────────
+
+/** The distribution of one stage's per-turn wall-clocks — mean and tail, never just an average. */
+export interface TurnStats {
+  count: number;
+  meanMs: number;
+  p90Ms: number;
+}
+
+/** One pipeline stage's wall-clock for one run. `units` is what the stage processed (fresh
+ *  verdicts, assigned judgments, model calls…) so a per-unit rate can be derived; 0 units means
+ *  the wall is recorded but no rate is (a stage that did nothing teaches nothing about speed). */
+export interface StageRecord {
+  stage: string;
+  ms: number;
+  units: number;
+  turns?: TurnStats;
+}
+
+/** One run's complete timing record. */
+export interface RunRecord {
+  at: string;
+  totalMs: number;
+  stages: StageRecord[];
+}
+
 export interface SynthState {
   /** ISO timestamp of the last synthesis; absent if there has never been one */
   lastSynthesisAt?: string;
@@ -33,6 +60,8 @@ export interface SynthState {
   judgmentsAtLastSynthesis?: number;
   /** the judge's view sizes fitted to this user's window (0.3.0) — recorded for visibility */
   aperture?: { prompt: number; said: number; reaction: number; computedAt: string };
+  /** the stopwatch (C8): the last runs' measured walls — every ETA and quote derives from these */
+  stopwatch?: RunRecord[];
 }
 
 /** Read the state. Missing or corrupt reads as never-synthesized and never throws. */
@@ -55,17 +84,40 @@ export function readState(file: string = statePath()): SynthState {
     ) {
       out.aperture = { prompt: Number(a.prompt), said: Number(a.said), reaction: Number(a.reaction), computedAt: a.computedAt };
     }
+    const runs = validRuns(raw.stopwatch);
+    if (runs.length) out.stopwatch = runs;
     return out;
   } catch {
     return {}; // fails open — one extra synthesis, never a crash
   }
 }
 
-/** Write the state. Best-effort: a failed write costs one extra synthesis next run, nothing more. */
+/** Keep only well-formed run records — a malformed one is dropped, never a crash or a wrong rate. */
+function validRuns(raw: unknown): RunRecord[] {
+  if (!Array.isArray(raw)) return [];
+  const out: RunRecord[] = [];
+  for (const r of raw as Partial<RunRecord>[]) {
+    if (!r || typeof r.at !== 'string' || !Number.isFinite(Number(r.totalMs)) || !Array.isArray(r.stages)) continue;
+    const stages: StageRecord[] = [];
+    for (const s of r.stages as Partial<StageRecord>[]) {
+      if (!s || typeof s.stage !== 'string' || !Number.isFinite(Number(s.ms)) || !Number.isFinite(Number(s.units))) continue;
+      const st: StageRecord = { stage: s.stage, ms: Number(s.ms), units: Number(s.units) };
+      const t = s.turns;
+      if (t && Number.isFinite(Number(t.count)) && Number.isFinite(Number(t.meanMs)) && Number.isFinite(Number(t.p90Ms))) {
+        st.turns = { count: Number(t.count), meanMs: Number(t.meanMs), p90Ms: Number(t.p90Ms) };
+      }
+      stages.push(st);
+    }
+    out.push({ at: r.at, totalMs: Number(r.totalMs), stages });
+  }
+  return out;
+}
+
+/** Write the state atomically (C2). Best-effort on failure: the old state survives on disk and
+ *  costs one extra synthesis next run, nothing more. */
 export function writeState(s: SynthState, file: string = statePath()): void {
   try {
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, `${JSON.stringify(s)}\n`);
+    atomicWriteFileSync(file, `${JSON.stringify(s)}\n`);
   } catch {
     /* best-effort by design */
   }
@@ -112,8 +164,7 @@ export function writeRender(kind: 'profile' | 'report', meta: RenderMeta, file: 
   try {
     const all = readRenders(file);
     all[kind] = meta;
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, `${JSON.stringify(all)}\n`);
+    atomicWriteFileSync(file, `${JSON.stringify(all)}\n`);
   } catch {
     /* best-effort by design */
   }

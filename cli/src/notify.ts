@@ -13,9 +13,10 @@
  * blocked or failed command. Result + timestamp cached in ~/.stratless/notify.json. The fetcher
  * is injectable so tests can PROVE no network happens on the unarmed path.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
+import { atomicWriteFileSync } from './atomic.js';
 
 /** Where the check cache lives. Override with STRATLESS_NOTIFY (tests). */
 const notifyPath = (): string => process.env.STRATLESS_NOTIFY || join(homedir(), '.stratless', 'notify.json');
@@ -40,8 +41,7 @@ export function readNotify(file: string = notifyPath()): NotifyCache {
 
 export function writeNotify(cache: NotifyCache, file: string = notifyPath()): void {
   try {
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, `${JSON.stringify(cache)}\n`);
+    atomicWriteFileSync(file, `${JSON.stringify(cache)}\n`);
   } catch {
     /* best-effort — a lost cache costs one extra check tomorrow */
   }
