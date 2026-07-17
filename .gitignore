@@ -8,6 +8,9 @@ dist/
 package-lock.json
 
 
-# scratch notes — personal working file, not repo content
-docs/notes.md
+# scratch notes — personal working files, not repo content. Anchored to the root on purpose:
+# a bare `docs/` would also ignore web/content/docs/ (the site docs) at any depth.
+/docs/
 
+# session tooling artifacts (exploration logs, local settings) — not repo content
+/.claude/
