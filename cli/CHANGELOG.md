@@ -4,7 +4,7 @@ All notable changes to `stratless` are recorded here — written by hand, for th
 not scraped from commits. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and each version matches its `cli-v*` git tag.
 
-## [0.3.5] — unreleased — the worker: the work moves off your terminal
+## [0.3.5] — 2026-07-18 — the worker: the work moves off your terminal
 
 Phase 2 of the cold-start build. The machinery no longer lives inside the command you typed — it
 lives in ONE background worker that commands merely wake. Nothing runs when there is nothing to
