@@ -47,16 +47,20 @@ export function findAssistant(): string | undefined {
 /**
  * Ask the person's own assistant one thing, in --print mode. Returns undefined if it can't answer.
  *
- * `model` names an alias (e.g. haiku, sonnet) tried first, falling back to their default if the
- * alias isn't recognised; omit it to run on their default straight away. `feature` labels the call
- * for the usage ledger ('judge', 'synthesis') so `status` can show WHERE the spend went, not just
- * its total.
+ * `model` names an alias (haiku, sonnet) the call is PINNED to; omit it to run on their default.
+ * `feature` labels the call for the usage ledger so `status` shows WHERE the spend went.
  *
- * THE LADDER IS METERED ALL THE WAY DOWN (C11, Phase 0's B3): the plain-text rung has no receipt
- * to parse, so it is recorded as an UNMETERED call — the ledger says "a call happened whose cost I
- * cannot see" instead of confidently recording zero. And any rung that dropped a requested model
- * pin records pinEscaped — landing on the account's default (frontier rates) is allowed, but never
- * silent. Phase 0 watched a whole slice's sonnet spend vanish through this exact hole.
+ * THE PIN IS ABSOLUTE (Sun, 2026-07-18): a pinned call runs on ITS model or it REFUSES — it never
+ * silently falls back to the account's default. The old escape-to-default rungs are gone: a pin
+ * escape could land the priciest stage (the miner) on the priciest model (a user who defaults to
+ * Opus) at frontier rates, invisibly. Always sonnet/haiku unless the user overrides
+ * (STRATLESS_SYNTH_MODEL). Compatibility for a CLI without JSON output is kept — but on the SAME
+ * pinned model, as plain text.
+ *
+ * THE PLAIN RUNG IS METERED AS UNMETERED (C11, Phase 0's B3): it carries no receipt, so the ledger
+ * records "a call happened whose cost I cannot see" rather than a confident zero. It also rejects
+ * an error envelope (a broken pin can emit one here too — is_error text must never pass as an
+ * answer, the same refusal parseJsonResult makes on the JSON rung).
  */
 export function runClaude(
   bin: string,
@@ -65,25 +69,16 @@ export function runClaude(
   feature?: string,
   timeoutMs = 120_000,
 ): string | undefined {
-  // Prefer JSON so we can record what the borrowed call cost (see `status`); fall back to plain text,
-  // and to the default model, so an older `claude`, or one whose JSON we can't parse, still answers.
-  // THE PROMPT COMES BEFORE --tools: `--tools` is variadic and would swallow a following
-  // positional whole — with no `--model` after it, the CLI then sees no input at all (verified
-  // live, 2026-07-17: the review caught the unpinned rungs structurally dead this way).
-  // Ladder order: both METERED (JSON) rungs before any plain-text one — a broken model pin
-  // answers with an error envelope on the JSON rung (refused below, ladder advances), and the
-  // same failure on a plain rung would be indistinguishable from an answer.
+  // Prefer JSON (metered, is_error-checked); fall back to plain text on the SAME pinned model for
+  // a CLI without JSON output. THE PROMPT COMES BEFORE --tools: `--tools` is variadic and would
+  // swallow a following positional whole (verified live, 2026-07-17).
   const modelArgs = model ? ['--model', model] : [];
-  const attempts: { args: string[]; json: boolean; pinned: boolean }[] = [
-    { args: ['-p', '--output-format', 'json', ...modelArgs, input, ...TOOLLESS_ARGS], json: true, pinned: true },
+  const attempts: { args: string[]; json: boolean }[] = [
+    { args: ['-p', '--output-format', 'json', ...modelArgs, input, ...TOOLLESS_ARGS], json: true },
+    { args: ['-p', ...modelArgs, input, ...TOOLLESS_ARGS], json: false },
   ];
-  if (model) attempts.push({ args: ['-p', '--output-format', 'json', input, ...TOOLLESS_ARGS], json: true, pinned: false });
-  attempts.push({ args: ['-p', ...modelArgs, input, ...TOOLLESS_ARGS], json: false, pinned: true });
-  if (model) attempts.push({ args: ['-p', input, ...TOOLLESS_ARGS], json: false, pinned: false });
 
-  for (const { args, json, pinned } of attempts) {
-    // The pin escaped when a model was asked for but this rung runs without it (C11: visible, never silent).
-    const escaped = !!model && !pinned;
+  for (const { args, json } of attempts) {
     try {
       const out = execFileSync(bin, args, {
         encoding: 'utf8',
@@ -95,19 +90,30 @@ export function runClaude(
       }).trim();
       if (!out) continue;
       if (!json) {
-        // No receipt exists on this rung — record the call as unmetered, not as free (B3).
-        recordUsage({ feature, unmetered: true, ...(escaped ? { pinEscaped: true } : {}) });
+        if (isErrorEnvelope(out)) continue; // a broken pin's error JSON must not pass as an answer
+        recordUsage({ feature, unmetered: true }); // no receipt on this rung — count it, never zero it
         return out;
       }
       const parsed = parseJsonResult(out);
-      if (!parsed) continue; // unparseable JSON — try the plain-text attempt instead
-      recordUsage({ ...parsed.usage, feature, ...(escaped ? { pinEscaped: true } : {}) }); // best-effort; never throws
+      if (!parsed) continue; // unparseable, or an is_error envelope — refuse this rung
+      recordUsage({ ...parsed.usage, feature }); // best-effort; never throws
       return parsed.result;
     } catch {
       /* try the next attempt; if all fail the caller degrades to silence */
     }
   }
   return undefined;
+}
+
+/** Does this raw output parse as a JSON error envelope (`is_error:true`)? The plain-text rung uses
+ *  it to reject a broken pin's error prose — parseJsonResult makes the same call on the JSON rung. */
+function isErrorEnvelope(raw: string): boolean {
+  try {
+    const o = JSON.parse(raw) as { is_error?: unknown };
+    return o !== null && typeof o === 'object' && o.is_error === true;
+  } catch {
+    return false; // real plain-text prose isn't JSON — it passes
+  }
 }
 
 interface ParsedResult {

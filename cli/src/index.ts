@@ -845,7 +845,12 @@ async function main(): Promise<void> {
     throw err;
   }
 
-  console.error(`  unknown command: ${cmd}`);
+  // A mistyped COMMAND gets the same courtesy as a mistyped flag (0.3.5): name the nearest one,
+  // never just reject. The user-facing verbs, in help order.
+  const KNOWN = ['init', 'profile', 'report', 'update', 'patterns', 'receipt', 'stop', 'status', 'stats', 'help'];
+  const guess = cmd ? KNOWN.map((k) => [k, editDistance(cmd, k)] as const).filter(([, d]) => d <= 3).sort((a, b) => a[1] - b[1])[0]?.[0] : undefined;
+  console.error(`\n  ${C.bad(`unknown command: ${cmd}`)}${guess ? C.dim(`  (did you mean ${guess}?)`) : ''}`);
+  console.error(`  ${C.dim(`see \`${hint('stratless help')}\` for the full list`)}\n`);
   process.exit(1);
 }
 
