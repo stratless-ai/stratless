@@ -4,7 +4,7 @@ All notable changes to `stratless` are recorded here — written by hand, for th
 not scraped from commits. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and each version matches its `cli-v*` git tag.
 
-## [0.3.3] — unreleased — looking is free, evidence is readable, and the tool talks properly through a pipe
+## [0.3.3] — 2026-07-17 — looking is free, evidence is readable, and the tool talks properly through a pipe
 
 ### Changed
 - **Looking is free.** `stratless profile` and `stratless report` now print the last built
