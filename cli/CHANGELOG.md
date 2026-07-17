@@ -4,6 +4,45 @@ All notable changes to `stratless` are recorded here — written by hand, for th
 not scraped from commits. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and each version matches its `cli-v*` git tag.
 
+## [0.3.5] — unreleased — the worker: the work moves off your terminal
+
+Phase 2 of the cold-start build. The machinery no longer lives inside the command you typed — it
+lives in ONE background worker that commands merely wake. Nothing runs when there is nothing to
+do; there is no daemon.
+
+### Changed
+- **`update` is now a doorbell.** It wakes the background worker and — in a real terminal —
+  watches it, printing the same progress lines as before. The difference shows only at the edges:
+  Ctrl-C (or closing the terminal) detaches the *display*; the work continues and the profile
+  still lands. The detach message prints the whole kill ladder: watch with `status`, stop
+  everything with `stop`. The after-session hook rings the same doorbell and returns instantly.
+- **`stop` now stops a RUNNING refresh too, within seconds.** The off switch means spending halts
+  now — not after the current build finishes. Killing never wastes what was spent: every judgment
+  already made is banked, and restarting re-reads at most one chunk.
+- **`status` shows a live worker** (`running now  judging 12/31 · pid N`) and labels the last
+  run honestly (`stopped by you`, or `failed` with the reason).
+- **Kill-safe to one chunk, for real (C3).** Judged verdicts are now banked per streamed session
+  as they land — a crash, sleep, or kill loses at most the twelve-turn chunk in flight, never the
+  whole batch. (The Phase 2 gauntlet test caught the old behavior losing the entire batch.)
+- **Typos refuse instead of quietly running something else.** `stratless update --npw` used to run
+  a plain update while you believed you had forced a rebuild. Unknown flags and stray arguments
+  now exit loudly, with a did-you-mean.
+
+### Added
+- **Every run hands you its receipt.** A finished `update` closes with what it actually spent —
+  `this run: 1.2M tokens · ≈ $0.21 at API rates · claude-haiku-4-5 ×31 · claude-sonnet-5 ×3` —
+  tokens first, models by their ground-truth names (which model RAN, not which was asked for).
+  Refused and stopped runs get their receipt too; a run that spent nothing owes none. `status`
+  keeps the most recent run's receipt (`last run spend`), so the hook's silent spends stay
+  readable. Announced before, metered during, accounted after.
+- **The artifact-shape lint** (the second half of the tool-less-borrow guarantee, pulled forward
+  after a chatter reply was loaded as a real HUMAN.md in the wild): a profile that opens with
+  assistant chatter, or a pattern-era profile without its section headings, is REFUSED like an
+  invented number — nothing malformed ever loads.
+- **The flat-memory walk (C1):** the archive is read one transcript at a time, newest first —
+  memory stays flat whether your history holds 200 exchanges or 20,000. This is the read the
+  cold-start release (0.4.0) will stand on.
+
 ## [0.3.4] — 2026-07-17 — the plumbing: what the cold-start build stands on
 
 Phase 1 of the cold-start build (spec §12). No new features — the release is eight acceptance

@@ -192,6 +192,47 @@ export function renderSurprises(patterns: Pattern[], now: Date, windowDays = 14)
   return items.join('\n');
 }
 
+/** The six section headings the pattern-era profile must open with — the protocol made visible. */
+const KIND_HEADINGS = ['WHAT THEY KNOW', 'HOW THEY THINK', 'HOW THEY WORK', 'DIRECTION', 'FAILURE SIGNALS', 'TRIGGERS'];
+
+/** The opening moves of a model talking to a HUMAN instead of writing an ARTIFACT. Matched only
+ *  against the PROFILE's opening line, and kept to the unambiguous tells — a report may honestly
+ *  begin "Here's the picture" or "It looks like the deploy work clicked", so breezy openers that
+ *  real writing uses are deliberately NOT here (review 2026-07-18: the first draft refused them). */
+const CHATTER_OPENERS = /^(sorry|unfortunately|i apologize|hi[,!.]|hello|what would you like)\b/i;
+/** Phrases that only ever mean the model was talking ABOUT the request, not writing the artifact.
+ *  Each is specific enough that a real profile quoting the person could not trip it by accident —
+ *  quotable failure-signals like "i can't read this" were cut for exactly that reason (review). */
+const CHATTER_MARKS =
+  /\b(your (message|request) (came through|appears to be|seems( to be)?) (empty|blank)|no request attached|i don'?t have (access|permission) to (write|read|edit|create)|as an ai|i'?m an ai)\b/i;
+
+/**
+ * THE ARTIFACT-SHAPE LINT (C9's second half — pulled forward from Phase 3 after B1 struck
+ * production, 2026-07-18: the borrowed model claimed the prompt "came through empty" and its
+ * chatter was LOADED as HUMAN.md). The promise layer's rule, applied to form, on THE PROFILE
+ * ONLY — the artifact that loads into an assistant's context. (The report is read by a human,
+ * who can see chatter for what it is; linting its freer prose risks refusing honest builds.)
+ * A pattern-era profile must open with one of the six kind headings — the structural check that
+ * catches whole classes of drift; the chatter checks catch the flat-era remainder. Returns a
+ * short description of the problem, or undefined when the shape is sound. Pure; exported for tests.
+ */
+export function artifactShapeProblem(
+  text: string,
+  opts: { kind: 'profile' | 'report'; patternEra: boolean },
+): string | undefined {
+  if (opts.kind !== 'profile') return undefined;
+  const head = text.trimStart();
+  const firstLine = head.split('\n', 1)[0].trim();
+  if (CHATTER_OPENERS.test(firstLine) || CHATTER_MARKS.test(head.slice(0, 400))) return 'assistant chatter';
+  if (opts.patternEra) {
+    // Tolerate markdown-bold drift around the heading (seen in Phase 0's B1 artifacts) — the
+    // heading must be THERE; cosmetic asterisks are the writer's tic, not a different shape.
+    const bare = firstLine.replace(/[*#`_]/g, '').trim();
+    if (!KIND_HEADINGS.includes(bare)) return 'text without the section headings';
+  }
+  return undefined;
+}
+
 /**
  * THE NUMBERS-LINT (promise layer): every numeral in the writer's output must already exist in the
  * input it was shown. No new numbers means no invented counts, no rounded frequencies, no

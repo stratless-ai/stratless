@@ -123,7 +123,7 @@ test('C4: a dead holder is stale and stolen; the thief records itself', async ()
   const deadPid = child.pid!;
   await new Promise((r) => child.on('close', r));
   writeFileSync(lockFile, `${JSON.stringify({ pid: deadPid, startedAt: '2026-01-01T00:00:00Z' })}\n`);
-  assert.equal(lockIsStale({ pid: deadPid, startedAt: '' }), true, 'dead pid reads stale');
+  assert.equal(lockIsStale({ pid: deadPid, startedAt: '', kind: 'worker' }), true, 'dead pid reads stale');
   assert.equal(acquireLock(lockFile), true, 'the stale lock is stolen');
   assert.equal(readLock(lockFile)?.pid, process.pid, 'and the thief now holds it');
   releaseLock(lockFile);
@@ -136,7 +136,7 @@ test('C4: a live pid that is NOT a stratless-ish process is PID reuse — stale,
   await sleep(50);
   try {
     writeFileSync(lockFile, `${JSON.stringify({ pid: foreign.pid, startedAt: '2026-01-01T00:00:00Z' })}\n`);
-    assert.equal(lockIsStale({ pid: foreign.pid!, startedAt: '' }), true, 'a sleep(1) holding our lock is a recycled pid');
+    assert.equal(lockIsStale({ pid: foreign.pid!, startedAt: '', kind: 'worker' }), true, 'a sleep(1) holding our lock is a recycled pid');
     assert.equal(acquireLock(lockFile), true, 'stolen');
     releaseLock(lockFile);
   } finally {
@@ -150,7 +150,7 @@ test('C4: a live node-ish holder is respected — no steal, acquire says no', as
   await sleep(80); // let it exist for ps
   try {
     writeFileSync(lockFile, `${JSON.stringify({ pid: holder.pid, startedAt: new Date().toISOString() })}\n`);
-    assert.equal(lockIsStale({ pid: holder.pid!, startedAt: '' }), false, 'alive node process = plausibly ours');
+    assert.equal(lockIsStale({ pid: holder.pid!, startedAt: '', kind: 'worker' }), false, 'alive node process = plausibly ours');
     assert.equal(acquireLock(lockFile), false, 'the lock is respected');
     assert.equal(readLock(lockFile)?.pid, holder.pid, 'and untouched');
     releaseLock(lockFile); // not ours — must be a no-op

@@ -18,24 +18,17 @@ import { init as doInit, ARCHIVE, stopRefresh, refreshArmed, type InitResult } f
 import { dailyCheck, fetchLatest, newerThan } from './notify.js';
 import { health } from './canary.js';
 import { loadRecentExchanges, sessionCount, findExchange } from './exchange.js';
-import { judgeAll, cachedCount, cacheHealth, fitAperture, allJudgments, pendingCount, type Judgment } from './judge.js';
-import {
-  synthesizeProfile,
-  synthesizeReport,
-  synthesizeProfileFromPatterns,
-  synthesizeReportFromPatterns,
-  topTopics,
-  hasSignal,
-  mostRecent,
-  type Corpus,
-} from './synthesize.js';
-import { mine, auditPatterns, gradePatterns, loadPatterns, displayOrder, matchReceiptPrefix, MIN_RECEIPTS, type PatternStore } from './miner.js';
-import { injectProfile, removeProfile, ensureLoaded, humanMdPath, claudeMdPath } from './sink.js';
-import { readState, writeState, synthesisDue, readRenders, writeRender, SYNTH_EVERY } from './state.js';
+import { judgeAll, cacheHealth, fitAperture, allJudgments, pendingCount, type Judgment } from './judge.js';
+import { topTopics, hasSignal, type Corpus } from './synthesize.js';
+import { loadPatterns, displayOrder, matchReceiptPrefix, MIN_RECEIPTS, type PatternStore } from './miner.js';
+import { removeProfile, humanMdPath, claudeMdPath } from './sink.js';
+import { readRenders, writeRender } from './state.js';
 import { readUsage } from './usage.js';
 import { atomicWriteFileSync, CorruptStoreError } from './atomic.js';
-import { acquireLock, releaseLock, readLock, lockFilePath } from './worker.js';
+import { acquireLock, releaseLock, readLock, lockFilePath, lockIsStale, stopWorker, spawnDetached, resolveBinPath } from './worker.js';
 import { startRun, type Stopwatch } from './stopwatch.js';
+import { runWorker, buildRendered, installedVersion, JUDGE_WINDOW, judgeLimit } from './loop.js';
+import { readProgress, type Progress } from './progress.js';
 import { makePalette } from './palette.js';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -96,38 +89,6 @@ function stats(cwd: string): void {
 const STRATLESS = join(homedir(), '.stratless');
 
 /**
- * The profile is built from the most-recent WINDOW exchanges, never the whole backlog. A profile
- * converges here — the older tail is diminishing returns and, by our own recency logic, stale — and
- * bounding it keeps every run cheap and SAFE regardless of how deep a history goes. (An unbounded pass
- * once judged 3,873 exchanges back-to-back and took a laptop down.)
- */
-const JUDGE_WINDOW = 200;
-
-/** Amortize default: a good first profile without chewing the whole window in one run. */
-const DEFAULT_JUDGE_LIMIT = 50;
-
-/**
- * Per-run cap on FRESH judge calls (cache hits are always free). STRATLESS_JUDGE_LIMIT overrides it;
- * otherwise a sane default keeps every run — and the after-session hook — cheap, and the window drains
- * over runs.
- */
-const judgeLimit = (): number => {
-  const env = Number(process.env.STRATLESS_JUDGE_LIMIT);
-  if (Number.isFinite(env) && env > 0) return env;
-  return DEFAULT_JUDGE_LIMIT;
-};
-
-/**
- * The synthesis gate: rebuild the profile only after this many fresh judgments accumulate (or on the
- * backstop / `--now` — see update()). STRATLESS_SYNTH_EVERY overrides it.
- */
-const synthEvery = (): number => {
-  const env = Number(process.env.STRATLESS_SYNTH_EVERY);
-  if (Number.isFinite(env) && env > 0) return env;
-  return SYNTH_EVERY;
-};
-
-/**
  * Is the profile actually loaded? HUMAN.md exists AND CLAUDE.md carries our redirect block. The one
  * honest definition, shared by `status` and `profile`'s footer.
  */
@@ -157,19 +118,17 @@ function buildRenderedText(
   bin: string,
   sw?: Stopwatch,
 ): string | undefined {
-  const store = loadPatterns();
-  if (!store.patterns.length) {
-    // pre-miner fallback — the 0.2.x flat read
-    return kind === 'profile' ? synthesizeProfile(signal, corpus, bin) : synthesizeReport(signal, corpus, bin);
-  }
-  const synth = kind === 'profile' ? synthesizeProfileFromPatterns : synthesizeReportFromPatterns;
-  // C10 (Phase 0's B2): the newest 25 BY TIMESTAMP — this was `signal.slice(-25)`, the oldest 25
-  // of a newest-first list, labelled "MOST RECENT" since 0.3.1. mostRecent() sorts; a test pins it.
-  const built = synth(store.patterns, mostRecent(signal, 25), corpus, bin);
+  const built = buildRendered(kind, signal, corpus, bin);
   if (built.invented?.length) {
     console.error(`\n  ${C.bad('Refused: the writer invented numbers.')} ${C.dim(`(${built.invented.join(', ')})`)}`);
-    console.error(`  ${C.dim('Nothing was written or loaded — this build is discarded. Try again with `' + hint('stratless update --now') + '`.')}\n`);
+    console.error(`  ${C.dim('Nothing was written or loaded — this build is discarded. Try again with `' + hint(`stratless ${kind} --now`) + '`.')}\n`);
     sw?.record(); // the stages already paid for are measured truth — a refused build must not erase them (C8)
+    process.exit(1);
+  }
+  if (built.malformed) {
+    console.error(`\n  ${C.bad(`Refused: the writer returned ${built.malformed} instead of a ${kind}.`)}`);
+    console.error(`  ${C.dim('Nothing was written or loaded — this build is discarded. Try again with `' + hint(`stratless ${kind} --now`) + '`.')}\n`);
+    sw?.record();
     process.exit(1);
   }
   return built.text;
@@ -342,6 +301,82 @@ async function profiler(kind: 'profile' | 'report', rest: string[] = []): Promis
  * existing profile is loaded (covers `update` after `stop`) — the skip is invisible, only the cost
  * is missing.
  */
+const TERMINAL_PHASES = new Set(['done', 'failed', 'stopped']);
+
+/** Render a finished worker's closing frame — first line in the outcome's color, the rest dim. */
+function renderFinal(p: Progress): void {
+  process.stderr.write(`\r${' '.repeat(60)}\r`);
+  const lines = p.summary?.length ? p.summary : [p.phase];
+  const style = p.ok ? C.ok : p.phase === 'stopped' ? C.it : C.bad;
+  console.log(`\n  ${style(lines[0])}`);
+  for (const l of lines.slice(1)) console.log(`  ${C.dim(l)}`);
+  console.log('');
+}
+
+/**
+ * THE TAIL — the terminal as a window onto the worker, never the engine. Polls progress.json and
+ * renders the familiar lines; Ctrl-C closes the window and prints the kill ladder (the work
+ * continues; `stop` is one line away). Returns the exit code the outcome deserves.
+ */
+async function tailWorker(spawnedAtMs: number, prevStamp: string): Promise<number> {
+  const startMs = Date.now();
+  process.once('SIGINT', () => {
+    process.stderr.write(`\r${' '.repeat(60)}\r`);
+    console.log(`\n  ${C.it('detached — the refresh continues in the background')}`);
+    console.log(`  ${C.dim(`watch it:        ${hint('stratless status')}`)}`);
+    console.log(`  ${C.dim(`stop everything: ${hint('stratless stop')}`)}\n`);
+    process.exit(0);
+  });
+  const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+  let sawAlive = false;
+  let deadSince = 0;
+  for (;;) {
+    const holder = readLock();
+    const alive = !!(holder && !lockIsStale(holder));
+    if (alive) {
+      sawAlive = true;
+      deadSince = 0;
+    }
+    const p = readProgress();
+    if (alive && p && p.pid === holder!.pid && !TERMINAL_PHASES.has(p.phase)) {
+      const line = p.phase === 'judging' && p.total ? `judging ${p.done ?? 0}/${p.total} new…` : `${p.phase}…`;
+      process.stderr.write(`\r  ${CE.dim(line)}${' '.repeat(Math.max(0, 40 - line.length))}`);
+    }
+    if (!alive) {
+      // Trust a terminal frame only when it is strictly NEWER than the narration that existed
+      // before this run began — a leftover 'done' from a previous run is history, not our outcome.
+      const trusted = p && TERMINAL_PHASES.has(p.phase) && p.updatedAt > prevStamp && (sawAlive || spawnedAtMs > 0);
+      if (trusted) {
+        renderFinal(p!);
+        // 'stopped' is the person getting exactly what they asked for — never an error exit
+        return p!.ok || p!.phase === 'stopped' ? 0 : 1;
+      }
+      const startupGrace = !sawAlive && spawnedAtMs > 0 && Date.now() - startMs < 5000;
+      if (!startupGrace) {
+        deadSince ||= Date.now();
+        if (Date.now() - deadSince > 1500) {
+          process.stderr.write(`\r${' '.repeat(60)}\r`);
+          console.error(`\n  ${C.bad('the background refresh ended without reporting.')} ${C.dim(`check \`${hint('stratless status')}\``)}\n`);
+          return 1;
+        }
+      }
+    }
+    if (Date.now() - startMs > 3_600_000) {
+      // The one-hour valve: something is unusually slow — leave the worker to it, honestly.
+      process.stderr.write(`\r${' '.repeat(60)}\r`);
+      console.log(`\n  ${C.it('still running — detaching the display')} ${C.dim(`· watch: ${hint('stratless status')} · stop: ${hint('stratless stop')}`)}\n`);
+      return 0;
+    }
+    await sleep(200);
+  }
+}
+
+/**
+ * UPDATE — the doorbell (Phase 2). The work lives in THE WORKER (loop.ts), one detached process
+ * that survives this terminal; `update` wakes it and — in a real terminal — watches it. The hook
+ * and pipes get one line and their prompt back. Ctrl-C mid-watch detaches the display, never the
+ * work; the kill ladder is printed at that exact moment of intent.
+ */
 async function update(rest: string[]): Promise<void> {
   const force = rest.includes('--now');
   const bin = findAssistant();
@@ -357,124 +392,46 @@ async function update(rest: string[]): Promise<void> {
     return;
   }
 
-  if (!claimLockOrSay()) return; // C4: the hook and a hand-run update no longer race the cache
-  try {
-    const sw = startRun(); // C8: the stopwatch runs wherever money runs
-    const sessions = sessionCount(window);
-    // The aperture: the judge's view sizes, fitted to THIS user's window (p90 × 1.2, clamped) —
-    // computed in code, costs nothing, never part of the cache identity.
-    const aperture = fitAperture(window);
-    preSpend(pendingCount([...window].reverse(), judgeLimit()));
-    process.stderr.write(`\n  ${CE.dim(`reading ${window.length.toLocaleString()} recent exchanges across ${sessions} sessions…`)}\n`);
-    const tJudge = Date.now();
-    const run = await judgeAll([...window].reverse(), bin, {
-      limit: judgeLimit(),
-      aperture,
-      onProgress: (done, total) => process.stderr.write(`\r  ${CE.dim(`judging ${done}/${total} new…`)}   `),
-    });
-    sw.stage('judge', Date.now() - tJudge, run.fresh, run.turnsMs);
-    process.stderr.write(`\r${' '.repeat(44)}\r`);
-
-    if (!run.judgments.length) {
-      console.error(`\n  ${C.bad('Could not read a single exchange.')} ${C.dim('Is `claude -p` working?')}\n`);
-      sw.record(); // whatever was measured before the refusal is still measured truth (C8)
-      process.exit(1);
-    }
-
-    // THE GATE — decide before spending the expensive read. cachedCount() runs after judging, so this
-    // session's fresh judgments count toward the gate. `--now`, a missing HUMAN.md, or a due verdict
-    // (K reached / backstop / cache reset / first build) all open it; otherwise the cheap path.
-    const state = readState();
-    const gate = synthesisDue(state, cachedCount(), new Date(), { every: synthEvery() });
-    const noProfile = !existsSync(humanMdPath());
-    // The daily version line rides ONLY on --auto consent (the installed hook is the consent
-    // artifact) — a plain-init user's update makes zero registry calls, provably (notify tests).
-    const versionLine = async (): Promise<void> => {
-      const newer = await dailyCheck(version(), refreshArmed());
-      if (newer) console.log(`  ${C.dim(`stratless ${newer} available: npm i -g stratless`)}`);
-    };
-
-    if (!force && !noProfile && !gate.due) {
-      // Record the fitted aperture even on the cheap path — state.json is where it's visible.
-      writeState({ ...state, aperture: { ...aperture, computedAt: new Date().toISOString() } });
-      if (run.fresh) sw.record(); // the cheap path still measured fresh judging — keep the rate data
-      const ensured = ensureLoaded();
-      const judged = run.fresh ? `judged ${run.fresh} new` : 'nothing new to judge';
-      console.log(`\n  ${C.ok('profile is fresh enough')}  ${C.dim(`(${judged} · ${gate.newSince}/${synthEvery()} toward the next build)`)}`);
-      if (ensured) console.log(`  ${C.dim(`loaded: ${humanMdPath()}`)}`);
-      console.log(`  ${C.dim(`rebuild now with \`${hint('stratless update --now')}\``)}`);
-      await versionLine();
-      console.log('');
-      return;
-    }
-
-    // Same signal filter as `profile` — `none` lines never reach the writer (see profiler()).
-    const signal = run.judgments.filter(hasSignal);
-    const corpus: Corpus = {
-      sessions,
-      exchanges: signal.length,
-      topics: topTopics(signal),
-      from: window[0].ts.slice(0, 10),
-      to: window[window.length - 1].ts.slice(0, 10),
-    };
-
-    // THE MINER + THE AUDITOR — behind the same gate as the synthesis, so the expensive passes all
-    // ride one cadence. The analyst assigns the un-mined judgments (whole pile, batched); a separate
-    // mind then checks every fresh receipt against its statement before the writer may lean on it.
-    const pile = allJudgments();
-    process.stderr.write(`  ${CE.dim('mining patterns…')}   `);
-    const tMine = Date.now();
-    const mined = mine(pile, bin);
-    sw.stage('mine', Date.now() - tMine, mined.assigned);
-    const tAudit = Date.now();
-    const audited = await auditPatterns(pile, bin);
-    sw.stage('audit', Date.now() - tAudit, audited.calls);
-    // THE GRADER (0.3.2) — every admitted pattern is a dated prediction; the window's new evidence
-    // grades it: confirmed / silent / surprised. Runs after mine (receipts current) and audit
-    // (padding evicted), so it grades clean claims against fresh reality.
-    const tGrade = Date.now();
-    const graded = await gradePatterns(pile, bin);
-    sw.stage('grade', Date.now() - tGrade, graded.graded);
-    process.stderr.write(`\r${' '.repeat(24)}\r`);
-
-    const tSynth = Date.now();
-    const text = buildRenderedText('profile', signal, corpus, bin, sw);
-    sw.stage('synthesis', Date.now() - tSynth, text ? 1 : 0);
-    if (!text) {
-      console.error(`\n  ${C.bad('Could not build your profile.')} ${C.dim('The assistant returned nothing — silence beats a guess.')}\n`);
-      sw.record(); // the judge/mine/audit/grade walls survive the refusal (C8)
-      process.exit(1);
-    }
-
-    atomicWriteFileSync(join(STRATLESS, 'profile.txt'), `${text}\n`);
-    writeRender('profile', { builtAt: new Date().toISOString(), sessions, exchanges: signal.length });
-    const { humanMd, claudeMd } = injectProfile(text);
-    // Spread the CURRENT state so bookkeeping the build didn't touch (the stopwatch ring) survives.
-    writeState({
-      ...readState(),
-      lastSynthesisAt: new Date().toISOString(),
-      judgmentsAtLastSynthesis: cachedCount(),
-      aperture: { ...aperture, computedAt: new Date().toISOString() },
-    });
-    sw.record();
-
-    const why = force ? 'forced with --now' : noProfile ? 'first load' : gate.reason;
-    const spend = run.fresh ? `${run.fresh} new, ${run.cached} from cache` : `all ${run.cached} from cache`;
-    const more = run.deferred ? ` · ${run.deferred} left for next run` : '';
-    const gradeNote = graded.graded
-      ? ` · graded ${graded.graded}${graded.surprised ? ` (${graded.surprised} surprised${graded.flagged ? `, ${graded.flagged} flagged` : ''})` : ''}`
-      : '';
-    const mineNote = mined.mined
-      ? ` · mined ${mined.assigned} → ${audited.store.patterns.length} patterns${audited.evicted ? `, ${audited.evicted} receipts evicted` : ''}${gradeNote}`
-      : gradeNote;
-    console.log(`\n  ${C.ok('profile refreshed and loaded')}  ${C.dim(`(${why} · ${spend}${more}${mineNote})`)}`);
-    console.log(`  ${C.dim(`wrote ${humanMd}`)}`);
-    console.log(`  ${C.dim(`pointed ${claudeMd} at it (via @import)`)}`);
-    await versionLine();
-    console.log('');
-  } finally {
-    releaseLock();
+  const holder = readLock();
+  const alive = !!(holder && !lockIsStale(holder));
+  // A foreground command (profile/report --now in another terminal) holds the same lock but
+  // narrates nothing — tailing it would render a LEFTOVER frame as this run's outcome. Respect it.
+  if (alive && holder!.kind !== 'worker') {
+    console.log(`\n  ${C.it('another stratless command is running')} ${C.dim(`(pid ${holder!.pid}) — nothing was spent; try again when it finishes.`)}\n`);
+    return;
   }
+  // The previous run's last narration frame: only frames NEWER than this belong to our run (a
+  // stale 'done' from yesterday must never be rendered as today's outcome).
+  const prevStamp = readProgress()?.updatedAt ?? '';
+  let spawnedAtMs = 0;
+  if (alive) {
+    const watching = process.stderr.isTTY ? ' — watching it' : '';
+    console.log(`\n  ${C.dim(`a refresh is already running (pid ${holder!.pid})${watching}`)}`);
+    if (force) {
+      console.log(`  ${C.dim(`note: it may not be a forced rebuild; if you still want one, run \`${hint('stratless update --now')}\` after it finishes`)}`);
+    }
+  } else {
+    // The bill is announced BEFORE the worker spends a token — same disclosure, new mouth.
+    preSpend(pendingCount([...window].reverse(), judgeLimit()));
+    const env: Record<string, string> = {};
+    const abs = resolveBinPath(bin) ?? (bin.includes('/') ? bin : undefined);
+    if (abs) env.STRATLESS_CLAUDE_BIN = abs; // C5: the claude path, captured while the PATH is real
+    spawnedAtMs = Date.now();
+    const entry = fileURLToPath(import.meta.url);
+    const pid = spawnDetached(process.execPath, [entry, '__worker', ...(force ? ['--now'] : [])], env);
+    if (!pid) {
+      console.error(`\n  ${C.bad('could not start the background refresh.')}\n`);
+      process.exit(1);
+    }
+  }
+
+  if (!process.stderr.isTTY) {
+    // the hook's path: ring, say where to look, give the prompt back
+    console.log(`  refresh running in the background · watch: ${hint('stratless status')}`);
+    return;
+  }
+  const code = await tailWorker(spawnedAtMs, prevStamp);
+  if (code) process.exit(code);
 }
 
 /**
@@ -616,14 +573,21 @@ function receiptCmd(rest: string[]): void {
  * the HUMAN.md file is left in place (your data). Being able to shut it up completely is half of why a
  * tool that reads everything earns trust.
  */
-function stop(): void {
+async function stop(): Promise<void> {
+  // C7 first: a RUNNING worker dies before anything else — the off switch means the spending
+  // halts now, not after the current build finishes.
+  const worker = await stopWorker();
   const hookRemoved = stopRefresh();
   const unloaded = removeProfile();
-  if (!hookRemoved && !unloaded) {
-    console.log(`\n  ${C.dim('nothing to stop — no refresh hook, no loaded profile.')}\n`);
+  if (!worker.killed && !hookRemoved && !unloaded) {
+    console.log(`\n  ${C.dim('nothing to stop — no running refresh, no refresh hook, no loaded profile.')}\n`);
     return;
   }
   console.log(`\n  ${C.ok('stratless is off.')}`);
+  if (worker.killed) {
+    console.log(`  ${C.dim(`· background refresh stopped (pid ${worker.pid})`)}`);
+    console.log(`  ${C.dim('  everything already judged is banked — restarting re-reads at most one chunk')}`);
+  }
   if (hookRemoved) console.log(`  ${C.dim('· after-session refresh removed')}`);
   if (unloaded) console.log(`  ${C.dim('· profile unloaded from your CLAUDE.md')}`);
   console.log(`  ${C.dim('Your ~/.claude/HUMAN.md is left as-is — delete it yourself if you want it gone.')}`);
@@ -641,7 +605,7 @@ async function status(rest: string[] = []): Promise<void> {
   if (rest.includes('--check')) {
     console.log(`\n  ${C.dim('checking npm for a newer version…')}`);
     const latest = await fetchLatest();
-    const installed = version();
+    const installed = installedVersion();
     if (!latest) console.log(`  ${C.warn('could not reach the registry')} ${C.dim('(offline? try again later)')}\n`);
     else if (newerThan(latest, installed))
       console.log(`  installed ${C.b(installed)} · latest ${C.b(latest)} — update: ${C.b('npm i -g stratless')}\n`);
@@ -683,6 +647,25 @@ async function status(rest: string[] = []): Promise<void> {
 
   console.log(`\n  ${C.b('stratless status')}\n`);
   console.log(`    after-session refresh   ${refresh ? C.ok('on') : C.dim('off')}`);
+  // Phase 2: a live worker is visible here — the tail's Ctrl-C message points people HERE.
+  {
+    const holder = readLock();
+    const wp = readProgress();
+    if (holder && !lockIsStale(holder)) {
+      const ph = wp && wp.pid === holder.pid
+        ? (wp.phase === 'judging' && wp.total ? `judging ${wp.done ?? 0}/${wp.total}` : wp.phase)
+        : 'working';
+      console.log(`    running now             ${C.ok('yes')}  ${C.dim(`${ph} · pid ${holder.pid} · stop: ${hint('stratless stop')}`)}`);
+    } else {
+      if (wp && wp.phase === 'stopped') {
+        console.log(`    last run                ${C.it('stopped by you')}`);
+      } else if (wp && wp.phase === 'failed') {
+        console.log(`    last run                ${C.warn('failed')}  ${C.dim(wp.summary?.[0] ?? '')}`);
+      }
+      // The receipt of the most recent run (0.3.5) — the hook's silent spends stay readable.
+      if (wp?.spend) console.log(`    last run spend          ${C.dim(wp.spend.replace('this run: ', ''))}`);
+    }
+  }
   console.log(`    profile loaded          ${loaded ? C.ok('yes') : C.dim('no')}${humanExists ? `  ${C.dim(human)}` : ''}`);
   if (cache.ok) {
     console.log(`    exchanges judged        ${C.b(cache.count.toLocaleString())}`);
@@ -713,14 +696,49 @@ async function status(rest: string[] = []): Promise<void> {
   console.log('');
 }
 
-/** The installed version, read from the package.json that ships next to dist/. */
-function version(): string {
-  try {
-    const pkg = join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json');
-    return (JSON.parse(readFileSync(pkg, 'utf8')).version as string) ?? 'unknown';
-  } catch {
-    return 'unknown';
+
+// ── STRICT ARGS (0.3.5, from the dogfood backlog): an unknown flag is a silent lie about what
+// the user asked for — `update --npw` once ran as a PLAIN update while its author believed he had
+// forced a rebuild. Unknown flags and stray arguments exit loudly, with a did-you-mean.
+const COMMAND_ARGS: Record<string, { flags: string[]; positionals: number }> = {
+  init: { flags: ['--auto'], positionals: 0 },
+  profile: { flags: ['--now'], positionals: 0 },
+  report: { flags: ['--now'], positionals: 0 },
+  update: { flags: ['--now'], positionals: 0 },
+  patterns: { flags: ['--all'], positionals: 0 },
+  receipt: { flags: ['--all'], positionals: 1 },
+  status: { flags: ['--check'], positionals: 0 },
+  stats: { flags: [], positionals: 0 },
+  stop: { flags: [], positionals: 0 },
+  __worker: { flags: ['--now'], positionals: 0 },
+};
+
+/** Tiny edit distance — enough for a did-you-mean on short flags, no dependency. */
+function editDistance(a: string, b: string): number {
+  const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++)
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return dp[a.length][b.length];
+}
+
+/** The validation error for a command's args, or undefined when they parse clean. */
+function argProblem(cmd: string, rest: string[]): string | undefined {
+  const spec = COMMAND_ARGS[cmd];
+  if (!spec) return undefined;
+  let positionals = 0;
+  for (const a of rest) {
+    if (a.startsWith('-')) {
+      if (!spec.flags.includes(a)) {
+        const guess = spec.flags.find((f) => editDistance(a, f) <= 2);
+        return `unknown flag for ${cmd}: ${a}${guess ? `  (did you mean ${guess}?)` : ''}`;
+      }
+    } else if (++positionals > spec.positionals) {
+      return `unexpected argument for ${cmd}: ${a}`;
+    }
   }
+  return undefined;
 }
 
 async function main(): Promise<void> {
@@ -729,8 +747,18 @@ async function main(): Promise<void> {
   const cwd = process.cwd();
 
   if (cmd === '--version' || cmd === '-v' || cmd === 'version') {
-    console.log(`stratless ${version()}`);
+    console.log(`stratless ${installedVersion()}`);
     return;
+  }
+
+  // Strict args before anything runs: a typo must never silently become a different request.
+  if (cmd && COMMAND_ARGS[cmd]) {
+    const problem = argProblem(cmd, args.slice(1));
+    if (problem) {
+      console.error(`\n  ${C.bad(problem)}`);
+      console.error(`  ${C.dim(`see \`${hint('stratless help')}\` for what ${cmd} takes`)}\n`);
+      process.exit(1);
+    }
   }
 
   if (cmd === 'init') {
@@ -793,6 +821,11 @@ async function main(): Promise<void> {
   // C2's command-layer half: a damaged spend-cache surfaces as ONE clear refusal, wherever it was
   // hit. Reading corruption as "empty" would re-bill the person's whole history without a word.
   try {
+    if (cmd === '__worker') {
+      // hidden: the doorbells spawn this — the worker process's whole life is runWorker()
+      process.exitCode = await runWorker({ force: args.includes('--now') });
+      return;
+    }
     if (cmd === 'stats') return stats(cwd);
     if (cmd === 'status') return await status(args.slice(1));
     if (cmd === 'profile') return await profiler('profile', args.slice(1));
@@ -800,7 +833,7 @@ async function main(): Promise<void> {
     if (cmd === 'update') return await update(args.slice(1));
     if (cmd === 'patterns') return patternsCmd(args.slice(1));
     if (cmd === 'receipt') return receiptCmd(args.slice(1));
-    if (cmd === 'stop') return stop();
+    if (cmd === 'stop') return await stop();
   } catch (err) {
     if (err instanceof CorruptStoreError) {
       console.error(`\n  ${C.bad('stratless cannot read its own cache — and will not re-bill you over it.')}`);

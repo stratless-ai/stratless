@@ -25,6 +25,7 @@ import { linkSync, readFileSync, renameSync, unlinkSync, writeFileSync, mkdirSyn
 import { execFileSync, spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { readProgress, writeProgress } from './progress.js';
 
 /** Where the lock lives. Override with STRATLESS_LOCK (tests). Exported so refusal messages can
  *  name the exact file a stuck user should inspect. */
@@ -32,10 +33,13 @@ export function lockFilePath(): string {
   return process.env.STRATLESS_LOCK || join(homedir(), '.stratless', 'lock');
 }
 
-/** What the lock file records — enough to decide staleness and to say WHO holds it. */
+/** What the lock file records — enough to decide staleness, say WHO holds it, and say what KIND
+ *  of holder it is: a detached 'worker' (safe to tail, safe for `stop` to kill) or a foreground
+ *  'command' (a person's own terminal — respected, never killed, never tailed). */
 export interface LockHolder {
   pid: number;
   startedAt: string;
+  kind: 'worker' | 'command';
 }
 
 /** Read the lock. Missing or unreadable reads as no-holder (an unreadable lock is a corpse — with
@@ -45,7 +49,11 @@ export function readLock(file: string = lockFilePath()): LockHolder | undefined 
     const raw = JSON.parse(readFileSync(file, 'utf8')) as Partial<LockHolder>;
     const pid = Number(raw.pid);
     if (!Number.isInteger(pid) || pid <= 0) return undefined;
-    return { pid, startedAt: typeof raw.startedAt === 'string' ? raw.startedAt : '' };
+    return {
+      pid,
+      startedAt: typeof raw.startedAt === 'string' ? raw.startedAt : '',
+      kind: raw.kind === 'worker' ? 'worker' : 'command', // unknown reads as command: respected, never killed
+    };
   } catch {
     return undefined;
   }
@@ -114,9 +122,9 @@ function tryCreate(file: string, record: string): boolean {
  * rename — it is put back and we report held. Because creation is link-based (never observable
  * half-written), an unreadable lock really is a corpse, not a neighbor mid-write.
  */
-export function acquireLock(file: string = lockFilePath()): boolean {
+export function acquireLock(file: string = lockFilePath(), kind: 'worker' | 'command' = 'command'): boolean {
   mkdirSync(dirname(file), { recursive: true });
-  const record = `${JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() })}\n`;
+  const record = `${JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), kind })}\n`;
   for (let attempt = 0; attempt < 3; attempt++) {
     if (tryCreate(file, record)) return true;
     const holder = readLock(file);
@@ -154,6 +162,109 @@ export function releaseLock(file: string = lockFilePath()): void {
   } catch {
     /* already gone */
   }
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/** When the process under this PID actually started, or undefined. `ps lstart` speaks a
+ *  Date.parse-able dialect on macOS and Linux. */
+function processStartMs(pid: number): number | undefined {
+  try {
+    const out = execFileSync('ps', ['-p', String(pid), '-o', 'lstart='], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    const t = Date.parse(out);
+    return Number.isFinite(t) ? t : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The process group a PID leads, if it leads one. A detached worker is its own group leader; its
+ *  borrowed claude children live in that group — the group is the honest kill target. */
+function leadsOwnGroup(pid: number): boolean {
+  try {
+    const out = execFileSync('ps', ['-p', String(pid), '-o', 'pgid='], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    return Number(out) === pid;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Is this live PID REALLY the lock's worker — not an innocent process wearing a recycled number?
+ * Waiting on a maybe (lockIsStale's conservative /stratless|node/ probe) is safe; KILLING on a
+ * maybe is not. So the kill path demands more: the lock says 'worker', and the process's actual
+ * start time agrees with the lock's own birth stamp (a worker takes its lock within its first
+ * seconds of life; a recycled PID's start time is a different day). Unverifiable reads as NO.
+ */
+export function verifiedWorker(holder: LockHolder): boolean {
+  if (holder.kind !== 'worker' || !isAlive(holder.pid)) return false;
+  const cmd = processCommand(holder.pid);
+  if (!cmd || !/stratless|node/i.test(cmd)) return false;
+  const born = processStartMs(holder.pid);
+  const locked = Date.parse(holder.startedAt);
+  if (born === undefined || !Number.isFinite(locked)) return false; // can't verify → don't kill
+  return locked >= born - 120_000 && locked - born < 300_000; // lock taken within the worker's first minutes
+}
+
+/**
+ * Kill a running worker (C7 — `stop` is total): SIGTERM first so it can label itself and die at a
+ * checkpoint, a short grace, then SIGKILL. Whatever it leaves behind is cleaned: its lock removed,
+ * its progress labeled "stopped by you" if it died too fast to say so itself. Returns whether a
+ * worker was actually there to kill. Stopping never wastes paid work — the hash-keyed cache means
+ * the next run re-asks at most one chunk.
+ */
+export async function stopWorker(graceMs = 3000): Promise<{ killed: boolean; pid?: number; unverified?: boolean }> {
+  const holder = readLock();
+  if (!holder || lockIsStale(holder)) return { killed: false };
+  // The kill demands verified identity (C7 hardening, review 2026-07-18): a stale lock whose PID
+  // was recycled by the person's dev server must never get that server killed by `stop`.
+  if (!verifiedWorker(holder)) return { killed: false, pid: holder.pid, unverified: true };
+  // A detached worker leads its own process GROUP, and its borrowed claude children (including
+  // the SYNCHRONOUS mine/synthesis calls that block its signal handler) live in that group — kill
+  // the group, so 'stopped' means the SPENDING stopped, not just the bookkeeper.
+  const group = leadsOwnGroup(holder.pid);
+  const signalTarget = group ? -holder.pid : holder.pid;
+  try {
+    process.kill(signalTarget, 'SIGTERM');
+  } catch {
+    return { killed: false }; // died between the read and the signal — nothing to stop
+  }
+  const deadline = Date.now() + graceMs;
+  while (Date.now() < deadline && isAlive(holder.pid)) await sleep(100);
+  if (isAlive(holder.pid)) {
+    try {
+      process.kill(signalTarget, 'SIGKILL');
+    } catch {
+      /* it beat us to the exit */
+    }
+    await sleep(200);
+  }
+  // The dead worker's leftovers: its lock (a SIGKILL skips its cleanup)…
+  if (readLock()?.pid === holder.pid) {
+    try {
+      unlinkSync(lockFilePath());
+    } catch {
+      /* already gone */
+    }
+  }
+  // …and its narration — the state must say what happened, in the person's terms.
+  const p = readProgress();
+  if (!p || p.pid !== holder.pid || !['done', 'failed', 'stopped'].includes(p.phase)) {
+    writeProgress({
+      pid: holder.pid,
+      phase: 'stopped',
+      ok: false,
+      startedAt: p?.pid === holder.pid ? p.startedAt : new Date().toISOString(),
+      summary: ['stopped by you — everything already judged is banked; the next run re-reads at most one chunk'],
+    });
+  }
+  return { killed: true, pid: holder.pid };
 }
 
 /**
