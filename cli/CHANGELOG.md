@@ -4,7 +4,39 @@ All notable changes to `stratless` are recorded here — written by hand, for th
 not scraped from commits. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and each version matches its `cli-v*` git tag.
 
-## [0.3.1] — unreleased
+## [0.3.2] — unreleased
+
+The self-correction release. Until now the profile asserted its confidence; from here it earns it.
+
+### Added
+- **The grader.** Every pattern is a dated prediction ("this will keep happening"), and each
+  rebuild now grades it against the window's new evidence: **confirmed** (new receipts landed),
+  **silent** (the topic never came up — never counted against a claim), or **surprised** (evidence
+  shows the opposite; the mistake carries its own receipts). A separate mind on Sonnet, streamed;
+  strict rules ("absence of the behavior is NOT the opposite of the behavior") tuned in three
+  controlled A/Bs on identical evidence.
+- **Balanced revision.** One surprise costs confidence, never standing; a second inside two weeks
+  flags the statement back to the miner: revise it to fit ALL the evidence, or retire it (retired
+  claims release their evidence for future patterns; revised ones re-earn their audit from zero).
+  Validated on a real month-apart backtest: June-mined claims graded against July caught exactly
+  what they should — statements that overreached ("always X") meeting the fuller truth.
+- **The report tells you when the file was wrong.** New surprises appear in `stratless report` as
+  honest updates, scaled to their weight — a first counter-example gets a clause, a claim under
+  revision gets the story. HUMAN.md itself stays clean: the AI reads current truth, you read the
+  diary.
+
+### Changed
+- **HUMAN.md speaks only in facts about you.** Pipeline bookkeeping (audit tallies, trend labels,
+  confidence classes) no longer appears in the profile — the writer uses it to weigh what to say
+  and how firmly, and says it in calibrated language instead. Real frequencies of your own behavior
+  stay when they carry meaning.
+
+### Fixed
+- Audit tallies were silently resetting on every mine (pattern ledgers now survive re-aggregation).
+- An async pipe error in the streaming layer could kill a whole run mid-batch (found by the
+  backtest; completed turns now always survive and the remainder falls back).
+
+## [0.3.1] — 2026-07-17
 
 The streaming release. 0.3.0's dogfood measured where the money actually goes: every judge and
 audit call re-booted the whole Claude Code harness — ~30k tokens and ~10 seconds of startup for a

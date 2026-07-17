@@ -52,6 +52,19 @@ export type Confidence = 'strong' | 'moderate' | 'thin';
 /** Admission: a category is a claim about repetition — an anecdote is not a category. */
 export const MIN_RECEIPTS = 5;
 
+/** The grading ledger (0.3.2): every pattern is a dated prediction, and this is its scorecard. */
+export interface GradeRecord {
+  /** windows where new evidence landed on the pattern — reality kept agreeing */
+  confirmed: number;
+  /** windows where the topic never came up — NEVER a miss (absence of evidence ≠ contradiction) */
+  silent: number;
+  /** windows where new evidence contradicted the statement — the highest-value signal */
+  surprised: number;
+  /** the mistakes carry receipts too — auditable error */
+  surprises: { at: string; evidence: string[] }[];
+  lastGradedAt?: string;
+}
+
 export interface Pattern {
   /** stable kebab slug — the pattern's name as an identifier */
   id: string;
@@ -69,6 +82,10 @@ export interface Pattern {
   confidence: Confidence;
   /** the separate-mind audit tally (0.3.0-5); absent until first audited */
   audit?: { kept: number; evicted: number; at: string };
+  /** the prediction scorecard (0.3.2); absent until first graded */
+  record?: GradeRecord;
+  /** balanced demotion tripped (2 surprises in a window): the next mine must revise or retire it */
+  flagged?: boolean;
 }
 
 /** What the model half proposes; everything numeric is IGNORED if present — the code recomputes. */
@@ -92,9 +109,18 @@ export interface PatternStore {
   assignments: Record<string, string[]>;
   /** `${patternId}:${hash}` keys already checked by the auditor — audited once, ever */
   audited: Record<string, 1>;
+  /** judgment hashes already used as grading evidence — graded once, ever (0.3.2) */
+  graded: Record<string, 1>;
 }
 
-const emptyStore = (): PatternStore => ({ v: MINER_V, patterns: [], candidates: [], assignments: {}, audited: {} });
+const emptyStore = (): PatternStore => ({
+  v: MINER_V,
+  patterns: [],
+  candidates: [],
+  assignments: {},
+  audited: {},
+  graded: {},
+});
 
 /** Load the store. Missing, corrupt, or version-mismatched reads as empty — rebuilt from the pile. */
 export function loadPatterns(file: string = storePath()): PatternStore {
@@ -110,6 +136,7 @@ export function loadPatterns(file: string = storePath()): PatternStore {
       candidates: Array.isArray(raw.candidates) ? (raw.candidates as Pattern[]) : [],
       assignments: raw.assignments && typeof raw.assignments === 'object' ? (raw.assignments as Record<string, string[]>) : {},
       audited: raw.audited && typeof raw.audited === 'object' ? (raw.audited as Record<string, 1>) : {},
+      graded: raw.graded && typeof raw.graded === 'object' ? (raw.graded as Record<string, 1>) : {},
     };
   } catch {
     return emptyStore();
@@ -337,6 +364,23 @@ export function parseMineOutput(raw: string, offered: ReadonlySet<string>): Mine
   }
 }
 
+/**
+ * aggregate() rebuilds Pattern objects from scratch — correct for the numbers (they must always be
+ * recomputed), wrong for the LEDGERS. This reattaches the sticky fields (audit tally, grade
+ * record, flagged) by id after any re-aggregation. Found while building 0.3.2: without it, audit
+ * tallies silently reset on every mine.
+ */
+function reattachSticky(before: Pattern[], after: Pattern[], skipAudit?: ReadonlySet<string>): void {
+  const sticky = new Map(before.map((p) => [p.id, p]));
+  for (const p of after) {
+    const s = sticky.get(p.id);
+    if (!s) continue;
+    if (s.audit && !skipAudit?.has(p.id)) p.audit = s.audit;
+    if (s.record) p.record = s.record;
+    if (s.flagged) p.flagged = s.flagged;
+  }
+}
+
 export interface MineResult {
   store: PatternStore;
   /** judgments assigned this pass (each recorded once, ever) */
@@ -372,22 +416,65 @@ export function mine(
     .map((p) => `${p.id} [${p.kind}]: ${p.statement}`)
     .join('\n');
   const lines = batch.map((j) => `${j.hash}: ${timeTag(j.ts)}${j.line}`).join('\n');
-  const input = `${MINE_PROMPT}\n\nA — EXISTING PATTERNS:\n${sheet || '(none yet — this is the first pass)'}\n\nB — NEW JUDGMENTS:\n${lines}`;
+
+  // (C) flagged statements — contradicted by graded evidence; the mine must revise or retire them.
+  const flagged = store.patterns.filter((p) => p.flagged);
+  const flaggedIds = new Set(flagged.map((p) => p.id));
+  const contra = (p: Pattern): string =>
+    (p.record?.surprises.at(-1)?.evidence ?? [])
+      .map((h) => byHash.get(h))
+      .filter((j): j is Judgment => !!j)
+      .map((j) => `    contradicted by ${j.hash}: ${j.line}`)
+      .join('\n');
+  const revise = flagged.map((p) => `${p.id}: ${p.statement}\n${contra(p)}`).join('\n');
+  const sectionC = flagged.length
+    ? `\n\nC — REVISE OR RETIRE (these statements were CONTRADICTED by evidence; you MUST include each id in your output, either with a corrected statement that fits ALL its receipts AND the contradictions, or with the exact statement "RETIRE"):\n${revise}`
+    : '';
+  const input = `${MINE_PROMPT}\n\nA — EXISTING PATTERNS:\n${sheet || '(none yet — this is the first pass)'}\n\nB — NEW JUDGMENTS:\n${lines}${sectionC}`;
 
   const raw = runClaude(bin, input, minerModel(), 'miner', MINE_TIMEOUT_MS);
   const mined = raw ? parseMineOutput(raw, new Set(batch.map((j) => j.hash))) : undefined;
   if (!mined) return { store, assigned: 0, deferred: waiting.length, mined: false }; // refuse, retry next gate
 
-  // Merge: existing patterns keep their stored statement (stability; the auditor handles drift);
-  // new ids need a statement or they are dropped — no statement, no pattern.
+  // Merge: existing patterns keep their stored statement (stability; the auditor handles drift) —
+  // EXCEPT flagged ones, whose revision is the whole point: a revised statement replaces the old
+  // (its audits reset — cohesion must re-earn), and "RETIRE" removes the pattern and releases its
+  // evidence back to future mines. New ids need a statement or they are dropped.
   const byId = new Map<string, ProposedPattern>();
   for (const p of [...store.patterns, ...store.candidates]) {
     byId.set(p.id, { id: p.id, statement: p.statement, kind: p.kind, receipts: [...p.receipts] });
   }
+  const revisedIds = new Set<string>();
+  const retiredIds = new Set<string>();
   for (const a of mined) {
     const existing = byId.get(a.id);
-    if (existing) existing.receipts.push(...a.newReceipts);
-    else if (a.statement) byId.set(a.id, { id: a.id, statement: a.statement, kind: a.kind, receipts: [...a.newReceipts] });
+    if (existing) {
+      if (flaggedIds.has(a.id) && a.statement) {
+        if (a.statement.trim().toUpperCase() === 'RETIRE') {
+          byId.delete(a.id);
+          retiredIds.add(a.id);
+          continue;
+        }
+        existing.statement = a.statement;
+        revisedIds.add(a.id);
+      }
+      existing.receipts.push(...a.newReceipts);
+    } else if (a.statement) {
+      byId.set(a.id, { id: a.id, statement: a.statement, kind: a.kind, receipts: [...a.newReceipts] });
+    }
+  }
+  // Retirement releases evidence: those judgments may witness a better pattern someday.
+  for (const id of retiredIds) {
+    for (const [h, ids] of Object.entries(store.assignments)) {
+      const kept = ids.filter((x) => x !== id);
+      if (kept.length) store.assignments[h] = kept;
+      else delete store.assignments[h];
+    }
+    for (const key of Object.keys(store.audited)) if (key.startsWith(`${id}:`)) delete store.audited[key];
+  }
+  // Revision resets the audit ledger for that id — the new statement must re-earn cohesion.
+  for (const id of revisedIds) {
+    for (const key of Object.keys(store.audited)) if (key.startsWith(`${id}:`)) delete store.audited[key];
   }
 
   // Record the assignment for EVERY offered judgment — landed or not, it is never re-sent.
@@ -395,7 +482,17 @@ export function mine(
   for (const a of mined) for (const h of a.newReceipts) landed.set(h, [...(landed.get(h) ?? []), a.id]);
   for (const j of batch) store.assignments[j.hash] = landed.get(j.hash) ?? [];
 
+  const preAggregate = [...store.patterns, ...store.candidates];
   const agg = aggregate([...byId.values()], byHash, opts.now ?? new Date());
+  reattachSticky(preAggregate, agg.patterns, revisedIds);
+  reattachSticky(preAggregate, agg.candidates, revisedIds);
+  // A revised statement sheds its flag and its audit tally — it re-earns both.
+  for (const p of [...agg.patterns, ...agg.candidates]) {
+    if (revisedIds.has(p.id)) {
+      p.flagged = undefined;
+      p.audit = undefined;
+    }
+  }
   store.patterns = agg.patterns;
   store.candidates = agg.candidates;
   store.minedAt = (opts.now ?? new Date()).toISOString();
@@ -517,21 +614,178 @@ export async function auditPatterns(
   }
 
   // The code removes what the auditor rejected, then arithmetic re-decides admission.
+  // (grading happens in gradePatterns, after this — see below)
   const proposed: ProposedPattern[] = [...store.patterns, ...store.candidates].map((p) => ({
     id: p.id,
     statement: p.statement,
     kind: p.kind,
     receipts: p.receipts.filter((h) => !evictions.get(p.id)?.has(h)),
   }));
-  const audits = new Map([...store.patterns, ...store.candidates].map((p) => [p.id, p.audit]));
+  const preAggregate = [...store.patterns, ...store.candidates];
   const agg = aggregate(proposed, byHash, opts.now ?? new Date());
-  const reattach = (list: Pattern[]) => {
-    for (const p of list) if (audits.get(p.id)) p.audit = audits.get(p.id);
-  };
-  reattach(agg.patterns);
-  reattach(agg.candidates);
+  reattachSticky(preAggregate, agg.patterns);
+  reattachSticky(preAggregate, agg.candidates);
   store.patterns = agg.patterns;
   store.candidates = agg.candidates;
   savePatterns(store, file);
   return { store, calls, kept, evicted };
+}
+
+// ────────────────────────────────────────────────────────────────────────────────────────────────
+// THE GRADER — the fourth mind (0.3.2). Every admitted pattern is a dated prediction: "this will
+// keep happening." Each gate, the window's new evidence grades it. The model does exactly ONE
+// semantic thing — cite evidence that CONTRADICTS a claim — and the CODE classifies:
+//   contradiction cited            → SURPRISED (the highest-value signal: the model of the person
+//                                    is wrong there; the mistake carries receipts too)
+//   new receipts landed (overlap)  → CONFIRMED (free, from the assignment arithmetic)
+//   neither                        → SILENT (the topic never came up — NEVER a miss; without this
+//                                    category every quiet week would erode true patterns)
+// Balanced demotion (Sun's call): two surprises inside 14 days flags the statement back to the
+// miner — revise or retire. One anomaly costs confidence, not standing. This is Law 2's
+// falsifiability made operational: claims are systematically exposed to falsification, on a
+// schedule. Graded once, ever, per evidence hash — the same read-once discipline as everything.
+// ────────────────────────────────────────────────────────────────────────────────────────────────
+
+const GRADE_RULES = `You are the GRADER — an independent check on whether claims about ONE person
+still hold, one claim per message. Each message gives a CLAIM about that person, then NEW EVIDENCE
+lines from their recent exchanges (hash: [time] line).
+
+Your ONLY job: cite evidence that CONTRADICTS the claim. The bar is strict — a line contradicts
+only if BOTH hold:
+1. The situation the claim covers actually AROSE in that line, and
+2. the person did the OPPOSITE of what the claim says.
+
+What is NOT a contradiction (never cite these):
+- The situation never arose (a different topic, a different kind of moment) — that is SILENCE.
+- The person did something merely different or additional, not opposite.
+- The claim describes a habit and one line shows a reasonable exception in an unusual context.
+Absence of the behavior is NOT the opposite of the behavior.
+
+When in doubt, do not cite. An empty list is the most common correct answer and is honest work.
+
+Reply to EACH message with EXACTLY one JSON object, no preamble, no markdown:
+{"contradicts":["<hash>","..."]}`;
+
+/** Contradiction-finding is subtler than one-line verdicts — the grader gets a thinking budget
+ *  (the stream default of 0 was tuned for the judge; 7/8 false surprises in the first live grade
+ *  taught us the difference, dogfood 2026-07-17). */
+const GRADE_THINKING = 1024;
+
+/** The grading model — SONNET by default: the A/B on identical evidence (2026-07-17) showed the
+ *  same surprise rate but materially better per-item judgment (haiku cited confirming evidence as
+ *  contradiction twice; sonnet correctly confirmed those patterns). The diary is the product's
+ *  most trust-sensitive output — the wrong place to save pennies. STRATLESS_GRADER_MODEL overrides. */
+const graderModel = (): string => process.env.STRATLESS_GRADER_MODEL || 'sonnet';
+
+/** New evidence offered to one grading pass — the rest waits for the next gate (amortize). */
+const GRADE_BATCH = 60;
+/** Balanced demotion: this many surprises inside the window flags the statement. */
+export const DEMOTE_SURPRISES = 2;
+const DEMOTE_WINDOW_DAYS = 14;
+
+/** Parse the grading reply — hashes outside the offered evidence are dropped (no minted
+ *  contradictions); unparseable refuses this pattern's grading (re-offered next gate). */
+export function parseGradeOutput(raw: string, offered: ReadonlySet<string>): Set<string> | undefined {
+  const m = raw.match(/\{[\s\S]*\}/);
+  if (!m) return undefined;
+  try {
+    const o = JSON.parse(m[0]) as { contradicts?: unknown };
+    if (!Array.isArray(o.contradicts)) return undefined;
+    return new Set(o.contradicts.filter((h): h is string => typeof h === 'string' && offered.has(h)));
+  } catch {
+    return undefined;
+  }
+}
+
+/** Classify one pattern's grade — pure code, exported for tests. Contradictions exclude the
+ *  pattern's own receipts (cohesion of receipts is the AUDITOR's domain, not the grader's). */
+export function classifyGrade(
+  cited: ReadonlySet<string>,
+  batch: readonly string[],
+  receipts: readonly string[],
+): { verdict: 'confirmed' | 'silent' | 'surprised'; evidence: string[] } {
+  const own = new Set(receipts);
+  const contradictions = [...cited].filter((h) => !own.has(h));
+  if (contradictions.length) return { verdict: 'surprised', evidence: contradictions };
+  const confirmedBy = batch.filter((h) => own.has(h));
+  return confirmedBy.length ? { verdict: 'confirmed', evidence: confirmedBy } : { verdict: 'silent', evidence: [] };
+}
+
+/** Balanced demotion check — pure, exported for tests. */
+export function shouldFlag(record: GradeRecord, now: Date): boolean {
+  const cutoff = now.getTime() - DEMOTE_WINDOW_DAYS * 86_400_000;
+  const recent = record.surprises.filter((s) => new Date(s.at).getTime() >= cutoff);
+  return recent.length >= DEMOTE_SURPRISES;
+}
+
+export interface GradeResult {
+  store: PatternStore;
+  graded: number;
+  confirmed: number;
+  silent: number;
+  surprised: number;
+  flagged: number;
+}
+
+/**
+ * Grade every admitted pattern against the window's ungraded evidence — one streamed session, a
+ * turn per pattern, per-pattern one-shot fallback. Candidates are not graded (they never reach the
+ * writer, so their being wrong costs nothing yet). A flagged pattern's confidence caps at `thin`
+ * until the next mine revises or retires it (chain of custody: claims weaken).
+ */
+export async function gradePatterns(
+  pile: Judgment[],
+  bin: string,
+  opts: { now?: Date; file?: string } = {},
+): Promise<GradeResult> {
+  const file = opts.file ?? storePath();
+  const store = loadPatterns(file);
+  const now = opts.now ?? new Date();
+  const result: GradeResult = { store, graded: 0, confirmed: 0, silent: 0, surprised: 0, flagged: 0 };
+  if (!store.patterns.length) return result;
+
+  const byHash = new Map(pile.map((j) => [j.hash, j]));
+  const batch = pile.filter((j) => !store.graded[j.hash]).slice(-GRADE_BATCH); // newest ungraded
+  if (!batch.length) return result;
+  const batchHashes = batch.map((j) => j.hash);
+  const lines = batch.map((j) => `${j.hash}: ${timeTag(j.ts)}${j.line}`).join('\n');
+
+  const stream = await runStreamBatch(bin, {
+    systemPrompt: GRADE_RULES,
+    role: 'grade',
+    model: graderModel(),
+    feature: 'grade',
+    maxThinkingTokens: GRADE_THINKING,
+    items: store.patterns.map((p) => ({ id: p.id, prompt: `CLAIM: ${p.statement}\n\nNEW EVIDENCE:\n${lines}` })),
+  });
+
+  for (const p of store.patterns) {
+    let raw = stream.results.get(p.id);
+    if (raw === undefined)
+      raw = runClaude(bin, `${GRADE_RULES}\n\nCLAIM: ${p.statement}\n\nNEW EVIDENCE:\n${lines}`, graderModel(), 'grade');
+    const cited = raw ? parseGradeOutput(raw, new Set(batchHashes)) : undefined;
+    if (!cited) continue; // refused — this pattern re-grades next gate, evidence stays ungraded for it
+
+    const grade = classifyGrade(cited, batchHashes, p.receipts);
+    const record: GradeRecord = p.record ?? { confirmed: 0, silent: 0, surprised: 0, surprises: [] };
+    record[grade.verdict] += 1;
+    record.lastGradedAt = now.toISOString();
+    if (grade.verdict === 'surprised') {
+      record.surprises.push({ at: now.toISOString(), evidence: grade.evidence });
+      if (shouldFlag(record, now)) {
+        p.flagged = true;
+        result.flagged++;
+      }
+    }
+    p.record = record;
+    if (p.flagged && p.confidence !== 'thin') p.confidence = 'thin'; // claims only weaken
+    result.graded++;
+    result[grade.verdict]++;
+  }
+
+  // Evidence is graded once, ever — mark the batch regardless of per-pattern refusals (a refused
+  // pattern simply has no verdict this window; the evidence itself was offered).
+  for (const h of batchHashes) store.graded[h] = 1;
+  savePatterns(store, file);
+  return result;
 }

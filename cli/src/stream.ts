@@ -154,6 +154,12 @@ function runSession(
 
     child.on('error', finish); // spawn failure (e.g. old CLI) — resolve empty, ladder falls back
     child.on('close', finish);
+    // Pipe errors arrive ASYNCHRONOUSLY as 'error' events — an unhandled one is an uncaught
+    // exception that kills the whole process (found by the 0.3.2 backtest: EPIPE writing a turn
+    // after the child closed its stdin). Swallow into finish(): completed turns survive, the
+    // remainder goes to the fallback ladder.
+    child.stdin.on('error', finish);
+    child.stdout.on('error', finish);
 
     child.stdout.on('data', (d: Buffer) => {
       buf += d.toString();
