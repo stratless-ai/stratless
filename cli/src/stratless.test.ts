@@ -39,10 +39,12 @@ import {
   type PatternStore,
 } from './miner.js';
 import { readUsage, recordUsage } from './usage.js';
+import { CorruptStoreError } from './atomic.js';
 import { parseJsonResult } from './claude.js';
 import { hasSignal, inventedNumbers, renderPatternSheet, renderSurprises, stripPreamble } from './synthesize.js';
 import {
   cachedCount,
+  cacheHealth,
   judgeInput,
   judgeTurnBody,
   parseJudgeOutput,
@@ -643,11 +645,12 @@ test('HUMAN.md carries the person-layer schema marker (0.3.1: the sectioned prot
   assert.ok(readFileSync(humanMd, 'utf8').includes('<!-- humanmd/v1 -->'), 'the protocol version is declared in the artifact');
 });
 
-test('loadPatterns: missing, corrupt, or version-mismatched store reads as empty — rebuilt from the pile', () => {
+test('loadPatterns: missing or version-mismatched reads as empty; a DAMAGED store refuses loudly (C2)', () => {
   const f = join(dir, 'patterns.json');
   assert.deepEqual(loadPatterns(f).patterns, [], 'missing = empty');
   writeFileSync(f, 'garbage {');
-  assert.deepEqual(loadPatterns(f).patterns, [], 'corrupt = empty, never a throw');
+  // 0.3.4 (C2): corrupt no longer reads as empty — that was a silent re-mine of the whole pile.
+  assert.throws(() => loadPatterns(f), CorruptStoreError, 'corrupt = refusal, never a silent re-bill');
   writeFileSync(f, JSON.stringify({ v: 999, patterns: [{ id: 'x' }] }));
   assert.deepEqual(loadPatterns(f).patterns, [], 'a foreign MINER_V = re-mine; the judgment pile is the permanent layer');
   savePatterns({ v: 1, patterns: [], candidates: [], assignments: { abc: ['p1'] }, audited: {}, graded: {} }, f);
@@ -843,6 +846,8 @@ const ZERO_USAGE = {
   outputTokens: 0,
   cacheCreationTokens: 0,
   cacheReadTokens: 0,
+  unmeteredCalls: 0,
+  pinEscapedCalls: 0,
   byFeature: {},
   byModel: {},
 };
@@ -992,13 +997,19 @@ test('a v1 cache entry is stale — currentJudgment gates the pipeline version',
   assert.equal(currentJudgment(j2('partial')), true, 'a current-version entry is served free');
 });
 
-test('cachedCount counts judgments, and reads missing or corrupt as zero', () => {
+test('cachedCount counts judgments; a DAMAGED cache refuses loudly, and cacheHealth labels it (C2)', () => {
   const f = join(dir, 'judgments.json');
   assert.equal(cachedCount(f), 0, 'no cache yet');
   writeFileSync(f, JSON.stringify({ a: {}, b: {}, c: {} }));
   assert.equal(cachedCount(f), 3, 'one per cached exchange');
+  assert.deepEqual(cacheHealth(f), { ok: true, count: 3, file: f }, 'healthy cache reports its count');
   writeFileSync(f, 'broken {');
-  assert.equal(cachedCount(f), 0, 'a corrupt cache never throws');
+  // 0.3.4 (C2): corrupt no longer reads as zero — the gate would mistake it for an empty pile
+  // and re-bill the whole history. Spending paths refuse; status labels via cacheHealth.
+  assert.throws(() => cachedCount(f), CorruptStoreError, 'corrupt = refusal, never a confident zero');
+  const health = cacheHealth(f);
+  assert.equal(health.ok, false, 'status sees "unreadable", not 0');
+  assert.equal(health.file, f, 'and knows which file to name');
 });
 
 // ── the recent-window loader: it must NOT read the whole history ──────────────────────────────

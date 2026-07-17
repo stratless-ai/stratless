@@ -61,6 +61,17 @@ function ground(corpus: Corpus): string {
   return bits.join(' · ');
 }
 
+/**
+ * The newest N judgments, newest first — BY TIMESTAMP, never by trusting the caller's order (C10).
+ * Phase 0's B2: the pattern-era writer took `signal.slice(-25)` from a newest-first list — the
+ * OLDEST 25, labelled "MOST RECENT" — so every profile since 0.3.1 had its current-direction
+ * evidence backwards. Sorting here makes the block correct no matter what order a future caller
+ * passes. Pinned by test; exported for it.
+ */
+export function mostRecent(judgments: Judgment[], n: number): Judgment[] {
+  return [...judgments].sort((a, b) => b.ts.localeCompare(a.ts)).slice(0, n);
+}
+
 const RECENT_DAYS = 14; // "recent" = within this many days of the newest exchange…
 const RECENT_FLOOR = 15; // …but always at least this many, so the window is never empty or tiny.
 

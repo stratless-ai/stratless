@@ -4,6 +4,56 @@ All notable changes to `stratless` are recorded here — written by hand, for th
 not scraped from commits. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and each version matches its `cli-v*` git tag.
 
+## [0.3.4] — 2026-07-17 — the plumbing: what the cold-start build stands on
+
+Phase 1 of the cold-start build (spec §12). No new features — the release is eight acceptance
+criteria passing, three of them bugs the Phase 0 measurement sitting caught in the shipped CLI.
+
+### Fixed
+- **"MOST RECENT" meant oldest.** Since 0.3.1, the writer's most-recent evidence block received
+  the OLDEST 25 judgments of a newest-first list — every pattern-era profile had its
+  current-direction evidence backwards. Now selected by timestamp, newest first, regardless of
+  caller order, with a test that pins the ordering (C10).
+- **The meter's blind spot is closed.** A call that degraded to the plain-text fallback used to be
+  recorded at zero cost, and a call that lost its model pin silently ran on your account's default
+  model at frontier rates. Both are now counted — `status` shows `fallback calls: N unmetered · M
+  ran on your default model` the moment either exists, and the ledger records which model actually
+  ran (C11).
+- **The borrow is tool-less.** Every borrowed `claude` call — judge, mine, audit, grade, write —
+  now runs with `--tools ""`. The borrowed model sometimes took the writer prompt literally,
+  attempted a real file write, and returned permission chatter instead of your profile; it no
+  longer has hands (C9).
+- **A failed call's error message can no longer be mistaken for an answer.** A broken model pin
+  exits 0 with an error envelope whose prose ("There's an issue with the selected model…") the
+  judge would have cached as a verdict and the writer would have reasoned from. The envelope's
+  `is_error` flag is now honored: the call is refused and the ladder advances to the next metered
+  rung instead. (Found by this release's own review pass, verified against the live CLI.)
+
+### Changed
+- **Every store is written atomically** (temp + rename): judgments, patterns, state, usage,
+  renders, settings, HUMAN.md, CLAUDE.md. A crash mid-write leaves the old file or the new one,
+  never a torn one (C2). Writes follow symlinks and preserve the file's mode — a dotfiles-repo
+  link to your CLAUDE.md or settings.json survives, and your chmod stays yours.
+- **A damaged spend-cache refuses loudly instead of re-billing you.** A corrupt judgments.json or
+  patterns.json used to read as "empty" — which would silently re-spend your entire history on the
+  next run. Now every spending command refuses with the file's path and how to move it aside, and
+  `status` labels the cache unreadable instead of showing 0 (C2).
+- **One spender at a time.** `update`, and a building `profile`/`report`, take a lock; the
+  after-session hook and a hand-run update can no longer race each other's writes over the
+  judgment cache. A second runner says `another stratless run is active` and exits clean; stale
+  locks from crashes are detected (with PID-reuse protection) and stolen (C4).
+- **Rate limits bend the run, they don't break it.** A streamed batch that hits a 429/overload now
+  backs off exponentially and retries the remaining items in a fresh session, bounded, losing
+  nothing — a rate-limit storm costs minutes, not evidence (C6).
+
+### Added
+- **The stopwatch.** Per-turn, per-stage, per-run wall-clock recorded in `state.json` on every
+  spend — so the cold-start door (0.4.0) can quote minutes measured on YOUR machine, never typed.
+  Includes a pure ETA that refuses to estimate any stage it hasn't measured (C8).
+- **The detached-spawn primitive** the Phase 2 worker will stand on: spawn a process that survives
+  its parent, with the absolute path to your `claude` captured at spawn time (C5). Unused by any
+  command yet — built and tested ahead of the worker.
+
 ## [0.3.3] — 2026-07-17 — looking is free, evidence is readable, and the tool talks properly through a pipe
 
 ### Changed

@@ -15,17 +15,37 @@
  * prompt therefore begins with a `<stratless-…>` sentinel, and isRealPrompt (transcript.ts) drops
  * `<`-prefixed messages. The pipeline must never eat its own exhaust.
  *
- * Failure semantics (refuse, don't lie, streaming edition): a turn that times out kills the session
- * — a late answer after a timeout would misalign every following turn, so we never guess at
- * alignment. Completed turns are returned; the caller's ladder (stream → per-call → silence)
- * handles the remainder. Session rotation every `maxTurnsPerSession` bounds context growth (the
- * cached prefix grows ~2.5k tokens/turn; measured).
+ * TOOL-LESS BY CONSTRUCTION (C9): every streamed session runs with `--tools ""` — the borrow asks a
+ * question, it never gets hands. Phase 0's B1 found the borrowed claude taking the writer prompt
+ * literally and attempting a real filesystem write; a borrow with tools is one prompt away from
+ * chatter instead of an artifact.
+ *
+ * Failure semantics (refuse, don't lie, streaming edition): a turn that times out or errors kills
+ * the session — a late answer after a timeout would misalign every following turn, so we never
+ * guess at alignment. Completed turns are returned. 0.3.4 adds THE BACKOFF RUNG (C6): a failure
+ * that looks TRANSIENT (429 / rate limit / overloaded / 5xx) retries the remaining items in a
+ * fresh session after an exponential pause, under a per-batch retry budget — a rate-limit storm
+ * costs minutes, not evidence. Anything else falls through to the caller's ladder
+ * (stream → per-call → silence) exactly as before. Session rotation every `maxTurnsPerSession`
+ * bounds context growth (the cached prefix grows ~2.5k tokens/turn; measured).
  */
 import { spawn } from 'node:child_process';
 import { recordUsage, type CallCost } from './usage.js';
+import { TOOLLESS_ARGS } from './claude.js';
 
 /** Streamed prompts start with this — isRealPrompt drops `<`-prefixed messages (pinned by test). */
 export const SENTINEL_PREFIX = '<stratless-';
+
+/** Does a failure smell TRANSIENT — worth a pause and another try, rather than a downgrade?
+ *  Matched against the child's error events and stderr tail. Exported for tests. */
+export function isTransientFailure(text: string): boolean {
+  return /\b(429|503|529)\b|rate.?limit|too many requests|overloaded|econnreset|etimedout|socket hang up/i.test(text);
+}
+
+/** The retry budget per batch — a storm degrades throughput; a hard-down claude exits in bounded time. */
+const MAX_TRANSIENT_RETRIES = 5;
+/** Backoff ceiling — degrade to slower, never to minutes-long dead air per step. */
+const MAX_BACKOFF_MS = 30_000;
 
 export interface StreamItem {
   id: string;
@@ -41,6 +61,10 @@ export interface StreamBatchResult {
   remaining: StreamItem[];
   /** whether streaming worked at all (false = fall back entirely, e.g. an old CLI) */
   streamed: boolean;
+  /** wall-clock per completed turn, in order (C8 — the stopwatch's raw material) */
+  turnsMs: number[];
+  /** transient-retry rounds spent (the backoff rung engaging is visible, never silent) */
+  retries: number;
 }
 
 export interface StreamOpts {
@@ -58,6 +82,8 @@ export interface StreamOpts {
   maxTurnsPerSession?: number;
   /** MAX_THINKING_TOKENS for the child; undefined = inherit. The dogfood decides the default. */
   maxThinkingTokens?: number;
+  /** base of the exponential backoff (default 1000ms; STRATLESS_BACKOFF_BASE_MS overrides — tests) */
+  backoffBaseMs?: number;
   onTurn?: (done: number, total: number) => void;
 }
 
@@ -68,21 +94,31 @@ interface TurnUsage {
   cacheReadTokens: number;
 }
 
+interface SessionOutcome {
+  results: Map<string, string>;
+  usage: CallCost & { byModel?: Record<string, CallCost> };
+  /** wall-clock per completed turn */
+  turnsMs: number[];
+  /** why the session ended early, if it did — error-event text + stderr tail, for classification */
+  failure: string;
+}
+
 /**
- * Run one SESSION of up to `items.length` turns. Resolves with completed turn texts and per-session
- * receipts. Never rejects — any failure resolves with what completed (the ladder handles the rest).
+ * Run one SESSION of up to `items.length` turns. Resolves with completed turn texts, per-session
+ * receipts, per-turn timings, and — when it ended early — the failure text the batch layer
+ * classifies. Never rejects (the ladder handles the rest).
  */
-function runSession(
-  bin: string,
-  opts: StreamOpts,
-  items: StreamItem[],
-): Promise<{ results: Map<string, string>; usage: CallCost & { byModel?: Record<string, CallCost> } }> {
+function runSession(bin: string, opts: StreamOpts, items: StreamItem[]): Promise<SessionOutcome> {
   return new Promise((resolve) => {
     const results = new Map<string, string>();
     const perTurn: TurnUsage[] = [];
+    const turnsMs: number[] = [];
+    let failure = '';
+    let stderrTail = '';
     let lastCost = 0;
     let lastByModel: Record<string, CallCost> | undefined;
     let turn = 0;
+    let sentAt = 0;
     let buf = '';
     let settled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -103,10 +139,11 @@ function runSession(
         '--input-format', 'stream-json',
         '--output-format', 'stream-json',
         '--verbose',
+        ...TOOLLESS_ARGS, // C9: the borrow asks; it never gets hands
         ...(opts.model ? ['--model', opts.model] : []),
         '--append-system-prompt', opts.systemPrompt,
       ],
-      { stdio: ['pipe', 'pipe', 'ignore'], env },
+      { stdio: ['pipe', 'pipe', 'pipe'], env },
     );
 
     const finish = () => {
@@ -126,7 +163,9 @@ function runSession(
         cacheReadTokens: perTurn.reduce((n, u) => n + u.cacheReadTokens, 0),
         ...(lastByModel ? { byModel: lastByModel } : {}),
       };
-      resolve({ results, usage });
+      // The failure the batch layer classifies: an incomplete session's error text + stderr tail.
+      const early = results.size < items.length;
+      resolve({ results, usage, turnsMs, failure: early ? `${failure}\n${stderrTail}`.trim() : '' });
     };
 
     const arm = () => {
@@ -145,6 +184,7 @@ function runSession(
       }
       const text = `${SENTINEL_PREFIX}${opts.role}>\n${items[turn].prompt}`;
       arm();
+      sentAt = Date.now();
       try {
         child.stdin.write(`${JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text }] } })}\n`);
       } catch {
@@ -160,6 +200,11 @@ function runSession(
     // remainder goes to the fallback ladder.
     child.stdin.on('error', finish);
     child.stdout.on('error', finish);
+    // The stderr tail is the transient/fatal telltale (C6) — a rate-limited CLI says so here.
+    child.stderr.on('error', () => {});
+    child.stderr.on('data', (d: Buffer) => {
+      stderrTail = (stderrTail + d.toString()).slice(-4096);
+    });
 
     child.stdout.on('data', (d: Buffer) => {
       buf += d.toString();
@@ -175,6 +220,17 @@ function runSession(
           continue;
         }
         if (ev.type !== 'result') continue; // the per-turn result event is the only advance signal
+        // An error result never advances the turn: its text is a diagnosis, not an answer, and
+        // treating it as one would misalign every following turn. Capture and end the session —
+        // the batch layer decides whether it was transient (retry) or fatal (ladder).
+        if (ev.is_error === true || (typeof ev.subtype === 'string' && ev.subtype !== 'success')) {
+          const detail = [ev.subtype, typeof ev.result === 'string' ? ev.result : '', typeof ev.error === 'string' ? ev.error : '']
+            .filter(Boolean)
+            .join(' · ');
+          failure = detail || 'error result';
+          finish();
+          return;
+        }
         const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
         perTurn.push({
           inputTokens: num(ev.usage?.input_tokens),
@@ -197,7 +253,12 @@ function runSession(
           lastByModel = byModel; // cumulative like the cost — last one wins
         }
         const text = typeof ev.result === 'string' ? ev.result.trim() : '';
-        if (text) results.set(items[turn].id, text);
+        if (text) {
+          results.set(items[turn].id, text);
+          turnsMs.push(Date.now() - sentAt); // C8: one wall-clock per COMPLETED turn — an empty
+          // answer's item is re-asked on the fallback rung, and timing it here too would
+          // double-count it into the rates the door quotes from
+        }
         turn++;
         opts.onTurn?.(turn, items.length);
         send();
@@ -208,40 +269,83 @@ function runSession(
   });
 }
 
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
 /**
  * Run a batch of one-liner items through streamed sessions, rotating every `maxTurnsPerSession`.
  * Records ONE meter entry per session (a session is one borrowed process — `calls` counts
  * processes, tokens are summed per turn; the cost field is the session's cumulative bill).
+ *
+ * The backoff rung (C6): a session that dies with a TRANSIENT smell (429 / rate limit /
+ * overloaded / 5xx) pauses — exponentially, capped — and retries the REMAINING items in a fresh
+ * session, up to MAX_TRANSIENT_RETRIES per batch. Completed turns are never re-asked (zero
+ * evidence lost, zero re-spend). A non-transient death keeps the 0.3.1 semantics: partial → the
+ * caller's per-call ladder takes the remainder; zero-progress → streaming is declared not working
+ * and the ladder takes everything.
  * Set STRATLESS_NO_STREAM=1 to disable streaming entirely (the per-call ladder takes over).
  */
 export async function runStreamBatch(bin: string, opts: StreamOpts): Promise<StreamBatchResult> {
   if (process.env.STRATLESS_NO_STREAM) {
-    return { results: new Map(), completed: 0, remaining: [...opts.items], streamed: false };
+    return { results: new Map(), completed: 0, remaining: [...opts.items], streamed: false, turnsMs: [], retries: 0 };
   }
   const results = new Map<string, string>();
+  const turnsMs: number[] = [];
   // Rotation tuning (dogfood 2026-07-17): at 25 turns the growing prefix (~2.5k tokens/turn,
   // re-read by every later turn) ate most of the streaming win — 12 balances boot amortization
   // against the growth tax. STRATLESS_STREAM_ROTATE overrides for measurement.
   const envRotate = Number(process.env.STRATLESS_STREAM_ROTATE);
   const rotate = opts.maxTurnsPerSession ?? (Number.isFinite(envRotate) && envRotate > 0 ? envRotate : 12);
-  let done = 0;
+  const envBackoff = Number(process.env.STRATLESS_BACKOFF_BASE_MS);
+  const backoffBase = opts.backoffBaseMs ?? (Number.isFinite(envBackoff) && envBackoff > 0 ? envBackoff : 1000);
+  let retries = 0; // total backoff retries this batch — the reported truth
+  let stormRetries = 0; // retries within the CURRENT storm — the budget; resets on a clean chunk
+  let zeroRuns = 0; // consecutive sessions that completed NOTHING — the hard-down telltale
   let anyStreamed = false;
 
-  for (let start = 0; start < opts.items.length; start += rotate) {
-    const chunk = opts.items.slice(start, start + rotate);
-    const session = await runSession(bin, { ...opts, onTurn: (t) => opts.onTurn?.(done + t, opts.items.length) }, chunk);
+  let pending = [...opts.items];
+  while (pending.length) {
+    const chunk = pending.slice(0, rotate);
+    const session = await runSession(
+      bin,
+      { ...opts, onTurn: (t) => opts.onTurn?.(results.size + t, opts.items.length) },
+      chunk,
+    );
     for (const [id, text] of session.results) results.set(id, text);
-    done += session.results.size;
+    turnsMs.push(...session.turnsMs);
     if (session.results.size > 0) {
       anyStreamed = true;
+      zeroRuns = 0;
       recordUsage({ ...session.usage, feature: opts.feature });
+    } else if (session.failure) {
+      // The session booted a whole harness (~17–24k tokens, measured) and died before its first
+      // receipt — the meter must not record that as free (C11). An unmetered call is the honest
+      // entry: a spend happened whose size we cannot see. (An empty failure means the spawn
+      // itself never took — nothing ran, nothing to record.)
+      zeroRuns++;
+      recordUsage({ feature: opts.feature, unmetered: true });
+    } else {
+      zeroRuns++;
     }
-    // a session that completed NOTHING means streaming isn't working here — stop burning batches
-    if (session.results.size === 0) break;
-    // a partial session means a mid-batch failure — hand the rest to the fallback ladder
-    if (session.results.size < chunk.length) break;
+    pending = pending.filter((it) => !results.has(it.id));
+    if (session.results.size === chunk.length) {
+      stormRetries = 0; // a clean chunk resets the budget — it bounds each STORM, not the batch's lifetime
+      continue;
+    }
+
+    // The session died early. Transient → pause and retry the remainder in a fresh session — but
+    // a claude that never completes ANYTHING gets two chances, not five: a hard-down network
+    // spells 429-ish (ECONNRESET, ETIMEDOUT) too, and the old fail-fast-to-the-ladder promise
+    // must survive the backoff rung.
+    if (isTransientFailure(session.failure) && stormRetries < MAX_TRANSIENT_RETRIES && zeroRuns <= 2) {
+      retries++;
+      stormRetries++;
+      await sleep(Math.min(backoffBase * 2 ** (stormRetries - 1), MAX_BACKOFF_MS));
+      continue;
+    }
+    // Fatal (or the budget is spent): 0.3.1 semantics — the per-call ladder takes the remainder.
+    break;
   }
 
   const remaining = opts.items.filter((it) => !results.has(it.id));
-  return { results, completed: results.size, remaining, streamed: anyStreamed };
+  return { results, completed: results.size, remaining, streamed: anyStreamed, turnsMs, retries };
 }

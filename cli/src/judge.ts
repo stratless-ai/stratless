@@ -18,9 +18,10 @@
  * time. Every run after adds only the handful of new exchanges since. The cache is what makes the
  * difference between "cheap forever" and "a fresh bill every session".
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
+import { atomicWriteFileSync, CorruptStoreError } from './atomic.js';
 import { runClaude } from './claude.js';
 import { runStreamBatch } from './stream.js';
 import type { Exchange } from './exchange.js';
@@ -218,14 +219,21 @@ type Cache = Record<string, Judgment>;
 /**
  * How many exchanges have a cached judgment — free and instant, for `status` and the synthesis
  * gate. Counts every entry regardless of pipeline version (an old entry is still a judged
- * exchange; it just re-judges when next seen). Missing or corrupt reads as zero, never a throw.
+ * exchange; it just re-judges when next seen). Missing reads as zero; a DAMAGED cache throws
+ * CorruptStoreError like every other read of it (C2) — the gate must never mistake corruption
+ * for an empty pile and trigger a full rebuild over it.
  */
 export function cachedCount(file: string = cachePath()): number {
-  if (!existsSync(file)) return 0;
+  return Object.keys(loadCache(file)).length;
+}
+
+/** The cache's health, for the surfaces that LABEL rather than spend (`status`): ok with a count,
+ *  or not ok with the damaged file's path. Never throws. */
+export function cacheHealth(file: string = cachePath()): { ok: boolean; count: number; file: string } {
   try {
-    return Object.keys(JSON.parse(readFileSync(file, 'utf8'))).length;
+    return { ok: true, count: cachedCount(file), file };
   } catch {
-    return 0;
+    return { ok: false, count: 0, file };
   }
 }
 
@@ -242,20 +250,26 @@ export function pendingCount(exchanges: Exchange[], limit: number): number {
   return Math.min(unjudged, limit);
 }
 
-function loadCache(): Cache {
-  const file = cachePath();
+/**
+ * A missing cache is an empty pile; a DAMAGED cache is a refusal (C2). The old behavior — corrupt
+ * reads as `{}` — was the one silent re-bill in the product: every judgment ever paid for would
+ * quietly be paid for again. CorruptStoreError propagates to the command layer, which says which
+ * file is damaged and how to move it aside; nothing is read or spent past this point.
+ */
+function loadCache(file: string = cachePath()): Cache {
   if (!existsSync(file)) return {};
+  let parsed: unknown;
   try {
-    return JSON.parse(readFileSync(file, 'utf8'));
+    parsed = JSON.parse(readFileSync(file, 'utf8'));
   } catch {
-    return {}; // a corrupt cache costs re-reads, never a crash
+    throw new CorruptStoreError(file);
   }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new CorruptStoreError(file);
+  return parsed as Cache;
 }
 
 function saveCache(c: Cache): void {
-  const file = cachePath();
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, `${JSON.stringify(c)}\n`);
+  atomicWriteFileSync(cachePath(), `${JSON.stringify(c)}\n`);
 }
 
 export interface JudgeRun {
@@ -267,6 +281,8 @@ export interface JudgeRun {
   cached: number;
   /** exchanges still unjudged (or stale-versioned) because a per-run limit was hit */
   deferred: number;
+  /** wall-clock per fresh verdict, streamed and one-shot alike (C8 — the stopwatch's raw material) */
+  turnsMs: number[];
 }
 
 /**
@@ -320,10 +336,16 @@ export async function judgeAll(
   }
 
   // Rung 2 — the per-call fallback for whatever the stream left behind.
+  const turnsMs = [...stream.turnsMs];
   let progressed = stream.completed;
   for (const item of stream.remaining) {
     const ex = byHash.get(item.id);
-    if (ex) accept(ex, judge(ex, bin, opts.aperture));
+    if (ex) {
+      const t0 = Date.now();
+      const j = judge(ex, bin, opts.aperture);
+      accept(ex, j);
+      if (j) turnsMs.push(Date.now() - t0); // a refused call is not a verdict — its wall stays out of the rates
+    }
     opts.onProgress?.(++progressed, target);
   }
   saveCache(cache);
@@ -332,5 +354,5 @@ export async function judgeAll(
   const judgments = exchanges
     .map((e) => cache[e.hash])
     .filter((j): j is Judgment => currentJudgment(j));
-  return { judgments, fresh, cached: judgments.length - fresh, deferred: unjudged.length - target };
+  return { judgments, fresh, cached: judgments.length - fresh, deferred: unjudged.length - target, turnsMs };
 }
