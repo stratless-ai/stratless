@@ -3,8 +3,7 @@
  * stratless — build your AI a model of who you are, so it stops making you feel stupid.
  *
  *   stratless init      keep your history (add --auto for the after-session refresh)
- *   stratless profile   see the model of you (profile LOOKS; update LOADS)
- *   stratless report    the same picture, written for you to read
+ *   stratless profile   see the model of you (--read: your prose copy · LOOKS; update LOADS)
  *   stratless update    judge what's new; rebuild + load the profile when due (--now: always)
  *   stratless stop      turn it off — stop refreshing and unload the profile
  *   stratless status    stratless's own state: on or off, and what it has cost
@@ -22,7 +21,7 @@ import { judgeAll, cacheHealth, fitAperture, allJudgments, pendingCount, type Ju
 import { topTopics, hasSignal, type Corpus } from './synthesize.js';
 import { loadPatterns, displayOrder, matchReceiptPrefix, MIN_RECEIPTS, type PatternStore } from './miner.js';
 import { removeProfile, humanMdPath, claudeMdPath } from './sink.js';
-import { readRenders, writeRender } from './state.js';
+import { readRenders, writeRender, writeBuildCorpus, readBuildCorpus, type RenderMeta } from './state.js';
 import { readUsage } from './usage.js';
 import { atomicWriteFileSync, CorruptStoreError } from './atomic.js';
 import { acquireLock, releaseLock, readLock, lockFilePath, lockIsStale, stopWorker, spawnDetached, resolveBinPath } from './worker.js';
@@ -121,13 +120,13 @@ function buildRenderedText(
   const built = buildRendered(kind, signal, corpus, bin);
   if (built.invented?.length) {
     console.error(`\n  ${C.bad('Refused: the writer invented numbers.')} ${C.dim(`(${built.invented.join(', ')})`)}`);
-    console.error(`  ${C.dim('Nothing was written or loaded — this build is discarded. Try again with `' + hint(`stratless ${kind} --now`) + '`.')}\n`);
+    console.error(`  ${C.dim('Nothing was written or loaded — this build is discarded. Try again with `' + hint('stratless update --now') + '`.')}\n`);
     sw?.record(); // the stages already paid for are measured truth — a refused build must not erase them (C8)
     process.exit(1);
   }
   if (built.malformed) {
     console.error(`\n  ${C.bad(`Refused: the writer returned ${built.malformed} instead of a ${kind}.`)}`);
-    console.error(`  ${C.dim('Nothing was written or loaded — this build is discarded. Try again with `' + hint(`stratless ${kind} --now`) + '`.')}\n`);
+    console.error(`  ${C.dim('Nothing was written or loaded — this build is discarded. Try again with `' + hint('stratless update --now') + '`.')}\n`);
     sw?.record();
     process.exit(1);
   }
@@ -139,11 +138,12 @@ function lookFooter(kind: 'profile' | 'report'): void {
   if (kind === 'profile') {
     console.log(
       profileLoaded()
-        ? `  ${C.dim(`loaded: ${humanMdPath()} · refresh it with \`${hint('stratless update')}\``)}\n`
-        : `  ${C.it('not loaded yet')} ${C.dim('· load it into your assistant:')} ${C.b(hint('stratless update'))}\n`,
+        ? `  ${C.dim(`loaded: ${humanMdPath()} · refresh it with \`${hint('stratless update')}\``)}`
+        : `  ${C.it('not loaded yet')} ${C.dim('· load it into your assistant:')} ${C.b(hint('stratless update'))}`,
     );
+    console.log(`  ${C.dim(`read it as prose: \`${hint('stratless profile --read')}\``)}\n`);
   } else {
-    // The evidence loop closes: every report points at the receipts behind it (clig: next command).
+    // The evidence loop closes: every read points at the receipts behind it (clig: next command).
     console.log(`  ${C.dim(`the evidence behind this: ${hint('stratless patterns')}`)}\n`);
   }
 }
@@ -182,27 +182,32 @@ function preSpend(pending: number): void {
 /**
  * The profiler — LOOKING IS FREE (the polish release, Sun's design decision).
  *
- * `profile` and `report` print the LAST BUILT rendering instantly, at zero spend, under a header
- * that carries the build's own date and numbers (from the sidecar — never recomputed at print).
- * Only `update` — and a first-ever look, or an explicit `--now` — spends. One word keeps one
- * meaning across the CLI: `--now` = spend now, skip nothing. `profile` looks, `update` loads:
- * unchanged.
+ * `profile` prints the LAST BUILT structured rendering instantly, at zero spend, under a header that
+ * carries the build's own date and numbers (from the sidecar — never recomputed at print). Only
+ * `update` — and a first-ever look, or an explicit `--now` — spends. `profile` looks, `update` loads.
+ *
+ * `profile --read` is the human-facing prose companion (the folded-in `report`): the same evidence,
+ * a different audience. It is LAZY — the main function (the structured profile that loads into
+ * HUMAN.md) earns the synthesis; the read renders only when someone wants it, over the profile's
+ * FROZEN corpus, so it can never describe a different window than the loaded profile. (Sun's
+ * principle: don't spend on a secondary render until it proves useful.)
  */
-async function profiler(kind: 'profile' | 'report', rest: string[] = []): Promise<void> {
-  const force = rest.includes('--now');
-  const cachedFile = join(STRATLESS, `${kind}.txt`);
-  const meta = readRenders()[kind];
+async function profiler(rest: string[] = []): Promise<void> {
+  if (rest.includes('--read')) return profileRead();
 
-  // The free path: a cached rendering + its build facts. No model, no meter movement.
-  if (!force && meta && existsSync(cachedFile)) {
+  const cachedFile = join(STRATLESS, 'profile.txt');
+  const meta = readRenders().profile;
+
+  // The look: a cached rendering + its build facts. No model, no meter movement. `profile` never
+  // rebuilds; that is `update`'s job (it also loads). A first-ever look with nothing cached builds once.
+  if (meta && existsSync(cachedFile)) {
     const text = readFileSync(cachedFile, 'utf8').trimEnd();
-    const header = kind === 'profile' ? "WHO YOU'RE WORKING WITH" : 'YOUR PATTERN — what stratless sees';
     console.log(
-      `\n  ${C.b(header)}   ${C.dim(`(stratless · built ${meta.builtAt.slice(0, 10)} · ${meta.sessions} sessions · ${meta.exchanges} exchanges)`)}\n`,
+      `\n  ${C.b("WHO YOU'RE WORKING WITH")}   ${C.dim(`(stratless · built ${meta.builtAt.slice(0, 10)} · ${meta.sessions} sessions · ${meta.exchanges} exchanges)`)}\n`,
     );
     console.log(text.split('\n').map((l) => `  ${l}`).join('\n'));
-    console.log(`\n  ${C.dim(`free — this is the last build · rebuild with \`${hint(`stratless ${kind} --now`)}\``)}`);
-    lookFooter(kind);
+    console.log(`\n  ${C.dim('free — this is the last build')}`);
+    lookFooter('profile');
     return;
   }
 
@@ -258,21 +263,24 @@ async function profiler(kind: 'profile' | 'report', rest: string[] = []): Promis
     };
 
     const tSynth = Date.now();
-    const text = buildRenderedText(kind, signal, corpus, bin, sw);
+    const text = buildRenderedText('profile', signal, corpus, bin, sw);
     sw.stage('synthesis', Date.now() - tSynth, text ? 1 : 0);
 
     if (!text) {
-      console.error(`\n  ${C.bad(`Could not build your ${kind}.`)} ${C.dim('The assistant returned nothing — silence beats a guess.')}\n`);
+      console.error(`\n  ${C.bad('Could not build your profile.')} ${C.dim('The assistant returned nothing — silence beats a guess.')}\n`);
       sw.record(); // the judge stage's rates survive the refusal (C8)
       process.exit(1);
     }
 
+    const builtAt = new Date().toISOString();
     atomicWriteFileSync(cachedFile, `${text}\n`);
-    writeRender(kind, { builtAt: new Date().toISOString(), sessions, exchanges: signal.length });
+    writeRender('profile', { builtAt, sessions, exchanges: signal.length });
+    // Freeze this build's corpus so a later `profile --read` renders the note over EXACTLY this
+    // evidence (lazy, no re-read) — never a divergent window.
+    writeBuildCorpus({ builtAt, corpus, signalHashes: signal.map((j) => j.hash) });
     sw.record();
 
-    const header = kind === 'profile' ? "WHO YOU'RE WORKING WITH" : 'YOUR PATTERN — what stratless sees';
-    console.log(`\n  ${C.b(header)}   ${C.dim(`(stratless · ${sessions} sessions · ${signal.length} exchanges)`)}\n`);
+    console.log(`\n  ${C.b("WHO YOU'RE WORKING WITH")}   ${C.dim(`(stratless · ${sessions} sessions · ${signal.length} exchanges)`)}\n`);
     console.log(
       text
         .split('\n')
@@ -284,10 +292,104 @@ async function profiler(kind: 'profile' | 'report', rest: string[] = []): Promis
       : `all ${run.cached} from cache`;
     const more = run.deferred ? C.dim(` · ${run.deferred} left for next run`) : '';
     console.log(`\n  ${C.dim(`${spend} · saved to ${cachedFile}`)}${more}`);
-    lookFooter(kind);
+    lookFooter('profile');
   } finally {
     releaseLock();
   }
+}
+
+/**
+ * `profile --read` — the human-facing prose, rendered LAZILY over the profile's FROZEN corpus.
+ *
+ * Fresh (a cached read stamped to the current profile build) → a pure look, free. Otherwise render
+ * ONCE from the frozen corpus: reload the exact signal judgments from the cache BY HASH (never a
+ * re-judge, never a fresh window), synthesize, stamp the render to the profile's build, cache, print.
+ * This is the "stop doing what `update` does": it never reads or judges a new exchange, and can
+ * never describe a different corpus than the loaded profile.
+ */
+async function profileRead(): Promise<void> {
+  const renders = readRenders();
+  const profileMeta = renders.profile;
+  const build = readBuildCorpus();
+  const reportFile = join(STRATLESS, 'report.txt');
+
+  if (!profileMeta) {
+    console.log(`\n  ${C.it('No profile to read yet.')}`);
+    console.log(`  ${C.dim(`Build one first: \`${hint('stratless update')}\`, then \`${hint('stratless profile --read')}\`.`)}\n`);
+    return;
+  }
+  if (!build) {
+    // Transition: a profile built before this feature has no frozen corpus. One rebuild enables the
+    // read — we never render over a fresh window, because that is exactly the divergence we removed.
+    console.log(`\n  ${C.it('Your profile predates the readable copy.')}`);
+    console.log(`  ${C.dim(`Rebuild once to enable it: \`${hint('stratless update --now')}\` (your next session refresh does too), then \`${hint('stratless profile --read')}\`.`)}\n`);
+    return;
+  }
+  if (build.builtAt !== profileMeta.builtAt) {
+    // The frozen corpus must belong to the LOADED profile. If they drifted — a best-effort
+    // writeBuildCorpus that failed, a crash between the two writes, a downgrade — rendering build.json
+    // would describe a DIFFERENT window than the loaded profile while stamping it as current: the
+    // exact divergence this fold removes. Refuse, don't lie; a rebuild re-syncs both.
+    console.log(`\n  ${C.it('Your readable copy is out of sync with the loaded profile.')}`);
+    console.log(`  ${C.dim(`Rebuild to re-sync: \`${hint('stratless update --now')}\`, then \`${hint('stratless profile --read')}\`.`)}\n`);
+    return;
+  }
+
+  // FRESH: report.txt stamped to the CURRENT profile build → pure look, no spend.
+  const reportMeta = renders.report;
+  if (reportMeta && reportMeta.builtAt === profileMeta.builtAt && existsSync(reportFile)) {
+    printRead(readFileSync(reportFile, 'utf8').trimEnd(), profileMeta, true);
+    return;
+  }
+
+  // STALE or absent report → render once over the frozen corpus. No new reading.
+  // Reconstruct the frozen signal from the cache by hash, and require it to reload IN FULL: a partial
+  // survivor set (a PIPELINE_V drain, a hand-edited cache) would be synthesized while the header and
+  // stored counts still assert the full frozen corpus. Refuse, don't lie.
+  const wanted = new Set(build.signalHashes);
+  const signal = allJudgments().filter((j) => wanted.has(j.hash));
+  if (signal.length < wanted.size) {
+    console.log(`\n  ${C.it('The evidence behind your last build is no longer fully in the cache.')}`);
+    console.log(`  ${C.dim(`Rebuild it: \`${hint('stratless update --now')}\`.`)}\n`);
+    return;
+  }
+
+  const bin = findAssistant();
+  if (!bin) {
+    console.error(`\n  ${C.bad('stratless needs your assistant to write your read.')} ${C.dim('It borrows your `claude` — install Claude Code, then retry.')}\n`);
+    process.exit(1);
+  }
+
+  if (!claimLockOrSay()) return; // C4: one spender at a time
+  try {
+    const sw = startRun();
+    process.stderr.write(`\n  ${CE.dim('writing your read from the last build (one borrowed synthesis, no re-reading)…')}\n`);
+    const tSynth = Date.now();
+    const text = buildRenderedText('report', signal, build.corpus, bin, sw);
+    sw.stage('synthesis', Date.now() - tSynth, text ? 1 : 0);
+    if (!text) {
+      console.error(`\n  ${C.bad('Could not write your read.')} ${C.dim('The assistant returned nothing — silence beats a guess.')}\n`);
+      sw.record();
+      process.exit(1);
+    }
+    atomicWriteFileSync(reportFile, `${text}\n`);
+    // Stamp the read to the profile build it was rendered from — the single staleness key.
+    writeRender('report', { builtAt: profileMeta.builtAt, sessions: build.corpus.sessions, exchanges: build.corpus.exchanges });
+    sw.record();
+    printRead(text, profileMeta, false);
+  } finally {
+    releaseLock();
+  }
+}
+
+/** Print the human-facing read under its header + footer. `fresh` picks the honest one-line note. */
+function printRead(text: string, meta: RenderMeta, fresh: boolean): void {
+  console.log(
+    `\n  ${C.b('YOUR PATTERN — what stratless sees')}   ${C.dim(`(stratless · built ${meta.builtAt.slice(0, 10)} · ${meta.sessions} sessions · ${meta.exchanges} exchanges)`)}\n`,
+  );
+  console.log(text.split('\n').map((l) => `  ${l}`).join('\n'));
+  console.log(`\n  ${C.dim(fresh ? 'free — from your last build' : 'written from your last build · no new reading')}`);
+  lookFooter('report');
 }
 
 /**
@@ -702,8 +804,7 @@ async function status(rest: string[] = []): Promise<void> {
 // forced a rebuild. Unknown flags and stray arguments exit loudly, with a did-you-mean.
 const COMMAND_ARGS: Record<string, { flags: string[]; positionals: number }> = {
   init: { flags: ['--auto'], positionals: 0 },
-  profile: { flags: ['--now'], positionals: 0 },
-  report: { flags: ['--now'], positionals: 0 },
+  profile: { flags: ['--read'], positionals: 0 },
   update: { flags: ['--now'], positionals: 0 },
   patterns: { flags: ['--all'], positionals: 0 },
   receipt: { flags: ['--all'], positionals: 1 },
@@ -748,6 +849,14 @@ async function main(): Promise<void> {
 
   if (cmd === '--version' || cmd === '-v' || cmd === 'version') {
     console.log(`stratless ${installedVersion()}`);
+    return;
+  }
+
+  // `profile --now` retired: profile only looks now. Nudge to the command that rebuilds AND loads
+  // (before strict-args rejects the unknown flag with a less helpful message).
+  if (cmd === 'profile' && args.includes('--now')) {
+    console.log(`\n  ${C.it('profile only looks; it does not rebuild.')}`);
+    console.log(`  ${C.dim(`to rebuild your profile and load it: ${C.b(hint('stratless update --now'))}`)}\n`);
     return;
   }
 
@@ -796,6 +905,14 @@ async function main(): Promise<void> {
     return;
   }
 
+  // `report` folded into `profile --read` (the human-facing prose is now a subfunction, lazy). Keep
+  // the muscle memory kind: redirect instead of an unknown-command error.
+  if (cmd === 'report') {
+    console.log(`\n  ${C.it('report folded into profile.')}`);
+    console.log(`  ${C.dim(`read your pattern as prose: ${C.b(hint('stratless profile --read'))}`)}\n`);
+    return;
+  }
+
   if (!cmd || cmd === 'help' || cmd === '--help' || cmd === '-h') {
     console.log(`
   ${C.b('stratless')} — build your AI a model of who you are
@@ -803,8 +920,7 @@ async function main(): Promise<void> {
     ${C.dim('get started:')}  ${C.b('npx stratless init')}
 
     ${C.b('stratless init')}       ${C.dim('keep your history safe (add --auto for background refresh)')}
-    ${C.b('stratless profile')}    ${C.dim('see the model of you — free, instant (--now: rebuild)')}
-    ${C.b('stratless report')}     ${C.dim('the same picture, written for you to read — free (--now: rebuild)')}
+    ${C.b('stratless profile')}    ${C.dim('see the model of you — free, instant (--read: as prose)')}
     ${C.b('stratless update')}     ${C.dim('judge what is new; mine + rebuild + load the profile when due (--now: always)')}
     ${C.b('stratless patterns')}   ${C.dim('every claim with its receipts: counts, trends, evidence (--all: candidates too)')}
     ${C.b('stratless receipt')}    ${C.dim('prove a claim: the raw exchanges behind it (receipt 3, or a hash prefix)')}
@@ -828,8 +944,7 @@ async function main(): Promise<void> {
     }
     if (cmd === 'stats') return stats(cwd);
     if (cmd === 'status') return await status(args.slice(1));
-    if (cmd === 'profile') return await profiler('profile', args.slice(1));
-    if (cmd === 'report') return await profiler('report', args.slice(1));
+    if (cmd === 'profile') return await profiler(args.slice(1));
     if (cmd === 'update') return await update(args.slice(1));
     if (cmd === 'patterns') return patternsCmd(args.slice(1));
     if (cmd === 'receipt') return receiptCmd(args.slice(1));
@@ -847,7 +962,7 @@ async function main(): Promise<void> {
 
   // A mistyped COMMAND gets the same courtesy as a mistyped flag (0.3.5): name the nearest one,
   // never just reject. The user-facing verbs, in help order.
-  const KNOWN = ['init', 'profile', 'report', 'update', 'patterns', 'receipt', 'stop', 'status', 'stats', 'help'];
+  const KNOWN = ['init', 'profile', 'update', 'patterns', 'receipt', 'stop', 'status', 'stats', 'help'];
   const guess = cmd ? KNOWN.map((k) => [k, editDistance(cmd, k)] as const).filter(([, d]) => d <= 3).sort((a, b) => a[1] - b[1])[0]?.[0] : undefined;
   console.error(`\n  ${C.bad(`unknown command: ${cmd}`)}${guess ? C.dim(`  (did you mean ${guess}?)`) : ''}`);
   console.error(`  ${C.dim(`see \`${hint('stratless help')}\` for the full list`)}\n`);
