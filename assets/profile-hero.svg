@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 620" xml:space="preserve">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 648" xml:space="preserve">
   <defs>
-    <clipPath id="card"><rect x="18" y="14" width="564" height="592" rx="11"/></clipPath>
+    <clipPath id="card"><rect x="18" y="14" width="564" height="620" rx="11"/></clipPath>
     <linearGradient id="bar" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#3a3831"/><stop offset="1" stop-color="#322f29"/>
     </linearGradient>
@@ -17,7 +17,7 @@
     </style>
   </defs>
 
-  <g filter="url(#sh)"><rect x="18" y="14" width="564" height="592" rx="11" fill="#1b1a16" stroke="#000"/></g>
+  <g filter="url(#sh)"><rect x="18" y="14" width="564" height="620" rx="11" fill="#1b1a16" stroke="#000"/></g>
   <g clip-path="url(#card)">
     <rect x="18" y="14" width="564" height="40" fill="url(#bar)"/>
     <line x1="18" y1="54" x2="582" y2="54" stroke="#000"/>
@@ -25,31 +25,36 @@
   <circle cx="42" cy="34" r="6" fill="#ff5f56"/>
   <circle cx="62" cy="34" r="6" fill="#febc2e"/>
   <circle cx="82" cy="34" r="6" fill="#28c840"/>
-  <text x="300" y="38" text-anchor="middle" fill="#b9b3a3" font-size="11">my-app — -zsh — 92×20</text>
+  <text x="300" y="38" text-anchor="middle" fill="#b9b3a3" font-size="11">my-app, -zsh, 92x20</text>
 
   <text x="36" y="74"><tspan class="g">➜</tspan>  <tspan class="pa">~/my-app</tspan> <tspan class="w">stratless profile</tspan></text>
 
-  <text x="36" y="118" class="d"># who you are working with, loaded into your assistant every session</text>
+  <text x="36" y="106" class="d"># who you are working with, read from your own history</text>
 
-  <text x="36" y="162">You're talking to a solo founder building stratless, a</text>
-  <text x="36" y="184">human-profiler: a CLI that reads your coding-assistant</text>
-  <text x="36" y="206">transcripts, judges them, and writes a <tspan class="w">HUMAN.md</tspan> the</text>
-  <text x="36" y="228">assistant loads at session start to know who it is talking to.</text>
+  <text x="36" y="142" class="w">WHAT THEY KNOW</text>
+  <text x="36" y="163">Holds the system's architecture actively in mind, restating</text>
+  <text x="36" y="184">a proposed design accurately before moving on. Carries</text>
+  <text x="36" y="205">granular competitive intelligence and uses it directly in</text>
+  <text x="36" y="226">strategic reasoning.</text>
 
-  <text x="36" y="272">They are not fluent in the tech, and the tech is never what</text>
-  <text x="36" y="294">stalls them. <tspan class="w">Altitude is.</tspan> Concrete, nameable architecture</text>
-  <text x="36" y="316">lands; abstract strategy framings get redirected. On</text>
-  <text x="36" y="338">implementation they give short orders, <tspan class="y">"go," "ok," "commit,"</tspan></text>
-  <text x="36" y="360">and rely on you for the how.</text>
+  <text x="36" y="262" class="w">HOW THEY WORK</text>
+  <text x="36" y="283">A settled recommendation gets a terse <tspan class="y">"go"</tspan> or <tspan class="y">"continue."</tspan></text>
+  <text x="36" y="304">They drive the release pipeline hands-on and <tspan class="w">personally</tspan></text>
+  <text x="36" y="325"><tspan class="w">check a live artifact against your status report</tspan> rather</text>
+  <text x="36" y="346">than trust it.</text>
 
-  <text x="36" y="404"><tspan class="w">Failure signal</tspan>  go abstract or long and they don't argue,</text>
-  <text x="36" y="426">they redirect: to a concrete task, to "just summarize the</text>
-  <text x="36" y="448">blockers," to correcting one fact and moving on. That pivot</text>
-  <text x="36" y="470">means you left ground level. <tspan class="w">Drop the frame, give the next move.</tspan></text>
-  <text x="36" y="492">And they gate real decisions on verification.</text>
+  <text x="36" y="382" class="w">FAILURE SIGNALS</text>
+  <text x="36" y="403">Catches gaps in your status claims (an unpublished page, a</text>
+  <text x="36" y="424">missed release note) and stops to demand verification. A</text>
+  <text x="36" y="445">dense answer to a narrow question gets bypassed for a</text>
+  <text x="36" y="466"><tspan class="w">blunt yes/no.</tspan></text>
 
-  <text x="36" y="536"><tspan class="g">↳ loaded</tspan>  <tspan class="d">your assistant now talks to a person, not a blank.</tspan></text>
+  <text x="36" y="502" class="d">not loaded yet · load it into your assistant: stratless update</text>
 
-  <text x="36" y="580"><tspan class="g">➜</tspan>  <tspan class="pa">~/my-app</tspan></text>
-  <rect x="133" y="568" width="8" height="15" fill="#e6e2d6"/>
+  <text x="36" y="538"><tspan class="g">➜</tspan>  <tspan class="pa">~/my-app</tspan> <tspan class="w">stratless update</tspan></text>
+
+  <text x="36" y="570"><tspan class="g">↳ loaded</tspan>  <tspan class="d">your assistant now talks to a person, not a blank.</tspan></text>
+
+  <text x="36" y="602"><tspan class="g">➜</tspan>  <tspan class="pa">~/my-app</tspan></text>
+  <rect x="133" y="590" width="8" height="15" fill="#e6e2d6"/>
 </svg>

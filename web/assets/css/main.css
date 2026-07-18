@@ -77,6 +77,20 @@
   --font-mark: 'Epetri', ui-monospace, monospace; /* wordmark / logo only */
   --font-mono: ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Menlo, monospace; /* code */
 
+  /* type scale — one ladder for the page. Heading + small-UI text was ~19 ad-hoc sizes
+     (a 0.72–0.95rem band spaced 1–2px apart, which reads as drift, not hierarchy); these
+     are the 6 steps they collapse to. Base reading text stays the body's 17px; the terminal
+     keeps its own step (it is device chrome, not page type). Map every element here. */
+  --fs-display: clamp(2.1rem, 5.2vw, 3.6rem); /* hero headline */
+  --fs-title: clamp(1.5rem, 3.2vw, 2.1rem); /* section heads */
+  --fs-lg: 1rem; /* lede + install command */
+  --fs-md: 0.9rem; /* secondary prose — cards, verdicts */
+  --fs-sm: 0.8rem; /* small UI — labels, notes, tags, eyebrow, code chips, brand names */
+  --fs-xs: 0.72rem; /* fine print */
+  --fs-2xs: 0.62rem; /* micro-labels — pager kicker, tiny mono caps */
+  --fs-term: 0.75rem; /* terminal chrome (title + body) */
+  --fs-code: 0.9em; /* inline code — scales with the text it sits in */
+
   --radius: 7px;
   --shadow: 3px 3px 0 var(--ink);
   --shadow-lg: 5px 5px 0 var(--ink);
@@ -163,7 +177,7 @@ kbd {
 /* eyebrow — small technical label in mono (Epetri stays reserved for the logo/wordmark) */
 .eyebrow {
   font-family: var(--font-mono);
-  font-size: 0.78rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
   letter-spacing: 0.14em;
   color: var(--mid);

@@ -79,28 +79,29 @@ useHead({
       <div class="term realterm" role="img" aria-label="Terminal showing stratless profile printing the model of the person, then stratless update loading it into the assistant">
         <div class="term-bar">
           <div class="term-dots"><span class="d-r" /><span class="d-y" /><span class="d-g" /></div>
-          <div class="term-title">my-app — -zsh — 92×20</div>
+          <div class="term-title">my-app — -zsh — 72×24</div>
         </div>
         <pre class="term-body"><code><span class="t-arrow">➜</span>  <span class="t-path">~/my-app</span> <span class="t-c">stratless profile</span>
 
 <span class="t-d"># who you are working with, read from your own history</span>
 
-You're talking to a solo founder building stratless, a
-human-profiler: a CLI that reads your coding-assistant
-transcripts, judges them, and writes a <span class="t-b">HUMAN.md</span> the
-assistant loads at session start to know who it is talking to.
+<span class="t-b">WHAT THEY KNOW</span>
+Holds the system's architecture actively in mind, restating
+a proposed design accurately before moving on. Carries
+granular competitive intelligence and uses it directly in
+strategic reasoning.
 
-They are not fluent in the tech, and the tech is never what
-stalls them. <span class="t-b">Altitude is.</span> Concrete, nameable architecture
-lands; abstract strategy framings get redirected. On
-implementation they give short orders, <span class="t-you">"go," "ok," "commit,"</span>
-and rely on you for the how.
+<span class="t-b">HOW THEY WORK</span>
+A settled recommendation gets a terse <span class="t-you">"go"</span> or <span class="t-you">"continue."</span>
+They drive the release pipeline hands-on and <span class="t-b">personally
+check a live artifact against your status report</span> rather
+than trust it.
 
-<span class="t-b">Failure signal</span>  go abstract or long and they don't argue,
-they redirect: to a concrete task, to "just summarize the
-blockers," to correcting one fact and moving on. That pivot
-means you left ground level. <span class="t-b">Drop the frame, give the next move.</span>
-And they gate real decisions on verification.
+<span class="t-b">FAILURE SIGNALS</span>
+Catches gaps in your status claims (an unpublished page, a
+missed release note) and stops to demand verification. A
+dense answer to a narrow question gets bypassed for a
+<span class="t-b">blunt yes/no.</span>
 
 <span class="t-d">not loaded yet · load it into your assistant: stratless update</span>
 
@@ -293,7 +294,7 @@ And they gate real decisions on verification.
   line-height: 1.2;
 }
 h1 {
-  font-size: clamp(2.1rem, 5.2vw, 3.6rem);
+  font-size: var(--fs-display);
   line-height: 1.12;
   letter-spacing: -0.02em;
   margin: 0;
@@ -302,7 +303,7 @@ h1 {
   max-width: 34rem;
   color: var(--ink-2);
   font-family: var(--font-read);
-  font-size: 0.9rem;
+  font-size: var(--fs-lg);
   line-height: 1.6;
   margin: 0.666rem;
 }
@@ -313,14 +314,14 @@ h1 {
   justify-content: center;
 }
 .free-note {
-  font-size: 0.82rem;
+  font-size: var(--fs-sm);
   color: var(--mid);
   margin: 0;
 }
 
 /* ── the terminal: a real shell, the trick performed ── */
 .term {
-  width: min(46rem, 100%);
+  width: min(37rem, 100%);
   text-align: left;
   border: 1px solid #000;
   border-radius: 11px;
@@ -361,7 +362,7 @@ h1 {
   right: 0;
   text-align: center;
   font-family: var(--font-mono);
-  font-size: 0.74rem;
+  font-size: var(--fs-term);
   color: #b9b3a3;
   letter-spacing: 0.01em;
 }
@@ -373,7 +374,7 @@ h1 {
   overflow: auto;
   overscroll-behavior: contain;
   font-family: var(--font-mono);
-  font-size: 0.79rem;
+  font-size: var(--fs-term);
   line-height: 1.7;
   color: #e6e2d6;
   -webkit-font-smoothing: antialiased;
@@ -441,7 +442,7 @@ h1 {
 }
 .cmd code {
   font-family: var(--font-mono);
-  font-size: 1rem;
+  font-size: var(--fs-lg);
   background: none;
   padding: 0;
 }
@@ -459,21 +460,21 @@ h1 {
 .card .k {
   font-family: var(--font-mono);
   font-weight: 700;
-  font-size: 0.8rem;
+  font-size: var(--fs-sm);
   background: none;
   padding: 0;
 }
 .card p {
   margin: 0.6rem 0 0;
   font-family: var(--font-read);
-  font-size: 0.9rem;
+  font-size: var(--fs-md);
   line-height: 1.55;
   color: var(--ink-2);
 }
 .cmd-meta {
   margin: 0 auto 2.8rem;
   font-family: var(--font-mono);
-  font-size: 0.78rem;
+  font-size: var(--fs-sm);
   color: var(--mid);
 }
 .cmd-meta a {
@@ -488,7 +489,7 @@ h1 {
   margin: 0;
   max-width: 15rem;
   text-align: left;
-  font-size: 0.72rem;
+  font-size: var(--fs-xs);
   line-height: 1.5;
   color: var(--mid);
 }
@@ -498,7 +499,7 @@ h1 {
   text-align: center;
 }
 .layer h2 {
-  font-size: clamp(1.5rem, 3.2vw, 2.1rem);
+  font-size: var(--fs-title);
   line-height: 1.25;
   margin: 0.4rem 0 1.2rem;
 }
@@ -513,7 +514,7 @@ h1 {
 }
 .layer code {
   font-family: var(--font-mono);
-  font-size: 0.92em;
+  font-size: var(--fs-code);
 }
 .file-icons {
   display: flex;
@@ -574,7 +575,7 @@ h1 {
 }
 .fi-name {
   font-family: var(--font-mono);
-  font-size: 0.82rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
   color: var(--ink);
 }
@@ -583,7 +584,7 @@ h1 {
 }
 .fi-tag {
   font-family: var(--font-read);
-  font-size: 0.78rem;
+  font-size: var(--fs-sm);
   color: var(--mid);
 }
 .files-note {
@@ -591,12 +592,12 @@ h1 {
 }
 .files-note code {
   font-family: var(--font-mono);
-  font-size: 0.85em;
+  font-size: var(--fs-code);
 }
 
 /* ── the reveal ── */
 .reveal h2 {
-  font-size: clamp(1.5rem, 3.2vw, 2.1rem);
+  font-size: var(--fs-title);
   line-height: 1.25;
   margin: 0.4rem 0 1.2rem;
 }
@@ -622,12 +623,12 @@ h1 {
   gap: 0.9rem;
   align-items: baseline;
   font-family: var(--font-read);
-  font-size: 0.9rem;
+  font-size: var(--fs-md);
   color: var(--ink-2);
 }
 .verdicts code {
   font-family: var(--font-mono);
-  font-size: 0.8rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
   min-width: 5.5rem;
   background: none;
@@ -638,7 +639,7 @@ h1 {
 .v-you { color: #1f6f8b; }
 .v-bad { color: #9b2c2c; }
 .quiet {
-  font-size: 0.85rem;
+  font-size: var(--fs-sm);
   color: var(--mid);
   margin: 0;
 }
@@ -648,7 +649,7 @@ h1 {
   text-align: center;
 }
 .rm-h {
-  font-size: clamp(1.4rem, 3vw, 2rem);
+  font-size: var(--fs-title);
   line-height: 1.25;
   margin: 0.4rem 0 0;
 }
@@ -698,13 +699,13 @@ h1 {
 }
 .brand-name {
   font-family: var(--font-mono);
-  font-size: 0.8rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
   letter-spacing: -0.01em;
 }
 .rm-note code {
   font-family: var(--font-mono);
-  font-size: 0.85em;
+  font-size: var(--fs-code);
 }
 @media (prefers-reduced-motion: reduce) {
   .marquee {

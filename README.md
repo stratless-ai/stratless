@@ -29,7 +29,7 @@ No account. No API key. No cloud. It reads transcripts already on your disk and 
 ## What it builds
 
 <p align="center">
-  <img src="assets/profile-hero.svg" alt="A sample stratless profile in a terminal: you're talking to a solo founder building stratless; the tech is never what stalls them, altitude is; failure signal is when they redirect after you go abstract; drop the frame and give the next move." width="620">
+  <img src="assets/profile-hero.svg" alt="A sample stratless profile printed in a terminal, in sections: WHAT THEY KNOW, HOW THEY WORK, FAILURE SIGNALS. A settled recommendation gets a terse go or continue; they drive the release pipeline hands-on and check a live artifact against your status report rather than trust it; a dense answer to a narrow question gets a blunt yes/no. Then stratless update loads it and the assistant talks to a person, not a blank." width="620">
 </p>
 
 Run `stratless profile` and it hands your assistant the picture above. Not a rules sheet you wrote. A model of a person, reasoned from your real history, and it sharpens as that history grows.
