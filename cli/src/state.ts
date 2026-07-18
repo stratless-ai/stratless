@@ -170,6 +170,58 @@ export function writeRender(kind: 'profile' | 'report', meta: RenderMeta, file: 
   }
 }
 
+// ── the frozen corpus (report folded into `profile --read`, lazy) ───────────────────────────────
+
+/**
+ * The frozen corpus of the last profile build — everything `profile --read` needs to render the
+ * human-facing note over EXACTLY the evidence the loaded profile saw, never a fresh re-read. That
+ * is the whole fix: `report` used to build separately and describe a different window than the
+ * loaded profile. `builtAt` matches the profile render's `builtAt` — the single staleness key: a
+ * cached read is fresh iff its stamp equals the current profile build's.
+ */
+export interface BuildCorpus {
+  builtAt: string;
+  corpus: { sessions: number; exchanges: number; topics?: string[]; from?: string; to?: string };
+  /** the signal judgments' content hashes — reloaded from the cache at read time, never re-judged */
+  signalHashes: string[];
+}
+
+/** Where the frozen corpus lives. Override with STRATLESS_BUILD (tests). */
+const buildCorpusPath = (): string => process.env.STRATLESS_BUILD || join(homedir(), '.stratless', 'build.json');
+
+/** Missing or corrupt reads as no-frozen-corpus — `--read` then guides to a rebuild, never lies. */
+export function readBuildCorpus(file: string = buildCorpusPath()): BuildCorpus | undefined {
+  try {
+    if (!existsSync(file)) return undefined;
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as Partial<BuildCorpus>;
+    const c = raw.corpus as Partial<BuildCorpus['corpus']> | undefined;
+    if (typeof raw.builtAt !== 'string' || !c || !Array.isArray(raw.signalHashes)) return undefined;
+    if (!Number.isFinite(Number(c.sessions)) || !Number.isFinite(Number(c.exchanges))) return undefined;
+    return {
+      builtAt: raw.builtAt,
+      corpus: {
+        sessions: Number(c.sessions),
+        exchanges: Number(c.exchanges),
+        ...(Array.isArray(c.topics) ? { topics: c.topics.filter((t): t is string => typeof t === 'string') } : {}),
+        ...(typeof c.from === 'string' ? { from: c.from } : {}),
+        ...(typeof c.to === 'string' ? { to: c.to } : {}),
+      },
+      signalHashes: raw.signalHashes.filter((h): h is string => typeof h === 'string'),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Freeze the build's corpus atomically. Best-effort — a lost sidecar costs one `--read` rebuild. */
+export function writeBuildCorpus(b: BuildCorpus, file: string = buildCorpusPath()): void {
+  try {
+    atomicWriteFileSync(file, `${JSON.stringify(b)}\n`);
+  } catch {
+    /* best-effort by design */
+  }
+}
+
 export interface GateDecision {
   due: boolean;
   /** the honest one-phrase why, for the receipt ('' when not due) */

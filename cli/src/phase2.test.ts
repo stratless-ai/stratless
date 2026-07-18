@@ -16,6 +16,7 @@ import { test, before, after } from 'node:test';
 
 import { iterateExchangesNewestFirst } from './exchange.js';
 import { artifactShapeProblem } from './synthesize.js';
+import { PIPELINE_V } from './judge.js';
 import { stopWorker, readLock } from './worker.js';
 import { readProgress } from './progress.js';
 import { readUsage, diffUsage } from './usage.js';
@@ -77,6 +78,7 @@ function makeHome(name: string, files: { exchanges: number; fat?: number }[]): {
     STRATLESS_LOCK: join(st, 'lock'),
     STRATLESS_PROGRESS: join(st, 'progress.json'),
     STRATLESS_RENDERS: join(st, 'renders.json'),
+    STRATLESS_BUILD: join(st, 'build.json'),
     STRATLESS_HUMAN_MD: join(home, '.claude', 'HUMAN.md'),
     STRATLESS_CLAUDE_MD: join(home, '.claude', 'CLAUDE.md'),
   };
@@ -268,6 +270,100 @@ test('strict args: unknown flags refuse loudly with a did-you-mean; clean args s
   const clean = run(['--version']);
   assert.equal(clean.code, 0, 'clean commands still run');
   assert.ok(clean.out.includes('stratless'));
+  // `profile --now` retired: intercepted with a nudge, never a hard error, never a rebuild.
+  const profileNow = run(['profile', '--now']);
+  assert.equal(profileNow.code, 0, 'profile --now is intercepted, not a hard error');
+  assert.ok(/update --now/.test(profileNow.out), 'and points at update --now — profile only looks');
+});
+
+// ── report folded into `profile --read`: lazy, over the profile's FROZEN corpus ────────────────
+// The bug this kills: `report` used to build separately and describe a DIFFERENT window than the
+// loaded profile. Now the read renders over the exact evidence the profile saw, only when asked,
+// and never re-judges a new exchange.
+
+test('fold: `report` redirects; `profile --read` is lazy over the frozen corpus, no re-judge', async () => {
+  const { env } = makeHome('read-home', [{ exchanges: 24 }]);
+  const bin = writeCountingBin('counting-claude-read', 15);
+  const counter = join(dir, 'counter-read');
+  const childEnv = { ...process.env, ...env, STRATLESS_CLAUDE_BIN: bin, FAKE_COUNTER: counter, STRATLESS_JUDGE_LIMIT: '24' };
+
+  // `report` is no longer a command — it redirects to the subfunction and spends nothing.
+  const redirect = execFileSync(process.execPath, [cli, 'report'], { env: childEnv, encoding: 'utf8', timeout: 10_000 });
+  assert.ok(/profile --read/.test(redirect), '`report` points at its new home');
+  assert.equal(existsSync(counter), false, 'the redirect never touches your claude');
+
+  // `--read` before any build guides to a build — never a divergent render.
+  const early = execFileSync(process.execPath, [cli, 'profile', '--read'], { env: childEnv, encoding: 'utf8', timeout: 10_000 });
+  assert.ok(/No profile to read yet/.test(early), 'no build yet → a guide, not a guess');
+
+  const w = spawn(process.execPath, [cli, '__worker', '--now'], { env: childEnv, stdio: 'ignore' });
+  try {
+    assert.equal(await waitTerminal(env, 30_000), 'done', 'the profile builds');
+    // let the worker release its lock before we spend again (progress 'done' precedes the release)
+    for (let i = 0; i < 60 && existsSync(env.STRATLESS_LOCK); i++) await sleep(50);
+
+    const renders1 = JSON.parse(readFileSync(env.STRATLESS_RENDERS, 'utf8'));
+    const frozen = JSON.parse(readFileSync(env.STRATLESS_BUILD, 'utf8'));
+    assert.equal(frozen.builtAt, renders1.profile.builtAt, 'the frozen corpus shares the profile build stamp');
+    assert.ok(Array.isArray(frozen.signalHashes) && frozen.signalHashes.length > 0, 'the signal is frozen by hash');
+    assert.equal(renders1.report, undefined, 'the build does NOT eagerly render the read — it stays lazy');
+
+    const judgedBefore = Number(readFileSync(counter, 'utf8'));
+    const read = execFileSync(process.execPath, [cli, 'profile', '--read'], { env: childEnv, encoding: 'utf8', timeout: 20_000 });
+    assert.ok(/YOUR PATTERN/.test(read), 'the read renders on demand');
+    assert.equal(Number(readFileSync(counter, 'utf8')), judgedBefore, 'the read never judges a new exchange — lazy, no re-read');
+
+    const renders2 = JSON.parse(readFileSync(env.STRATLESS_RENDERS, 'utf8'));
+    assert.equal(renders2.report.builtAt, renders2.profile.builtAt, 'the read describes EXACTLY the loaded profile corpus, same stamp');
+
+    const read2 = execFileSync(process.execPath, [cli, 'profile', '--read'], { env: childEnv, encoding: 'utf8', timeout: 10_000 });
+    assert.ok(/free . from your last build/.test(read2), 'a second read is a pure look — free, no synthesis');
+  } finally {
+    w.kill('SIGKILL');
+  }
+});
+
+// The fold's whole promise is "never a different corpus than the loaded profile". These pin the two
+// ways the frozen corpus can fail to belong to the loaded profile — both must REFUSE, never render.
+test('fold: profile --read refuses a drifted or partly-gone frozen corpus — never a divergent render', () => {
+  const { env } = makeHome('read-refuse', [{ exchanges: 4 }]);
+  const st = join(env.HOME, '.stratless');
+  const read = (): { code: number; out: string } => {
+    try {
+      const out = execFileSync(process.execPath, [cli, 'profile', '--read'], {
+        env: { ...process.env, ...env, STRATLESS_CLAUDE_BIN: process.execPath },
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 10_000,
+      });
+      return { code: 0, out };
+    } catch (err: any) {
+      return { code: err.status ?? 1, out: `${err.stdout ?? ''}${err.stderr ?? ''}` };
+    }
+  };
+
+  // A profile is loaded, built at Y.
+  writeFileSync(env.STRATLESS_RENDERS, JSON.stringify({ profile: { builtAt: 'Y', sessions: 1, exchanges: 2 } }));
+
+  // Case A: the frozen corpus belongs to an OLDER build (X != Y) — a swallowed write, a crash between
+  // the two writes, a downgrade. Rendering it would describe a different window than the loaded profile.
+  writeFileSync(env.STRATLESS_BUILD, JSON.stringify({ builtAt: 'X', corpus: { sessions: 1, exchanges: 2 }, signalHashes: ['h1', 'h2'] }));
+  const drift = read();
+  assert.equal(drift.code, 0, 'a drifted frozen corpus is handled, not crashed');
+  assert.ok(/out of sync/.test(drift.out), 'drifted build.json → refuse + guide, never a divergent render');
+  assert.equal(existsSync(join(st, 'report.txt')), false, 'and nothing is written');
+
+  // Case B: the frozen corpus matches the profile (Y), but only ONE of its two frozen hashes survives
+  // in the cache (a PIPELINE_V drain / edited cache). A partial render would overstate the corpus.
+  writeFileSync(env.STRATLESS_BUILD, JSON.stringify({ builtAt: 'Y', corpus: { sessions: 1, exchanges: 2 }, signalHashes: ['h1', 'h2'] }));
+  writeFileSync(
+    env.STRATLESS_CACHE,
+    JSON.stringify({ h1: { hash: 'h1', ts: '2026-07-18T00:00:00Z', session: 's1', v: PIPELINE_V, verdict: 'transferred', topic: 't', behavior: 'b', line: 'transferred, t, b' } }),
+  );
+  const partial = read();
+  assert.equal(partial.code, 0);
+  assert.ok(/no longer fully in the cache/.test(partial.out), 'a partial frozen reload → refuse, never overstate the corpus');
+  assert.equal(existsSync(join(st, 'report.txt')), false, 'still nothing written');
 });
 
 // ── The artifact-shape lint (C9's second half): chatter never loads again ──────────────────────

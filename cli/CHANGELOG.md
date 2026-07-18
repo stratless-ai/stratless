@@ -4,6 +4,20 @@ All notable changes to `stratless` are recorded here — written by hand, for th
 not scraped from commits. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and each version matches its `cli-v*` git tag.
 
+## [Unreleased]
+
+### Changed
+- **`report` folded into `profile --read`.** The human-facing prose copy is now a subfunction of
+  `profile`, not its own command, and it renders LAZILY: your profile earns the build, and the read
+  is written only when you ask for it, once per build, over exactly the evidence the loaded profile
+  saw. It can no longer describe a different window than the profile you are running, and it never
+  re-reads your history. Typing `stratless report` points you at `stratless profile --read`.
+- **`profile --now` retired.** `profile` now only *looks* — one clear rule, `profile` looks and
+  `update` loads. The old `profile --now` was a paid look that never loaded and never re-mined (it
+  re-synthesized from stale patterns), so it could show a fresh-looking profile your assistant never
+  saw. To rebuild and load, use `stratless update` (or `update --now` to force it). Typing
+  `profile --now` points you there.
+
 ## [0.3.5] — 2026-07-18 — the worker: the work moves off your terminal
 
 Phase 2 of the cold-start build. The machinery no longer lives inside the command you typed — it

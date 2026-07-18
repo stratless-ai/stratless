@@ -19,7 +19,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parseExchanges, loadRecentExchanges, findExchange } from './exchange.js';
 import { injectProfile, removeProfile, ensureLoaded } from './sink.js';
-import { readState, writeState, synthesisDue, readRenders, writeRender } from './state.js';
+import { readState, writeState, synthesisDue, readRenders, writeRender, readBuildCorpus, writeBuildCorpus } from './state.js';
 import { pendingCount, PIPELINE_V as PV } from './judge.js';
 import {
   aggregate,
@@ -381,6 +381,25 @@ test('renders sidecar: round-trips build facts; missing/corrupt = build path, ne
   const r = readRenders(f);
   assert.equal(r.profile?.exchanges, 119, "the header's numbers come from the BUILD, stored not recomputed");
   assert.equal(r.report?.builtAt, '2026-07-17T11:00:00Z', 'each rendering keeps its own build facts');
+});
+
+test('build corpus: the frozen corpus round-trips; the build stamp is the staleness key', () => {
+  const f = join(dir, 'build.json');
+  assert.equal(readBuildCorpus(f), undefined, 'missing = no frozen corpus (so `--read` guides to a build, never guesses)');
+  writeFileSync(f, '{ not json');
+  assert.equal(readBuildCorpus(f), undefined, 'corrupt = none, never a throw');
+  const b = {
+    builtAt: '2026-07-18T03:00:00Z',
+    corpus: { sessions: 5, exchanges: 164, topics: ['deploys'], from: '2026-07-15', to: '2026-07-18' },
+    signalHashes: ['aa', 'bb', 'cc'],
+  };
+  writeBuildCorpus(b, f);
+  const got = readBuildCorpus(f);
+  assert.equal(got?.builtAt, b.builtAt, 'the build stamp survives — `--read` is fresh iff it matches the profile build');
+  assert.equal(got?.corpus.exchanges, 164, 'the corpus the read renders over is frozen, not recomputed');
+  assert.deepEqual(got?.signalHashes, ['aa', 'bb', 'cc'], 'the exact signal membership round-trips (reloaded by hash, never re-judged)');
+  writeFileSync(f, JSON.stringify({ builtAt: 'x', corpus: { sessions: 1 } }));
+  assert.equal(readBuildCorpus(f), undefined, 'a corpus missing its counts or its hashes reads as none, never a half-truth');
 });
 
 test('pendingCount: the pre-spend disclosure counts the cache diff, bounded by the budget', () => {

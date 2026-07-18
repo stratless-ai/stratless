@@ -25,8 +25,7 @@ That does two things, and the first one is urgent:
 
 ```
 stratless init       keep your history safe (add --auto for background refresh)
-stratless profile    see the model of you (profile looks; update loads)
-stratless report     the same picture, written for you to read
+stratless profile    see the model of you (--read: your copy; profile looks, update loads)
 stratless update     judge what's new; rebuild + load the profile when due (--now: always)
 stratless patterns   the evidence behind your profile: every claim with its receipts
 stratless stop       turn it off, and unload the profile

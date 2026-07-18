@@ -116,7 +116,6 @@ useSeo({
           <span class="pn-k">← Previous</span>
           <span class="pn-t">{{ prev.label }}</span>
         </NuxtLink>
-        <span v-else />
         <NuxtLink v-if="next" :to="next.to" class="pn pn-next">
           <span class="pn-k">Next →</span>
           <span class="pn-t">{{ next.label }}</span>
@@ -224,10 +223,11 @@ useSeo({
 .toc-link:hover {
   color: var(--accent-deep);
 }
-/* prev / next */
+/* prev / next — the site's button language: 1.5px ink border + hard offset shadow,
+   hover-lift and press like .btn. Flex (not a 1fr/1fr grid) so a solo card hugs its
+   side as a real button instead of stranding a half-width panel with an empty half. */
 .docs-pn {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
   gap: 1rem;
   margin-top: 3rem;
   padding-top: 1.5rem;
@@ -236,29 +236,45 @@ useSeo({
 .pn {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 0.1rem;
+  min-width: 11.5rem; /* the .btn footprint — a consistent button size, not a stretched panel */
+  max-width: 24rem;
   text-decoration: none;
-  padding: 0.7rem 0.9rem;
-  border: 1px solid rgba(21, 20, 15, 0.25);
+  padding: 0.55rem 0.9rem;
+  border: 1.5px solid var(--ink);
   border-radius: var(--radius);
-  transition: border-color var(--dur) ease;
+  background: var(--paper-2);
+  box-shadow: var(--shadow);
+  transition:
+    transform var(--dur) ease,
+    box-shadow var(--dur) ease;
 }
 .pn:hover {
-  border-color: var(--ink);
+  transform: translate(-1px, -1px);
+  box-shadow: var(--shadow-lg);
+}
+.pn:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 var(--ink);
 }
 .pn-next {
+  margin-left: auto; /* pushes Next to the right edge; a solo Next lands right, a solo Prev stays left */
   text-align: right;
 }
 .pn-k {
   font-family: var(--font-mono);
-  font-size: 0.66rem;
-  letter-spacing: 0.08em;
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.1em;
+  line-height: 1.3;
   text-transform: uppercase;
   color: var(--mid);
 }
 .pn-t {
-  font-family: var(--font-read);
-  font-size: 0.92rem;
+  font-family: var(--font-mono);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
   color: var(--accent-deep);
 }
 .docs-cta {
@@ -287,6 +303,19 @@ useSeo({
     position: static;
     border-bottom: 1.5px solid var(--ink);
     padding-bottom: 1rem;
+  }
+}
+@media (max-width: 560px) {
+  /* stack the pager so two 11.5rem button-cards never overflow a phone */
+  .docs-pn {
+    flex-direction: column;
+  }
+  .pn {
+    max-width: none;
+  }
+  .pn-next {
+    margin-left: 0;
+    text-align: left;
   }
 }
 </style>

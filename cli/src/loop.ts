@@ -29,7 +29,7 @@ import { mine, auditPatterns, gradePatterns, loadPatterns } from './miner.js';
 import { dailyCheck } from './notify.js';
 import { refreshArmed } from './init.js';
 import { injectProfile, ensureLoaded, humanMdPath } from './sink.js';
-import { readState, writeState, synthesisDue, writeRender, SYNTH_EVERY } from './state.js';
+import { readState, writeState, synthesisDue, writeRender, writeBuildCorpus, SYNTH_EVERY } from './state.js';
 import { startRun } from './stopwatch.js';
 import { readUsage, diffUsage, fmtTokens } from './usage.js';
 import { killActiveSession } from './stream.js';
@@ -265,14 +265,18 @@ export async function runWorker(opts: { force?: boolean } = {}): Promise<number>
           return fail(['could not build the profile — the assistant returned nothing; silence beats a guess']);
         }
 
+        const builtAt = new Date().toISOString();
         atomicWriteFileSync(join(STRATLESS_DIR, 'profile.txt'), `${built.text}\n`);
-        writeRender('profile', { builtAt: new Date().toISOString(), sessions, exchanges: signal.length });
+        writeRender('profile', { builtAt, sessions, exchanges: signal.length });
+        // Freeze this build's corpus so `profile --read` can render the human-facing note over
+        // EXACTLY this evidence later (lazy, no re-read) — never a divergent window.
+        writeBuildCorpus({ builtAt, corpus, signalHashes: signal.map((j) => j.hash) });
         const { humanMd, claudeMd } = injectProfile(built.text);
         writeState({
           ...readState(),
-          lastSynthesisAt: new Date().toISOString(),
+          lastSynthesisAt: builtAt,
           judgmentsAtLastSynthesis: cachedCount(),
-          aperture: { ...aperture, computedAt: new Date().toISOString() },
+          aperture: { ...aperture, computedAt: builtAt },
         });
 
         const why = force ? 'forced with --now' : noProfile ? 'first load' : gate.reason;
