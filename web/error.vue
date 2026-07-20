@@ -7,8 +7,14 @@
  * design system.
  *
  * The STATIC 404 (a cold load on a bad URL, which is the common case) is handled separately:
- * pages/404.vue + the prerender hook in nuxt.config.ts. Both render <NotFound />, so there is
+ * pages/not-found.vue + the prerender hook in nuxt.config.ts. Both render <NotFound />, so there is
  * one definition of the page.
+ *
+ * The chrome here is <SiteHeader /> + <SiteFooter />, the same components the layout uses. It used
+ * to be a hand-copied header, which by 2026-07-20 had drifted into three real defects (no sticky
+ * positioning, nav links still visible on mobile, no skip link). Nuxt error boundaries CAN render
+ * layouts via <NuxtLayout>, but sharing the components keeps this file's own <main> centring — the
+ * one thing it legitimately does differently.
  */
 import type { NuxtError } from '#app'
 
@@ -18,16 +24,8 @@ useHead({ title: `${props.error?.statusCode ?? 'Error'} — stratless` })
 
 <template>
   <div class="site">
-    <header class="nav">
-      <div class="nav-inner">
-        <Logo :height="24" />
-        <nav class="nav-right">
-          <NuxtLink to="/docs">Docs</NuxtLink>
-          <a href="https://github.com/stratless-ai/stratless" target="_blank" rel="noopener">GitHub</a>
-        </nav>
-      </div>
-    </header>
-    <main>
+    <SiteHeader />
+    <main id="main">
       <NotFound :code="error?.statusCode ?? 500" :message="error?.message" />
     </main>
     <SiteFooter />
@@ -35,11 +33,15 @@ useHead({ title: `${props.error?.statusCode ?? 'Error'} — stratless` })
 </template>
 
 <style scoped>
-.site { min-height: 100vh; display: flex; flex-direction: column; }
-.nav { background: color-mix(in srgb, var(--paper) 85%, transparent); backdrop-filter: blur(6px); }
-.nav-inner { display: flex; align-items: center; justify-content: space-between; height: 58px; width: 100%; padding: 0 1.4rem 0 1.9rem; }
-.nav-right { display: flex; align-items: center; gap: 1.4rem; font-size: 0.9rem; }
-.nav-right a { font-weight: 500; text-decoration: none; color: var(--ink); }
-.nav-right a:hover { text-decoration: underline; }
-main { flex: 1; display: flex; align-items: center; }
+.site {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+/* the one deliberate difference from the layout: the error body is vertically centred */
+main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
 </style>
