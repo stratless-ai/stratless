@@ -13,10 +13,8 @@
  * Nothing here is generated. Every field is quoted from the log. The judging lives in judge.ts.
  */
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { basename, join } from 'node:path';
-import { hasToolResult, isRealPrompt, textOf } from './transcript.js';
+import { basename } from 'node:path';
+import { DEFAULT_ROOTS, readSessions, turnsOfFile, type Turn } from './reader.js';
 
 /** One (AI turn → human reaction) pair. */
 export interface Exchange {
@@ -32,6 +30,18 @@ export interface Exchange {
   session: string;
   /** stable content hash — the cache key. Read once, ever. */
   hash: string;
+  /**
+   * WHAT THE PERSON DID WITH THEIR HANDS between the prompt and the reaction — recorded fact, not
+   * inference. Deliberately OUTSIDE the hash: adding these must not orphan a single cached
+   * judgment (measured: 436 of 496 survive the move to the shared reader; only the 60 whose text
+   * genuinely changed re-judge).
+   *
+   * `interrupted` is 'plain' (Escape mid-generation — a spontaneous course correction) or
+   * 'tool-use' (the tail of a permission decline). They are NOT the same event.
+   */
+  interrupted?: 'plain' | 'tool-use';
+  /** the person declined a tool during this turn */
+  declined?: boolean;
 }
 
 /** The parse-time cap per field — the IDENTITY layer: capped text is what gets hashed, so this
@@ -47,133 +57,97 @@ function hashOf(prompt: string, said: string, reaction: string): string {
   return createHash('sha256').update(`${prompt}\0${said}\0${reaction}`).digest('hex').slice(0, 16);
 }
 
-/** Parse one session transcript into its (AI turn → human reaction) pairs. */
-export function parseExchanges(path: string): Exchange[] {
+/**
+ * Pair one session's clean turns into (AI turn → human reaction) exchanges.
+ *
+ * Each real human message is BOTH the reaction to the turn before it AND the prompt for the turn
+ * after, so we carry the last message forward, accumulate what the assistant says, and close a pair
+ * the instant the human speaks again. A pair only counts if the person asked something AND the
+ * assistant actually said something back: a turn where it only ran tools has no understanding to
+ * transfer, so there is nothing to judge.
+ *
+ * Control actions seen while the assistant was talking ride along on the exchange they belong to.
+ */
+export function exchangesOfTurns(turns: Turn[], session: string): Exchange[] {
   const out: Exchange[] = [];
-  const session = basename(path, '.jsonl');
-
-  let prompt = ''; // the human message that opened the current turn
-  let said: string[] = []; // assistant text accumulated since then
+  let prompt = '';
+  let said: string[] = [];
   let saidTs = '';
+  let interrupted: 'plain' | 'tool-use' | undefined;
+  let declined = false;
 
-  for (const line of readFileSync(path, 'utf8').split('\n')) {
-    if (!line.trim()) continue;
-    let d: any;
-    try {
-      d = JSON.parse(line);
-    } catch {
-      continue; // a truncated final line is normal; skip it
-    }
-    if (d.isSidechain || d.isMeta) continue; // subagents aren't the person's conversation
-
-    const content = d.message?.content;
-
-    if (d.type === 'user') {
-      if (hasToolResult(content)) continue; // tool output, not the human
-      const s = textOf(content).trim();
-      if (!isRealPrompt(s)) continue;
-
-      // The human just spoke: close the turn that was open. It only counts if the person had
-      // asked something AND the assistant actually said something back — a turn where the
-      // assistant only ran tools has no understanding to transfer, so there's nothing to judge.
-      // `said` keeps its TAIL (slice(-CAP)): the reaction answers the end, not the preamble.
-      const saidText = said.join('\n').trim().slice(-CAP);
-      if (prompt && saidText) {
-        const p = prompt.slice(0, CAP);
-        const r = s.slice(0, CAP);
-        out.push({ prompt: p, said: saidText, reaction: r, ts: d.timestamp ?? saidTs, session, hash: hashOf(p, saidText, r) });
-      }
-      prompt = s;
-      said = [];
+  for (const t of turns) {
+    if (t.role === 'assistant') {
+      if (t.ts) saidTs = t.ts;
+      if (t.text) said.push(t.text);
       continue;
     }
-
-    if (d.type !== 'assistant' || !Array.isArray(content)) continue;
-    if (d.timestamp) saidTs = d.timestamp;
-    for (const b of content) {
-      if (typeof b === 'object' && b !== null && b.type === 'text' && typeof b.text === 'string' && b.text.trim()) {
-        said.push(b.text.trim());
-      }
+    // Control actions are not messages — they annotate the turn in flight.
+    if (t.interrupted) {
+      interrupted = t.interruptKind ?? 'plain';
+      continue;
     }
+    if (t.denial === 'user-rejected') declined = true;
+    if (!t.text) continue;
+
+    // `said` keeps its TAIL: the reaction answers the end of the turn, not its preamble.
+    const saidText = said.join('\n').trim().slice(-CAP);
+    if (prompt && saidText) {
+      const p = prompt.slice(0, CAP);
+      const r = t.text.slice(0, CAP);
+      out.push({
+        prompt: p,
+        said: saidText,
+        reaction: r,
+        ts: t.ts || saidTs,
+        session,
+        hash: hashOf(p, saidText, r),
+        ...(interrupted ? { interrupted } : {}),
+        ...(declined ? { declined } : {}),
+      });
+    }
+    prompt = t.text;
+    said = [];
+    interrupted = undefined;
+    declined = false;
   }
   return out;
 }
 
-const PROJECTS = join(homedir(), '.claude', 'projects');
-const ARCHIVE = join(homedir(), '.stratless', 'archive');
-
-/** Every .jsonl under a root, at any depth (subagent transcripts nest). */
-export function allJsonl(dir: string, out: string[] = []): string[] {
-  if (!existsSync(dir)) return out;
-  for (const name of readdirSync(dir)) {
-    const p = join(dir, name);
-    if (statSync(p).isDirectory()) allJsonl(p, out);
-    else if (name.endsWith('.jsonl')) out.push(p);
-  }
-  return out;
+/** One transcript's exchanges. Kept as a named seam so a single file can be parsed directly. */
+export function parseExchanges(path: string): Exchange[] {
+  return exchangesOfTurns(turnsOfFile(path), basename(path, '.jsonl'));
 }
 
-/** Hard ceiling on bytes read in one pass. The profile only needs the recent window, and reading the
- *  whole corpus (which can be many gigabytes) just to keep the last few hundred is what hung low-memory
- *  machines. This bounds peak memory no matter how the history is shaped. */
-const CAP_BYTES = 96 * 1024 * 1024;
-/** A file's mtime only APPROXIMATES its newest exchange's ts, so once we have enough we read a few more
- *  files before trusting the boundary — cheap insurance against a slightly-wrong window edge. */
+/** A file's mtime only APPROXIMATES its newest exchange's ts, so once we have enough we read a few
+ *  more sessions before trusting the boundary — cheap insurance against a wrong window edge. */
 const FILE_MARGIN = 4;
 
 /**
- * The most recent `want` exchanges, loaded CHEAPLY — newest transcripts first, stopping the moment we
- * have enough. The profile is a model of a PERSON across the whole corpus, but it only ever needs the
- * recent window (see JUDGE_WINDOW in index.ts); the corpus itself can be thousands of files and gigabytes.
- * Reading ALL of it just to keep the last 200 is what took machines down. This touches only the handful of
- * most-recently-written transcripts it takes to fill `want`, bounded hard by CAP_BYTES — never the tail.
- *
- * `roots` defaults to the live logs (`~/.claude/projects`, which `init` keeps the reaper from thinning)
- * unioned with the archive (`~/.stratless/archive`); the same session in both dedupes by content hash.
- * It is a parameter so tests can point the loader at a temp dir.
+ * The most recent `want` exchanges. reader.ts offers sessions newest-modified first, so this stops
+ * the moment it has enough plus a margin — it never walks the tail of a multi-gigabyte corpus.
  */
 export function loadRecentExchanges(
   want: number,
-  roots: string[] = [PROJECTS, ARCHIVE],
-  opts: { capBytes?: number; fileMargin?: number } = {},
+  roots: string[] = DEFAULT_ROOTS,
+  opts: { fileMargin?: number } = {},
 ): Exchange[] {
-  const capBytes = opts.capBytes ?? CAP_BYTES;
   const fileMargin = opts.fileMargin ?? FILE_MARGIN;
-  // newest-modified transcripts first — their tails hold the newest exchanges
-  const files = roots
-    .flatMap((r) => allJsonl(r))
-    .map((p) => {
-      try {
-        const s = statSync(p);
-        return { p, mtime: s.mtimeMs, size: s.size };
-      } catch {
-        return { p, mtime: 0, size: 0 };
-      }
-    })
-    .sort((a, b) => b.mtime - a.mtime);
-
   const seen = new Set<string>();
   const all: Exchange[] = [];
-  let bytes = 0;
+  let i = 0;
   let enoughAt = -1;
-  for (let i = 0; i < files.length; i++) {
-    if (bytes >= capBytes) break; // memory backstop — never read more than this in one pass
-    bytes += files[i].size;
-    let ex: Exchange[];
-    try {
-      ex = parseExchanges(files[i].p);
-    } catch {
-      continue; // one unreadable file must not sink the whole read
-    }
-    for (const e of ex) {
+  for (const session of readSessions(roots)) {
+    for (const e of exchangesOfTurns(session.turns, basename(session.path, '.jsonl'))) {
       if (seen.has(e.hash)) continue;
       seen.add(e.hash);
       all.push(e);
     }
     if (all.length >= want) {
       if (enoughAt < 0) enoughAt = i;
-      if (i - enoughAt >= fileMargin) break; // have enough + a margin — stop before the archive tail
+      if (i - enoughAt >= fileMargin) break;
     }
+    i++;
   }
   all.sort((a, b) => a.ts.localeCompare(b.ts));
   return all.slice(-want);
@@ -184,74 +158,40 @@ export function sessionCount(exchanges: Exchange[]): number {
   return new Set(exchanges.map((e) => e.session)).size;
 }
 
-/** Refuse to slurp any single pathological file — C1's per-file cap, applied at the iterator. */
-const SINGLE_FILE_CAP = 96 * 1024 * 1024;
-
 /**
- * THE FLAT-MEMORY WALK (Phase 2, C1) — every exchange, newest files first, ONE file in memory at
- * a time. `loadRecentExchanges` above bounds a WINDOW read; this is the unbounded walk the
- * cold-start read (newest-first to the floor, Phase 3) and the backfill cursor (Phase 4) consume:
- * RSS stays flat whether the archive holds 200 exchanges or 20,000, because nothing ever holds
- * more than one parsed transcript plus the dedup set of seen hashes. Order is newest-first by
- * file mtime, then newest-first within each file — the same approximation the window loader
- * trusts, exact enough for evidence that is keyed by its own timestamp anyway.
+ * Every exchange, newest-first, one at a time — the flat-memory walk (C1) for a full-corpus read.
+ * Nothing accumulates but the dedup set.
  */
-export function* iterateExchangesNewestFirst(roots: string[] = [PROJECTS, ARCHIVE]): Generator<Exchange> {
-  const files = roots
-    .flatMap((r) => allJsonl(r))
-    .map((p) => {
-      try {
-        const s = statSync(p);
-        return { p, mtime: s.mtimeMs, size: s.size };
-      } catch {
-        return { p, mtime: 0, size: 0 };
-      }
-    })
-    .sort((a, b) => b.mtime - a.mtime);
-
+export function* iterateExchangesNewestFirst(roots: string[] = DEFAULT_ROOTS): Generator<Exchange> {
   const seen = new Set<string>();
-  for (const f of files) {
-    if (f.size > SINGLE_FILE_CAP) continue; // a 100MB "transcript" is not a transcript
-    let ex: Exchange[];
-    try {
-      ex = parseExchanges(f.p);
-    } catch {
-      continue; // one unreadable file must not sink the walk
-    }
-    for (let i = ex.length - 1; i >= 0; i--) {
-      // within a file, newest exchanges are last — yield them first
-      const e = ex[i];
-      if (seen.has(e.hash)) continue;
-      seen.add(e.hash);
-      yield e;
+  for (const session of readSessions(roots)) {
+    const ex = exchangesOfTurns(session.turns, basename(session.path, '.jsonl'));
+    for (let k = ex.length - 1; k >= 0; k--) {
+      if (seen.has(ex[k].hash)) continue;
+      seen.add(ex[k].hash);
+      yield ex[k];
     }
   }
 }
 
 /**
- * Dereference one receipt back to its raw exchange — the `stratless receipt` machinery.
+ * Find one exchange by hash — the receipt path, dereferencing a judgment back to the raw words.
  *
- * Exchange TEXT is not in judgments.json (only the hash and the session id are), so we re-derive:
- * find the transcript file whose name carries the session id — ARCHIVE FIRST (reaper-proof), then
- * the live projects — and re-parse it to the matching hash. Session-targeted, never a full-corpus
- * scan. Returns undefined when the transcript no longer exists anywhere: the honest-failure case
- * the receipt command turns into an init lesson (this is exactly what init protects against).
+ * The HASH is what identifies an exchange; `session` is only a hint and is deliberately not used as
+ * a filter. It cannot be: `session` is now the record's own sessionId (so the live copy and the
+ * archived copy of one session finally agree), while judgments cached before that change carry the
+ * old filename-derived value. Matching on hash alone keeps every existing receipt dereferenceable.
+ *
+ * Returns undefined when the transcript is gone — the reaper took it — which the caller reports
+ * honestly rather than guessing at.
  */
-export function findExchange(
-  session: string,
-  hash: string,
-  roots: string[] = [ARCHIVE, PROJECTS],
-): Exchange | undefined {
-  for (const root of roots) {
-    for (const file of allJsonl(root)) {
-      if (!basename(file).includes(session)) continue;
-      try {
-        const hit = parseExchanges(file).find((e) => e.hash === hash);
-        if (hit) return hit;
-      } catch {
-        /* an unreadable candidate must not sink the lookup — keep searching */
-      }
-    }
+export function findExchange(session: string, hash: string, roots: string[] = DEFAULT_ROOTS): Exchange | undefined {
+  for (const s of readSessions(roots)) {
+    const name = basename(s.path, '.jsonl');
+    // Tolerant of either naming: the file's name (what the cache stores) or the record's own
+    // sessionId. A receipt written before or after this refactor dereferences the same way.
+    if (name !== session && s.session !== session) continue;
+    for (const e of exchangesOfTurns(s.turns, name)) if (e.hash === hash) return e;
   }
   return undefined;
 }

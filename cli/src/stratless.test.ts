@@ -41,7 +41,7 @@ import {
 import { readUsage, recordUsage } from './usage.js';
 import { CorruptStoreError } from './atomic.js';
 import { parseJsonResult } from './claude.js';
-import { hasSignal, inventedNumbers, renderPatternSheet, renderSurprises, stripPreamble } from './synthesize.js';
+import { inventedNumbers, renderPatternSheet, renderSurprises, stripPreamble } from './synthesize.js';
 import {
   cachedCount,
   cacheHealth,
@@ -51,7 +51,6 @@ import {
   currentJudgment,
   fitAperture,
   PIPELINE_V,
-  type Verdict,
 } from './judge.js';
 import { installStopHook, readSettings } from './init.js';
 
@@ -144,6 +143,53 @@ const u = (text: string, ts = '2026-07-01T10:00:00Z') =>
   JSON.stringify({ type: 'user', message: { content: text }, timestamp: ts });
 const a = (text: string, ts = '2026-07-01T10:00:05Z') =>
   JSON.stringify({ type: 'assistant', timestamp: ts, message: { content: [{ type: 'text', text }] } });
+
+// ── control actions: recorded facts, carried but never hashed ───────────────────────────────────
+
+const interruptRec = (kind: 'plain' | 'tool-use' = 'plain') =>
+  JSON.stringify({
+    type: 'user',
+    timestamp: '2026-07-01T10:00:03Z',
+    message: { content: kind === 'tool-use' ? '[Request interrupted by user for tool use]' : '[Request interrupted by user]' },
+  });
+const denyRec = () =>
+  JSON.stringify({ type: 'user', timestamp: '2026-07-01T10:00:03Z', toolDenialKind: 'user-rejected', message: { content: '' } });
+
+test('THE HASH IGNORES CONTROL ACTIONS — adding them must not orphan a cached judgment', () => {
+  const plain = parseExchanges(writeTranscript('plain.jsonl', [u('why a queue?'), a('bursts outrun the worker'), u('ok that lands')].join('\n')));
+  const withInt = parseExchanges(
+    writeTranscript('withint.jsonl', [u('why a queue?'), a('bursts outrun the worker'), interruptRec(), u('ok that lands')].join('\n')),
+  );
+  assert.equal(plain.length, 1);
+  assert.equal(withInt.length, 1);
+  assert.equal(withInt[0].hash, plain[0].hash, 'same words = same hash, whatever the person did with their hands');
+  assert.equal(plain[0].interrupted, undefined);
+  assert.equal(withInt[0].interrupted, 'plain', 'but the fact is carried');
+});
+
+test('the two interrupt kinds are distinguished, not merged', () => {
+  const ex = parseExchanges(
+    writeTranscript('kinds.jsonl', [u('run the deploy'), a('starting'), interruptRec('tool-use'), u('no, stop')].join('\n')),
+  );
+  assert.equal(ex[0].interrupted, 'tool-use', 'the permission-flow variant is not a spontaneous course correction');
+});
+
+test('a declined tool is recorded on the exchange it happened in', () => {
+  const ex = parseExchanges(writeTranscript('deny.jsonl', [u('push it'), a('running git push'), denyRec(), u('not yet')].join('\n')));
+  assert.equal(ex[0].declined, true);
+});
+
+test('control actions do not leak into the NEXT exchange', () => {
+  const ex = parseExchanges(
+    writeTranscript(
+      'leak.jsonl',
+      [u('first ask'), a('first answer'), interruptRec(), u('second ask'), a('second answer'), u('third')].join('\n'),
+    ),
+  );
+  assert.equal(ex.length, 2);
+  assert.equal(ex[0].interrupted, 'plain', 'the interrupt belongs to the turn it happened in');
+  assert.equal(ex[1].interrupted, undefined, 'and is cleared before the next one');
+});
 
 test('each real human message is the reaction to one turn AND the prompt for the next', () => {
   const p = writeTranscript(
@@ -446,8 +492,8 @@ test('judgeTurnBody carries no rules — the rules ride the system prompt, once 
   const ex = { prompt: 'why?', said: 'because', reaction: 'ok', ts: '', session: 's', hash: 'h' };
   const body = judgeTurnBody(ex);
   assert.ok(body.includes('PERSON ASKED'), 'the exchange rendering is there');
-  assert.ok(!body.includes('verdict'), 'no instructions inside the turn body');
-  assert.ok(judgeInput(ex).includes('verdict'), 'the one-shot fallback still carries the rules');
+  assert.ok(!body.includes('THE SUBJECT OF THAT SENTENCE'), 'no instructions inside the turn body');
+  assert.ok(judgeInput(ex).includes('THE SUBJECT OF THAT SENTENCE'), 'the one-shot fallback still carries the rules');
 });
 
 /** A fake `claude` that speaks the stream-json protocol — executable, shebang'd, argv-ignoring. */
@@ -970,44 +1016,82 @@ test('recordUsage tolerates missing fields — a JSON payload without usage stil
   assert.equal(t.costUsd, 0);
 });
 
-const j2 = (verdict: Verdict, topic = 'a topic', behavior = 'what they did') => ({
+const j2 = (topic = 'a topic', behavior = 'what they did') => ({
   hash: 'x',
   ts: '2026-07-01T10:00:00Z',
   session: 's',
   v: PIPELINE_V,
-  verdict,
   topic,
   behavior,
-  line: `${verdict} — ${topic} — ${behavior}`,
+  line: `${topic} — ${behavior}`,
 });
 
-test('`none` judgments carry no signal and never reach the writer', () => {
-  assert.equal(hasSignal(j2('none')), false, 'a none verdict is filtered — read from the field, not the line');
-  assert.equal(hasSignal(j2('transferred')), true);
-  assert.equal(hasSignal(j2('no')), true, '`no` IS signal — it did not land');
-  assert.equal(hasSignal(j2('partial')), true);
+test('EVERY judgment reaches the writer — the `none` gate is gone with the verdict', () => {
+  // The gate dropped 11% of evidence, including "gave explicit go-ahead to merge" and "executed the
+  // manual steps and reported completion" — exactly what HOW THEY WORK is built from.
+  assert.ok(currentJudgment(j2()), 'a judgment with no verdict field is valid');
+  assert.equal(currentJudgment({ ...j2(), v: 1 }), false, 'a v1 entry is still stale');
+  assert.equal(currentJudgment({ ...j2(), behavior: undefined } as never), false, 'behavior is required');
 });
 
 // ── judgment v2: strict FORM guaranteed in code, free VOCABULARY in the fields ─────────────────
 
 test('parseJudgeOutput: valid JSON parses into validated fields', () => {
-  const p = parseJudgeOutput('{"verdict":"partial","topic":"the deploy step","behavior":"accepted but pivoted to cost"}');
+  const p = parseJudgeOutput('{"topic":"the deploy step","behavior":"accepted but pivoted to cost"}');
   assert.ok(p, 'well-formed output parses');
-  assert.equal(p.verdict, 'partial');
   assert.equal(p.topic, 'the deploy step');
   assert.equal(p.behavior, 'accepted but pivoted to cost');
 });
 
-test('parseJudgeOutput: tolerates prose around the JSON, refuses bad form — silence over guess', () => {
+test('parseJudgeOutput: tolerates prose and stale fields, refuses a missing one', () => {
   assert.ok(
-    parseJudgeOutput('Here is my judgment: {"verdict":"no","topic":"JWT expiry","behavior":"re-asked"} hope that helps'),
+    parseJudgeOutput('Here is my judgment: {"topic":"JWT expiry","behavior":"re-asked"} hope that helps'),
     'the first {...} block wins even when the model chats',
   );
-  assert.equal(parseJudgeOutput('{"verdict":"maybe","topic":"x","behavior":"y"}'), undefined, 'unknown verdict = refuse');
-  assert.equal(parseJudgeOutput('{"verdict":"no","topic":"x"}'), undefined, 'missing behavior = refuse');
-  assert.equal(parseJudgeOutput('transferred — an old v1 line — moved on'), undefined, 'v1 line format = refuse, re-judge');
-  const none = parseJudgeOutput('{"verdict":"none","topic":"","behavior":"said thanks and committed"}');
-  assert.ok(none && none.topic === 'no signal', 'a none verdict may carry an empty topic — defaulted, never refused');
+  assert.ok(
+    parseJudgeOutput('{"verdict":"maybe","topic":"x","behavior":"y"}'),
+    'a leftover verdict field is ignored, never a reason to refuse — the old shape is a superset',
+  );
+  assert.equal(parseJudgeOutput('{"topic":"x"}'), undefined, 'missing behavior = refuse');
+  assert.equal(parseJudgeOutput('{"behavior":"y"}'), undefined, 'missing topic = refuse');
+  assert.equal(parseJudgeOutput('transferred — an old v1 line — moved on'), undefined, 'no JSON = refuse, re-judge');
+});
+
+test('parseJudgeOutput: an over-long field is cut at a word boundary, never mid-word', () => {
+  // Measured 2026-07-19: 16% of behaviors hit the cap and were amputated mid-word ("…based on
+  // act"). Behavior text is what the miner mines, so half a word is damaged evidence.
+  const long = `${'alpha bravo charlie delta echo foxtrot golf hotel '.repeat(8)}terminus`;
+  const p = parseJudgeOutput(`{"verdict":"no","topic":"t","behavior":"${long}"}`);
+  assert.ok(p, 'an over-long behavior still parses');
+  assert.ok(p.behavior.length <= 240, 'still bounded by the backstop cap');
+  assert.ok(!/\s$/.test(p.behavior), 'no trailing whitespace at the cut');
+  assert.ok(
+    long.startsWith(p.behavior),
+    'the kept text is a genuine prefix of what the model said — never re-worded',
+  );
+  const lastWord = p.behavior.slice(p.behavior.lastIndexOf(' ') + 1);
+  assert.ok(
+    ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel'].includes(lastWord),
+    `cut landed on a whole word, got "${lastWord}"`,
+  );
+});
+
+test('parseJudgeOutput: a dangling quote is dropped, a matched pair is kept', () => {
+  // Observed 2026-07-19: behaviors arriving as `…moved on"` — one quote, no opener. But the model
+  // quotes the person legitimately and often, so the test is PARITY, not "strip quotes".
+  const dangling = parseJudgeOutput('{"verdict":"none","topic":"t","behavior":"confirmed and moved on\\""}');
+  assert.equal(dangling?.behavior, 'confirmed and moved on', 'an unmatched trailing quote is noise');
+
+  const paired = parseJudgeOutput('{"verdict":"no","topic":"t","behavior":"pushed back with \\"not like that\\""}');
+  assert.equal(paired?.behavior, 'pushed back with "not like that"', 'a matched pair is the person\'s own words — keep it');
+
+  const apostrophe = parseJudgeOutput('{"verdict":"none","topic":"t","behavior":"said it was the team\'s call"}');
+  assert.equal(apostrophe?.behavior, "said it was the team's call", 'a mid-string apostrophe is untouched');
+});
+
+test('parseJudgeOutput: a field that fits is left exactly alone', () => {
+  const p = parseJudgeOutput('{"verdict":"partial","topic":"the deploy step","behavior":"accepted, then pivoted to cost"}');
+  assert.equal(p?.behavior, 'accepted, then pivoted to cost', 'no cut, no reflow, byte-identical');
 });
 
 test('a v1 cache entry is stale — currentJudgment gates the pipeline version', () => {

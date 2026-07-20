@@ -68,13 +68,17 @@ export function runClaude(
   model?: string,
   feature?: string,
   timeoutMs = 120_000,
+  /** JSON Schema the reply must satisfy (--json-schema). The JSON rung only: the plain-text rung
+   *  exists for a CLI too old to know --output-format json, which will not know this either. */
+  schema?: string,
 ): string | undefined {
   // Prefer JSON (metered, is_error-checked); fall back to plain text on the SAME pinned model for
   // a CLI without JSON output. THE PROMPT COMES BEFORE --tools: `--tools` is variadic and would
   // swallow a following positional whole (verified live, 2026-07-17).
   const modelArgs = model ? ['--model', model] : [];
+  const schemaArgs = schema ? ['--json-schema', schema] : [];
   const attempts: { args: string[]; json: boolean }[] = [
-    { args: ['-p', '--output-format', 'json', ...modelArgs, input, ...TOOLLESS_ARGS], json: true },
+    { args: ['-p', '--output-format', 'json', ...modelArgs, ...schemaArgs, input, ...TOOLLESS_ARGS], json: true },
     { args: ['-p', ...modelArgs, input, ...TOOLLESS_ARGS], json: false },
   ];
 

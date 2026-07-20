@@ -1,14 +1,23 @@
 /**
  * JUDGE — the small read, once per exchange, ever.
  *
- * One question, and only one (handover §4): did understanding transfer, and about WHAT? We do NOT
- * impose a taxonomy of reactions — categories emerge later, in the miner, never here. Each answer
- * is one judgment, cached forever by the exchange's content hash. The rule that keeps the whole
- * product cheap, the one that must never be broken: never re-read what's already read.
+ * THE JUDGE IS A WITNESS, NOT AN ASSESSOR. It records what one moment was ABOUT and what the person
+ * DID in it. It does not rule on whether they understood — that was the `verdict` field, removed
+ * 2026-07-20 after three independent attempts to mine it came back empty (1 of 16 topic domains
+ * distinguishable from the base rate; 0 of 13 assistant-side properties; the rate sat near 50%
+ * however it was sliced). The reason is structural, not statistical: "did understanding transfer"
+ * is a property of the PAIR — it moves when the assistant changes, not only when the person does —
+ * so it can never be a clean fact about one party. Its only consumer gated 11% of evidence out of
+ * the writer, including "gave explicit go-ahead to merge" and "executed the manual steps and
+ * reported completion", which is exactly the material HOW THEY WORK is built from.
  *
- * v2 (0.3.0): the judgment gains structured FORM — {verdict, topic, behavior} parsed from strict
- * one-line JSON and validated in code — while the VOCABULARY stays free (behavior is rich, open
- * description: the raw material every future category emerges from). The form change is why
+ * Categories emerge later, in the miner, never here. Each answer is one judgment, cached forever by
+ * the exchange's content hash. The rule that keeps the whole product cheap and must never break:
+ * never re-read what's already read.
+ *
+ * v2 (0.3.0): the judgment gained structured FORM, parsed from strict one-line JSON and validated in
+ * code, while the VOCABULARY stays free (behavior is rich, open description: the raw material every
+ * future category emerges from). The form change is why
  * PIPELINE_V now lives in every cache entry: an entry from another pipeline version is stale and
  * re-judged under the normal per-run budget, so a materially better judge actually propagates
  * (build-pass §10, the Clock 2 delivery subtlety) without ever re-spending the whole backlog at
@@ -37,9 +46,6 @@ const cachePath = (): string => process.env.STRATLESS_CACHE || CACHE;
  */
 export const PIPELINE_V = 2;
 
-export type Verdict = 'transferred' | 'partial' | 'no' | 'none';
-const VERDICTS = new Set<string>(['transferred', 'partial', 'no', 'none']);
-
 /** One thing learned about one moment. */
 export interface Judgment {
   hash: string;
@@ -47,19 +53,24 @@ export interface Judgment {
   session: string;
   /** which pipeline version judged it — mismatch means stale, re-judge */
   v: number;
-  /** the one measurement axis: did understanding transfer? */
-  verdict: Verdict;
   /** what the exchange was about — free text, forced only to be concrete */
   topic: string;
   /** what the person actually did — rich, free description; never a category */
   behavior: string;
-  /** the rendered one-liner (verdict — topic — behavior), for display and the writer's input */
+  /** the rendered one-liner (topic — behavior), for display and the writer's input */
   line: string;
 }
 
-/** Is a cache entry from the current pipeline? (v1 entries have no `v` and fail here.) */
+/**
+ * Is a cache entry from the current pipeline? (v1 entries have no `v` and fail here.)
+ *
+ * Deliberately does NOT look at `verdict`. That field was removed in the same change that stopped
+ * asking for it — entries judged before carry it, entries judged after do not, and since the old
+ * shape is a superset of the new one every cached judgment stays valid. No version bump, no
+ * re-judging, no capacity spent to delete a field nobody reads.
+ */
 export function currentJudgment(j: Partial<Judgment> | undefined): j is Judgment {
-  return !!j && j.v === PIPELINE_V && typeof j.verdict === 'string' && VERDICTS.has(j.verdict);
+  return !!j && j.v === PIPELINE_V && typeof j.topic === 'string' && typeof j.behavior === 'string';
 }
 
 /**
@@ -72,24 +83,46 @@ assistant, ONE per message. Your job is to learn about the PERSON, not to grade 
 answer.
 
 Each message gives what the person asked, what the assistant said back, and how the person reacted.
-From the REACTION, judge one thing:
+From the REACTION, record two things: what it was ABOUT, and what the person DID.
 
-  did understanding transfer, and about WHAT?
-
-How to read it:
-- The signal is in the REACTION. "ok, next" / "perfect" / moving on = it landed. "wait, what does
-  this mean for us" / "i'm lost" / "cant keep up" / a bounced-back question / a redirect to cost or
-  direction = it did NOT land.
 - topic: name it concretely — "JWT expiry", "the deploy step", "why we need a queue" — never "the
   code" or "the answer".
 - behavior: describe what the person actually DID, specifically, in their own words where short.
   Do NOT force it into a fixed category — this rich description is the raw material everything
-  later learns from.
-- If the reaction carries no signal about understanding (pure logistics, a thank-you), the verdict
-  is "none" — but still describe the behavior; even "ok, commit" shows how the person works.
+  later learns from. Keep it under 200 characters: one dense sentence, not a paragraph.
+  THE SUBJECT OF THAT SENTENCE MUST BE THE PERSON. If you have written what the ASSISTANT did
+  ("provided a summary instead of…", "launched into implementation before…"), you have described
+  the wrong party — rewrite it as what the person did. Write it so it could be true of them on
+  another day too: a sentence that can only ever describe this one moment teaches nothing.
+- Do NOT rule on whether they understood, agreed, or were satisfied. Redirecting, disagreeing,
+  pushing back and cutting you off are things a person DOES — record the doing, never a verdict on
+  it. Someone who grasps things fast and argues often must not come out reading as someone nothing
+  ever reaches.
+- A "PERSON ALSO" line, when present, is a RECORDED FACT — they really did that, and you do not
+  need to detect it from the wording. Use it in the behavior.
 
-Reply to EACH message with EXACTLY one line of JSON, no preamble, no markdown, no code fence:
-{"verdict":"transferred|partial|no|none","topic":"<concrete topic>","behavior":"<what the person did>"}`;
+Reply to EACH message with EXACTLY one line of JSON, no preamble, no markdown, no code fence.
+Nothing before the "{" and nothing after the "}". topic under 100 characters, behavior under 200:
+{"topic":"<concrete topic>","behavior":"<what the person did>"}`;
+
+/**
+ * THE SHAPE, ENFORCED BY THE TRANSPORT rather than requested in prose. Asking for "EXACTLY one line
+ * of JSON" is a request a model can decline: measured 2026-07-19, **8 of 15 replies carried no JSON
+ * at all** — a full call spent for nothing. With --json-schema, 0 of 15 failed and the behavior text
+ * got RICHER (median 114 → 158 chars), because what vanished was preamble, not content.
+ *
+ * These caps are the SAME numbers the prose states, so the two can never drift apart again — that
+ * drift WAS the original bug.
+ */
+export const JUDGE_SCHEMA = JSON.stringify({
+  type: 'object',
+  properties: {
+    topic: { type: 'string', maxLength: 100 },
+    behavior: { type: 'string', maxLength: 200 },
+  },
+  required: ['topic', 'behavior'],
+  additionalProperties: false,
+});
 
 /**
  * THE APERTURE — the judge's per-field view sizes, fitted to THIS user's own history.
@@ -156,12 +189,25 @@ function view(s: string, budget: number, headShare: number): string {
 /** The per-turn exchange rendering — a streamed turn carries ONLY this (rules ride the system
  *  prompt, sent once per session). Exported for tests. */
 export function judgeTurnBody(ex: Exchange, aperture: Aperture = DEFAULT_APERTURE): string {
+  // What the person did with their hands, when there is anything to say. Omitted entirely when
+  // there is not — most exchanges carry no control action, and an empty line would be noise on
+  // every one of them.
+  // NEUTRAL wording, deliberately. The first cut said "cut the answer off" / "refused a tool it
+  // wanted to run" and the verdicts collapsed toward failure (6 of 8 became "no") — the loaded verb
+  // outweighed the rules' explicit caveat that 96.9% of interrupts are steering. State the event,
+  // let the reaction carry the meaning.
+  const acts = [
+    ex.interrupted === 'plain' ? 'started typing before the answer had finished' : '',
+    ex.interrupted === 'tool-use' ? 'the answer stopped at a permission prompt' : '',
+    ex.declined ? 'declined a proposed tool' : '',
+  ].filter(Boolean);
   return [
     `PERSON ASKED: ${view(ex.prompt, aperture.prompt, 0.7)}`,
     '',
     `ASSISTANT SAID: ${view(ex.said, aperture.said, 0.2)}`,
     '',
     `PERSON REACTED: ${view(ex.reaction, aperture.reaction, 1)}`,
+    ...(acts.length ? ['', `PERSON ALSO: ${acts.join(' · ')}`] : []),
   ].join('\n');
 }
 
@@ -180,7 +226,7 @@ function toJudgment(ex: Exchange, raw: string): Judgment | undefined {
     session: ex.session,
     v: PIPELINE_V,
     ...parsed,
-    line: `${parsed.verdict} — ${parsed.topic} — ${parsed.behavior}`,
+    line: `${parsed.topic} — ${parsed.behavior}`,
   };
 }
 
@@ -190,19 +236,35 @@ function toJudgment(ex: Exchange, raw: string): Judgment | undefined {
  * block); refuses on a bad verdict or a missing field — silence over a malformed judgment.
  * Exported for tests.
  */
-export function parseJudgeOutput(raw: string): { verdict: Verdict; topic: string; behavior: string } | undefined {
+export function parseJudgeOutput(raw: string): { topic: string; behavior: string } | undefined {
   const m = raw.match(/\{[\s\S]*?\}/);
   if (!m) return undefined;
   try {
-    const o = JSON.parse(m[0]) as Partial<Record<'verdict' | 'topic' | 'behavior', unknown>>;
-    const verdict = typeof o.verdict === 'string' ? o.verdict.trim().toLowerCase() : '';
-    if (!VERDICTS.has(verdict)) return undefined;
-    const clean = (v: unknown, cap: number) =>
-      typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, cap) : '';
-    const topic = clean(o.topic, 120) || (verdict === 'none' ? 'no signal' : '');
-    const behavior = clean(o.behavior, 240);
+    const o = JSON.parse(m[0]) as Partial<Record<'topic' | 'behavior', unknown>>;
+    // A BACKSTOP above the limits the prompt and schema state, not the design. It cuts on a word
+    // boundary: 16% of behaviors used to hit the old cap mid-word, and this text is what the miner
+    // mines, so half a word is damaged evidence (measured 2026-07-19).
+    const clean = (v: unknown, cap: number): string => {
+      if (typeof v !== 'string') return '';
+      const flat = v.replace(/\s+/g, ' ').trim();
+      if (flat.length <= cap) return flat;
+      const cut = flat.slice(0, cap);
+      const lastSpace = cut.lastIndexOf(' ');
+      return (lastSpace > cap * 0.6 ? cut.slice(0, lastSpace) : cut).trim();
+    };
+    // Drop a DANGLING closing quote (observed intermittently: `…moved on"`). The model quotes the
+    // person legitimately and often, so the test is PARITY — an odd count ending on that character
+    // means the last one is unmatched noise.
+    const unquote = (s: string): string => {
+      const last = s.at(-1);
+      if (last !== '"' && last !== "'") return s;
+      const count = s.split(last).length - 1;
+      return count % 2 === 1 ? s.slice(0, -1).trim() : s;
+    };
+    const topic = unquote(clean(o.topic, 120));
+    const behavior = unquote(clean(o.behavior, 240));
     if (!topic || !behavior) return undefined;
-    return { verdict: verdict as Verdict, topic, behavior };
+    return { topic, behavior };
   } catch {
     return undefined;
   }
@@ -210,7 +272,7 @@ export function parseJudgeOutput(raw: string): { verdict: Verdict; topic: string
 
 /** Judge a single exchange. Returns undefined if the assistant couldn't answer — silence over guess. */
 export function judge(ex: Exchange, bin: string, aperture?: Aperture): Judgment | undefined {
-  const raw = runClaude(bin, judgeInput(ex, aperture), 'haiku', 'judge');
+  const raw = runClaude(bin, judgeInput(ex, aperture), 'haiku', 'judge', undefined, JUDGE_SCHEMA);
   return raw ? toJudgment(ex, raw) : undefined;
 }
 
@@ -329,6 +391,7 @@ export async function judgeAll(
     role: 'judge',
     model: 'haiku',
     feature: 'judge',
+    jsonSchema: JUDGE_SCHEMA, // the form is enforced by the transport, not requested in prose
     items: toJudge.map((e) => ({ id: e.hash, prompt: judgeTurnBody(e, opts.aperture) })),
     onTurn: (done, total) => opts.onProgress?.(done, total),
     onSessionResults: (chunk) => {

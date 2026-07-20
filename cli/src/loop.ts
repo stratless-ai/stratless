@@ -39,7 +39,6 @@ import {
   synthesizeProfileFromPatterns,
   synthesizeReportFromPatterns,
   artifactShapeProblem,
-  hasSignal,
   mostRecent,
   topTopics,
   type Corpus,
@@ -222,7 +221,7 @@ export async function runWorker(opts: { force?: boolean } = {}): Promise<number>
         summary.push(`profile is fresh enough (${judged} · ${gate.newSince}/${synthEvery()} toward the next build)`);
       } else {
         // The expensive rungs — mine, audit, grade, write, load — behind the one gate.
-        const signal = run.judgments.filter(hasSignal);
+        const signal = run.judgments;
         const corpus: Corpus = {
           sessions,
           exchanges: signal.length,

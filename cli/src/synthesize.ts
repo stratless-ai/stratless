@@ -32,18 +32,6 @@ import type { Pattern } from './miner.js';
  */
 const synthModel = (): string => process.env.STRATLESS_SYNTH_MODEL || 'sonnet';
 
-/**
- * Judgments that carry signal. A `none` verdict is, by the judge's own definition, a reaction that
- * says nothing about understanding (pure logistics, a thank-you) — so it never reaches the writer.
- * It stays cached forever like everything else: filtered at synthesis time, never re-judged.
- * (v2: read from the structured field, not the rendered line. The `none` pile is not waste — it is
- * exactly where the miner will hunt how-they-work and trigger patterns, and where Law 3 evidence
- * accumulates.)
- */
-export function hasSignal(j: Judgment): boolean {
-  return j.verdict !== 'none';
-}
-
 /** Free, raw counts that ground the synthesis so it can cite real frequencies. */
 export interface Corpus {
   sessions: number;

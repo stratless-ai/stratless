@@ -18,7 +18,7 @@ import { dailyCheck, fetchLatest, newerThan } from './notify.js';
 import { health } from './canary.js';
 import { loadRecentExchanges, sessionCount, findExchange } from './exchange.js';
 import { judgeAll, cacheHealth, fitAperture, allJudgments, pendingCount, type Judgment } from './judge.js';
-import { topTopics, hasSignal, type Corpus } from './synthesize.js';
+import { topTopics, type Corpus } from './synthesize.js';
 import { loadPatterns, displayOrder, matchReceiptPrefix, MIN_RECEIPTS, type PatternStore } from './miner.js';
 import { removeProfile, humanMdPath, claudeMdPath } from './sink.js';
 import { readRenders, writeRender, writeBuildCorpus, readBuildCorpus, type RenderMeta } from './state.js';
@@ -253,7 +253,7 @@ async function profiler(rest: string[] = []): Promise<void> {
 
     // Only judgments that carry signal reach the writer — a `none` line is, by definition, nothing
     // to reason from. The corpus counts what the writer actually sees, so the numbers stay honest.
-    const signal = run.judgments.filter(hasSignal);
+    const signal = run.judgments;
     const corpus: Corpus = {
       sessions,
       exchanges: signal.length,

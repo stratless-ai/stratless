@@ -468,7 +468,6 @@ const j = (ts: string): Judgment => ({
   ts,
   session: 's',
   v: 2,
-  verdict: 'transferred',
   topic: 't',
   behavior: 'b',
   line: `line ${ts}`,
