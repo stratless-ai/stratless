@@ -20,7 +20,7 @@ import { atomicWriteFileSync, CorruptStoreError } from './atomic.js';
 import { acquireLock, releaseLock, readLock, lockIsStale, spawnDetached } from './worker.js';
 import { summarizeTurns, appendRun, stageRates, etaMs, startRun, STOPWATCH_KEEP } from './stopwatch.js';
 import { runStreamBatch, isTransientFailure } from './stream.js';
-import { runClaude, parseJsonResult, TOOLLESS_ARGS } from './claude.js';
+import { runClaude, parseJsonResult, CLEAN_ARGS, TOOLLESS_ARGS } from './claude.js';
 import { mostRecent } from './synthesize.js';
 import { readState, writeState, type RunRecord } from './state.js';
 import { readUsage, recordUsage } from './usage.js';
@@ -439,6 +439,68 @@ test('C9: runClaude spawns tool-less — --tools "" rides every attempt', () => 
     delete process.env.STRATLESS_USAGE;
     delete process.env.FAKE_ARGV;
     delete process.env.FAKE_MODE;
+  }
+});
+
+// ── the borrow is BLANK-SLATE: every spawn carries --safe-mode ─────────────────────────────────
+//
+// Verified live 2026-07-20: without this the borrowed assistant answers YES when asked whether it
+// holds a description of the user, and quotes it back. Three sources feed it — our own HUMAN.md,
+// Claude Code's auto-memory, and the project's CLAUDE.md — so a judge reads the profile it is
+// helping to write. These tests pin the flag onto both spawn paths.
+
+test('the borrow is blank-slate — --safe-mode rides every runClaude attempt', () => {
+  const bin = writeOneShotBin();
+  const argvFile = join(dir, 'argv-clean.json');
+  process.env.STRATLESS_USAGE = join(dir, 'usage-clean.json');
+  process.env.FAKE_ARGV = argvFile;
+  process.env.FAKE_MODE = 'json';
+  try {
+    assert.equal(runClaude(bin, 'question', 'haiku', 'judge'), 'hi');
+    const argv = JSON.parse(readFileSync(argvFile, 'utf8')) as string[];
+    assert.ok(argv.includes('--safe-mode'), 'the JSON rung carries --safe-mode');
+    assert.deepEqual([...CLEAN_ARGS], ['--safe-mode'], 'one constant governs every spawn');
+    // It must precede --tools: --tools is variadic and swallows what follows it.
+    assert.ok(argv.indexOf('--safe-mode') < argv.indexOf('--tools'), '--safe-mode is not swallowed by --tools');
+  } finally {
+    delete process.env.STRATLESS_USAGE;
+    delete process.env.FAKE_ARGV;
+    delete process.env.FAKE_MODE;
+  }
+});
+
+test('the blank slate survives the fallback to the plain-text rung', () => {
+  const bin = writeOneShotBin();
+  const argvFile = join(dir, 'argv-clean-text.json');
+  process.env.STRATLESS_USAGE = join(dir, 'usage-clean-text.json');
+  process.env.FAKE_ARGV = argvFile;
+  process.env.FAKE_MODE = 'text'; // no JSON — forces the second rung
+  try {
+    assert.equal(runClaude(bin, 'question', 'haiku', 'judge'), 'plain words, no receipt');
+    const argv = JSON.parse(readFileSync(argvFile, 'utf8')) as string[];
+    assert.ok(argv.includes('--safe-mode'), 'the degraded rung is blank-slate too — a cheaper call is not a dirtier one');
+  } finally {
+    delete process.env.STRATLESS_USAGE;
+    delete process.env.FAKE_ARGV;
+    delete process.env.FAKE_MODE;
+  }
+});
+
+test('the streamed session is blank-slate too', async () => {
+  const bin = writeStreamBin();
+  const argvFile = join(dir, 'argv-stream-clean.json');
+  process.env.STRATLESS_USAGE = join(dir, 'usage-stream-clean.json');
+  process.env.FAKE_ARGV = argvFile;
+  process.env.FAKE_COUNTER = join(dir, 'counter-clean');
+  try {
+    const r = await runStreamBatch(bin, { systemPrompt: 'rules', role: 'judge', feature: 'judge', items: streamItems(2) });
+    assert.equal(r.completed, 2);
+    const argv = JSON.parse(readFileSync(argvFile, 'utf8')) as string[];
+    assert.ok(argv.includes('--safe-mode'), 'the stream child carries --safe-mode');
+  } finally {
+    delete process.env.STRATLESS_USAGE;
+    delete process.env.FAKE_ARGV;
+    delete process.env.FAKE_COUNTER;
   }
 });
 

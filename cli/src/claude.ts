@@ -22,6 +22,40 @@ import { recordUsage, type CallCost } from './usage.js';
  */
 export const TOOLLESS_ARGS = ['--tools', ''] as const;
 
+/**
+ * BLANK-SLATE BY CONSTRUCTION: every borrowed call carries `--safe-mode`, which disables CLAUDE.md
+ * discovery, auto-memory, and every other customization on the machine.
+ *
+ * Without it the borrowed assistant arrives already knowing the person. Verified 2026-07-20 by
+ * asking it directly — it answered YES and quoted context back. THREE sources feed it, and which
+ * one answers depends on the working directory:
+ *
+ *   1. `~/.claude/CLAUDE.md` -> `@~/.claude/HUMAN.md` — OUR OWN PROFILE. The judge reads the file
+ *      it is helping to write, so the profile confirms itself: a claim that gets in makes the judge
+ *      likelier to see it again, which puts it back in. No stage could catch this; every stage is
+ *      downstream of it. Measured direction: toward flattery. The same pile judged with the profile
+ *      loaded produced a category quoting HUMAN.md's own wording, and did NOT produce
+ *      "reacts with blunt or profane language when confused" — which the blank-slate run did.
+ *      A profile that hides where the person got lost fails at exactly the thing it exists for.
+ *   2. Claude Code's own auto-memory, which survives `stratless stop`.
+ *   3. The project's `CLAUDE.md` / `CLAUDE.local.md` and anything they import.
+ *
+ * THE FORWARD REASON, bigger than the bug: without this the instrument is not the same for two
+ * people. A user with a rich CLAUDE.md gets a differently-informed reader than a user with none —
+ * a variable in the measurement that we neither control nor can see. The blank slate is what makes
+ * "same method for every user" literally true rather than aspirational.
+ *
+ * UNCONDITIONAL, on the same reasoning as TOOLLESS_ARGS above: a CLI too old to know the flag
+ * refuses loudly, which beats silently judging someone while reading their strategy documents.
+ *
+ * NOT `--bare`, which also blocks the memory but forces ANTHROPIC_API_KEY / apiKeyHelper auth and
+ * so kills the borrow at the door (no key, ride the subscription).
+ *
+ * It is also cheaper and faster — measured on identical input, $0.71 -> $0.49 and 150s -> 87s.
+ * There is simply less to carry.
+ */
+export const CLEAN_ARGS = ['--safe-mode'] as const;
+
 /** Is a binary on PATH? (Also guards `init --auto`: a hook that runs `stratless` needs it findable.) */
 export function onPath(bin: string): boolean {
   try {
@@ -78,8 +112,8 @@ export function runClaude(
   const modelArgs = model ? ['--model', model] : [];
   const schemaArgs = schema ? ['--json-schema', schema] : [];
   const attempts: { args: string[]; json: boolean }[] = [
-    { args: ['-p', '--output-format', 'json', ...modelArgs, ...schemaArgs, input, ...TOOLLESS_ARGS], json: true },
-    { args: ['-p', ...modelArgs, input, ...TOOLLESS_ARGS], json: false },
+    { args: ['-p', '--output-format', 'json', ...modelArgs, ...schemaArgs, ...CLEAN_ARGS, input, ...TOOLLESS_ARGS], json: true },
+    { args: ['-p', ...modelArgs, ...CLEAN_ARGS, input, ...TOOLLESS_ARGS], json: false },
   ];
 
   for (const { args, json } of attempts) {

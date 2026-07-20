@@ -31,7 +31,7 @@
  */
 import { spawn } from 'node:child_process';
 import { recordUsage, type CallCost } from './usage.js';
-import { TOOLLESS_ARGS } from './claude.js';
+import { CLEAN_ARGS, TOOLLESS_ARGS } from './claude.js';
 
 /** Streamed prompts start with this — isRealPrompt drops `<`-prefixed messages (pinned by test). */
 export const SENTINEL_PREFIX = '<stratless-';
@@ -146,6 +146,7 @@ function runSession(bin: string, opts: StreamOpts, items: StreamItem[]): Promise
         '--output-format', 'stream-json',
         '--verbose',
         ...TOOLLESS_ARGS, // C9: the borrow asks; it never gets hands
+        ...CLEAN_ARGS, // and it arrives knowing nothing but the question — see claude.ts
         ...(opts.model ? ['--model', opts.model] : []),
         ...(opts.jsonSchema ? ['--json-schema', opts.jsonSchema] : []),
         '--append-system-prompt', opts.systemPrompt,
