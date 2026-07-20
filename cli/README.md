@@ -75,8 +75,11 @@ No model of ours. No server. No training. No separate bill.
 1. **Read.** Every session Claude Code has is already on your disk, in `~/.claude/projects`.
    stratless walks each one into `(what the assistant said → how you reacted)` pairs.
 2. **Judge.** It hands each pair to the `claude` you already have (`claude -p`, on your own plan)
-   and asks one question: *did understanding transfer, and about what?* One structured verdict
-   back, **cached**, so each exchange is read once.
+   and asks one question: *what did you actually do here?* It records the action and never a grade
+   on it. Pushing back, redirecting and cutting an answer short are things you **do**, not evidence
+   you missed something. Anything the code can establish for itself (which project, how long you
+   paused, whether you interrupted, what the assistant ran) is written down as fact rather than
+   guessed at by a model. One line back, **cached**, so each exchange is read once.
 3. **Mine + synthesize.** The judgments are mined into named patterns, each with a real count and
    **receipts**: the exchanges that witnessed it. No receipt, no claim. A separate pass audits the
    evidence, and the profile is written from what survives; a number the evidence can't back
