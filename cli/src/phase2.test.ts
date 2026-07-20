@@ -158,7 +158,9 @@ test('C1: the newest-first walk holds one file at a time — RSS flat over a 10k
   );
   const out = execFileSync(process.execPath, ['--expose-gc', script, roots], { encoding: 'utf8', timeout: 60_000 });
   const r = JSON.parse(out.trim()) as { n: number; peak: number; firstSession: string };
-  assert.equal(r.n, 40 * 250, 'every exchange yielded exactly once');
+  // 40 sessions × 250 closed turns, PLUS one session opener each: the first human message of a
+  // transcript is now an exchange in its own right, so every session yields exactly one more.
+  assert.equal(r.n, 40 * 251, 'every exchange yielded exactly once');
   assert.equal(r.firstSession, 'session-039', 'newest file walks first');
   // ~72MB of corpus text: loading it all would balloon well past this; one-file-at-a-time stays flat.
   assert.ok(r.peak < 130 * 1024 * 1024, `peak RSS ${(r.peak / 1e6).toFixed(0)}MB stays under the flat-memory bound`);

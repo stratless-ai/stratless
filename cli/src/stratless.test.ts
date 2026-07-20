@@ -128,28 +128,33 @@ const interruptRec = (kind: 'plain' | 'tool-use' = 'plain') =>
 const denyRec = () =>
   JSON.stringify({ type: 'user', timestamp: '2026-07-01T10:00:03Z', toolDenialKind: 'user-rejected', message: { content: '' } });
 
+// NOTE ON INDICES, and it applies to every fixture below. Since exchanges emit on the reaction
+// alone, the FIRST human message of a transcript is itself an exchange — a session opener, with an
+// empty prompt and an empty `said`. So `ex[0]` is the opener and the first CLOSED turn is `ex[1]`.
+// Nothing about these tests changed except that arithmetic.
+
 test('THE HASH IGNORES CONTROL ACTIONS — adding them must not orphan a cached judgment', () => {
   const plain = parseExchanges(writeTranscript('plain.jsonl', [u('why a queue?'), a('bursts outrun the worker'), u('ok that lands')].join('\n')));
   const withInt = parseExchanges(
     writeTranscript('withint.jsonl', [u('why a queue?'), a('bursts outrun the worker'), interruptRec(), u('ok that lands')].join('\n')),
   );
-  assert.equal(plain.length, 1);
-  assert.equal(withInt.length, 1);
-  assert.equal(withInt[0].hash, plain[0].hash, 'same words = same hash, whatever the person did with their hands');
-  assert.equal(plain[0].interrupted, undefined);
-  assert.equal(withInt[0].interrupted, 'plain', 'but the fact is carried');
+  assert.equal(plain.length, 2, 'the opener, then the closed turn');
+  assert.equal(withInt.length, 2);
+  assert.equal(withInt[1].hash, plain[1].hash, 'same words = same hash, whatever the person did with their hands');
+  assert.equal(plain[1].interrupted, undefined);
+  assert.equal(withInt[1].interrupted, 'plain', 'but the fact is carried');
 });
 
 test('the two interrupt kinds are distinguished, not merged', () => {
   const ex = parseExchanges(
     writeTranscript('kinds.jsonl', [u('run the deploy'), a('starting'), interruptRec('tool-use'), u('no, stop')].join('\n')),
   );
-  assert.equal(ex[0].interrupted, 'tool-use', 'the permission-flow variant is not a spontaneous course correction');
+  assert.equal(ex[1].interrupted, 'tool-use', 'the permission-flow variant is not a spontaneous course correction');
 });
 
 test('a declined tool is recorded on the exchange it happened in', () => {
   const ex = parseExchanges(writeTranscript('deny.jsonl', [u('push it'), a('running git push'), denyRec(), u('not yet')].join('\n')));
-  assert.equal(ex[0].declined, true);
+  assert.equal(ex[1].declined, true);
 });
 
 test('control actions do not leak into the NEXT exchange', () => {
@@ -159,9 +164,9 @@ test('control actions do not leak into the NEXT exchange', () => {
       [u('first ask'), a('first answer'), interruptRec(), u('second ask'), a('second answer'), u('third')].join('\n'),
     ),
   );
-  assert.equal(ex.length, 2);
-  assert.equal(ex[0].interrupted, 'plain', 'the interrupt belongs to the turn it happened in');
-  assert.equal(ex[1].interrupted, undefined, 'and is cleared before the next one');
+  assert.equal(ex.length, 3, 'the opener plus two closed turns');
+  assert.equal(ex[1].interrupted, 'plain', 'the interrupt belongs to the turn it happened in');
+  assert.equal(ex[2].interrupted, undefined, 'and is cleared before the next one');
 });
 
 // ── THE FACTS: what the code knows for certain, carried as data (judge v2, 2026-07-20) ──────────
@@ -218,15 +223,16 @@ test('position and rhythm are computed once the session is whole', () => {
       ].join('\n'),
     ),
   );
-  assert.equal(ex.length, 2);
+  assert.equal(ex.length, 3, 'the opener plus two closed turns');
   assert.deepEqual(
     ex.map((e) => e.index),
-    [0, 1],
+    [0, 1, 2],
     'the judge could not tell the 1st exchange from the 259th; now it can',
   );
-  assert.equal(ex[0].ofSession, 2);
+  assert.equal(ex[0].ofSession, 3);
   assert.equal(ex[0].gapSec, undefined, 'the first exchange has nothing to measure from — absent, never a fabricated 0');
-  assert.equal(ex[1].gapSec, 120, 'two minutes between one reaction and the next');
+  assert.equal(ex[1].gapSec, 60, 'a minute from the opener to the next reaction');
+  assert.equal(ex[2].gapSec, 120, 'two minutes between one reaction and the next');
 });
 
 test('markFirstOfDay marks exactly one exchange per working day', () => {
@@ -243,7 +249,7 @@ test('the fact the judge dropped 19 times in 20 now travels as data, not prose',
   const ex = parseExchanges(
     writeTranscript('fact.jsonl', [u('run the deploy'), a('starting'), interruptRec(), u('no, stop')].join('\n')),
   );
-  assert.equal(didOf(ex[0])?.interrupted, 'plain', 'a field the model cannot decline to mention');
+  assert.equal(didOf(ex[1])?.interrupted, 'plain', 'a field the model cannot decline to mention');
 });
 
 // ── SHOWING the facts to the judge (Block 2 piece 1) ────────────────────────────────────────────
@@ -291,11 +297,11 @@ test('tools the assistant ran are carried, and do not change the hash', () => {
   const withTools = parseExchanges(
     writeTranscript('tools.jsonl', [u(words[0]), toolAsst(words[1], ['Edit', 'Bash', 'Edit']), u(words[2])].join('\n')),
   );
-  assert.equal(withTools[0].hash, bare[0].hash, 'the facts never touch the cache key');
-  assert.deepEqual(withTools[0].tools, ['Edit', 'Bash', 'Edit'], 'duplicates kept — they are the SIZE of the work');
-  assert.equal(bare[0].tools, undefined);
-  assert.deepEqual(ranOf(withTools[0]), { tools: ['Edit', 'Bash'], calls: 3 }, 'names deduped, calls counted');
-  assert.equal(ranOf(bare[0]), undefined, 'a turn that only talked has no `ran` at all');
+  assert.equal(withTools[1].hash, bare[1].hash, 'the facts never touch the cache key');
+  assert.deepEqual(withTools[1].tools, ['Edit', 'Bash', 'Edit'], 'duplicates kept — they are the SIZE of the work');
+  assert.equal(bare[1].tools, undefined);
+  assert.deepEqual(ranOf(withTools[1]), { tools: ['Edit', 'Bash'], calls: 3 }, 'names deduped, calls counted');
+  assert.equal(ranOf(bare[1]), undefined, 'a turn that only talked has no `ran` at all');
 });
 
 test('the assistant work line is neutral, and states size only when it adds something', () => {
@@ -310,9 +316,9 @@ test('tools do not leak into the next exchange', () => {
       [u('first'), toolAsst('a1', ['Edit']), u('second'), a('a2'), u('third')].join('\n'),
     ),
   );
-  assert.equal(ex.length, 2);
-  assert.deepEqual(ex[0].tools, ['Edit']);
-  assert.equal(ex[1].tools, undefined, 'reset with `said`, like every other per-turn fact');
+  assert.equal(ex.length, 3, 'the opener plus two closed turns');
+  assert.deepEqual(ex[1].tools, ['Edit']);
+  assert.equal(ex[2].tools, undefined, 'reset with `said`, like every other per-turn fact');
 });
 
 test('empty facts are absent, never empty objects', () => {
@@ -333,14 +339,20 @@ test('each real human message is the reaction to one turn AND the prompt for the
     ].join('\n'),
   );
   const ex = parseExchanges(p);
-  assert.equal(ex.length, 2, 'two closed turns — the dangling last human message is not a third');
-  assert.equal(ex[0].prompt, 'how do i deploy');
-  assert.equal(ex[0].said, 'Push to main and it builds.');
-  assert.equal(ex[0].reaction, 'wait what does that mean for us', 'the reaction carries the signal');
-  assert.equal(ex[1].prompt, 'wait what does that mean for us', 'that same message opens the next turn');
+  // Three, not two: the SESSION OPENER now counts. It has no prompt and no assistant turn before
+  // it, which used to disqualify it — but "how do i deploy" is a thing the person did, and setting
+  // the agenda is one of the more informative things they do. The dangling last message is still
+  // not an exchange: nothing closes it.
+  assert.equal(ex.length, 3, 'two closed turns plus the opener; the dangling last message is not a fourth');
+  assert.equal(ex[0].reaction, 'how do i deploy', 'the opener is a moment in its own right');
+  assert.equal(ex[0].prompt, '', 'and it honestly has no prompt, rather than being dropped');
+  assert.equal(ex[1].prompt, 'how do i deploy');
+  assert.equal(ex[1].said, 'Push to main and it builds.');
+  assert.equal(ex[1].reaction, 'wait what does that mean for us', 'the reaction carries the signal');
+  assert.equal(ex[2].prompt, 'wait what does that mean for us', 'that same message opens the next turn');
 });
 
-test('a turn where the assistant only ran tools is NOT an exchange — there is no understanding to judge', () => {
+test('a turn where the assistant only ran tools IS a moment — the person still did something', () => {
   const p = writeTranscript(
     'toolonly.jsonl',
     [
@@ -353,7 +365,19 @@ test('a turn where the assistant only ran tools is NOT an exchange — there is 
       u('did it work?'),
     ].join('\n'),
   );
-  assert.equal(parseExchanges(p).length, 0, 'no assistant words = nothing transferred = judge nothing');
+  // This test used to assert 0, on the judge's reasoning: no assistant words meant nothing
+  // transferred, so there was nothing to judge. Discovery asks a different question — what did the
+  // PERSON do — and a reply to work-in-progress is often the most informative moment there is.
+  //
+  // The loss was not evenly spread. Measured on the reference archive, the old condition dropped
+  // 180 moments (3.7%) but 25 of 151 ANCHOR moments (16.6%): an interrupt is most likely to land
+  // exactly while the assistant is mid-tool and has not spoken yet, so the filter was correlated
+  // with the thing it was hiding.
+  const ex = parseExchanges(p);
+  assert.equal(ex.length, 2, 'the opener, and the reply to a turn that only ran tools');
+  assert.equal(ex[1].reaction, 'did it work?');
+  assert.equal(ex[1].said, '', 'said is honestly empty — the assistant had not spoken yet');
+  assert.deepEqual(ex[1].tools, ['Edit'], 'and what it was DOING is carried instead');
 });
 
 test('a tool_result is not the human reacting, and assistant text accumulates across it', () => {
@@ -368,9 +392,9 @@ test('a tool_result is not the human reacting, and assistant text accumulates ac
     ].join('\n'),
   );
   const ex = parseExchanges(p);
-  assert.equal(ex.length, 1, 'the tool_result must not split the turn into two');
-  assert.equal(ex[0].reaction, 'nice');
-  assert.ok(ex[0].said.includes('Looking now') && ex[0].said.includes('off-by-one'), 'both assistant texts survive');
+  assert.equal(ex.length, 2, 'the opener, then one closed turn — the tool_result must not split it into two');
+  assert.equal(ex[1].reaction, 'nice');
+  assert.ok(ex[1].said.includes('Looking now') && ex[1].said.includes('off-by-one'), 'both assistant texts survive');
 });
 
 test('subagent turns are not the human conversation', () => {
@@ -387,7 +411,15 @@ test('subagent turns are not the human conversation', () => {
       u('done?'),
     ].join('\n'),
   );
-  assert.equal(parseExchanges(p).length, 0, 'a sidechain turn is not the person talking');
+  // This asserted `length === 0` and passed for the WRONG REASON: the count was zero because no
+  // assistant text survived the sidechain filter, so the old `prompt && saidText` condition
+  // suppressed everything. It never actually checked that subagent chatter stays out.
+  //
+  // Both human messages ARE moments — the person really typed them. What must not happen is the
+  // subagent's words appearing as something the assistant said to them.
+  const ex = parseExchanges(p);
+  assert.equal(ex.length, 2, 'the person spoke twice, and both are moments');
+  for (const e of ex) assert.ok(!e.said.includes('subagent chatter'), 'a sidechain turn is not the person talking');
 });
 
 // The tail rule (0.2.4): the person reacts to the END of the assistant's turn, but a long turn used
@@ -400,10 +432,10 @@ test('a long assistant turn keeps its TAIL — the reaction pairs with the end o
     [u('explain the whole design'), a(`THE-OPENING ${'y'.repeat(8300)} THE-CONCLUSION`), u('got it')].join('\n'),
   );
   const ex = parseExchanges(p);
-  assert.equal(ex.length, 1);
-  assert.ok(ex[0].said.includes('THE-CONCLUSION'), 'the end survives the cap');
-  assert.ok(!ex[0].said.includes('THE-OPENING'), 'the head is what gets cut');
-  assert.ok(ex[0].said.length <= 8000, 'the 0.3.0 identity cap holds (8k, raised inside the v2 bump)');
+  assert.equal(ex.length, 2, 'the opener, then the closed turn');
+  assert.ok(ex[1].said.includes('THE-CONCLUSION'), 'the end survives the cap');
+  assert.ok(!ex[1].said.includes('THE-OPENING'), 'the head is what gets cut');
+  assert.ok(ex[1].said.length <= 8000, 'the 0.3.0 identity cap holds (8k, raised inside the v2 bump)');
 });
 
 // ── the notifier: nothing ambient without consent — and the boundary is PROVABLE ───────────────
@@ -462,7 +494,7 @@ test('findExchange dereferences a receipt session-targeted; a reaped transcript 
   const root = mkdtempSync(join(tmpdir(), 'stratless-receipt-'));
   const p = join(root, 'sess-abc123.jsonl');
   writeFileSync(p, `${[u('why a queue?'), a('because bursts arrive faster than the worker drains'), u('ok that lands')].join('\n')}\n`);
-  const [ex] = parseExchanges(p);
+  const ex = parseExchanges(p)[1]; // [0] is the session opener
   assert.ok(ex, 'fixture parsed');
   const found = findExchange('sess-abc123', ex.hash, [root]);
   assert.equal(found?.reaction, 'ok that lands', 'the raw exchange comes back readable');
@@ -865,10 +897,12 @@ test('loadRecentExchanges returns the newest `want` exchanges, oldest-first, win
   session('s3.jsonl', 'three', '2026-07-03T10:00:00Z', 3000);
   session('s4.jsonl', 'four', '2026-07-04T10:00:00Z', 4000);
 
-  const got = loadRecentExchanges(2, [rdir]);
-  assert.equal(got.length, 2, 'windowed to `want`, not the whole archive');
-  assert.equal(got[0].reaction, 'react three', 'oldest of the window comes first');
-  assert.equal(got[1].reaction, 'react four', 'newest last');
+  // Each session now yields TWO exchanges — its opener (`ask N`) and its closed turn (`react N`) —
+  // so a window of 4 spans the two newest sessions rather than four.
+  const got = loadRecentExchanges(4, [rdir]);
+  assert.equal(got.length, 4, 'windowed to `want`, not the whole archive');
+  assert.equal(got[0].reaction, 'ask three', 'oldest of the window comes first');
+  assert.equal(got[3].reaction, 'react four', 'newest last');
   assert.ok(!got.some((e) => e.reaction === 'react one'), 'the older sessions are dropped');
   rmSync(rdir, { recursive: true, force: true });
 });
@@ -1039,10 +1073,10 @@ test('scoring: accuracy is against ANSWERED items, and "none of these" is counte
 test('shape records TRUE lengths, taken before the 8k cap', () => {
   const big = 'x'.repeat(9000);
   const ex = parseExchanges(writeTranscript('shape.jsonl', [u('short ask'), a(big), u('go')].join('\n')));
-  assert.equal(ex[0].shape?.ask, 9, 'the ask');
-  assert.equal(ex[0].shape?.said, 9000, 'the real size of the answer, not the capped 8000');
-  assert.equal(ex[0].shape?.reply, 2, 'and the reply');
-  assert.equal(ex[0].said.length, 8000, 'while the TEXT is still capped for the hash and the view');
+  assert.equal(ex[1].shape?.ask, 9, 'the ask');
+  assert.equal(ex[1].shape?.said, 9000, 'the real size of the answer, not the capped 8000');
+  assert.equal(ex[1].shape?.reply, 2, 'and the reply');
+  assert.equal(ex[1].said.length, 8000, 'while the TEXT is still capped for the hash and the view');
 });
 
 test('the generic-ask-after-a-long-answer shape is visible in the data', () => {
@@ -1055,8 +1089,8 @@ test('the generic-ask-after-a-long-answer shape is visible in the data', () => {
       u('double check the token expiry in auth.ts, i think it is wrong'),
     ].join('\n')),
   );
-  assert.equal(ex.length, 2);
-  const [lost, doubting] = ex;
+  assert.equal(ex.length, 3, 'the opener plus the two closed turns');
+  const [, lost, doubting] = ex;
   assert.ok(lost.shape!.said / lost.shape!.reply > 100, 'a long answer met with a short generic ask');
   assert.ok(doubting.shape!.reply > lost.shape!.reply, 'versus a longer, specific one');
 });
@@ -1065,10 +1099,11 @@ test('lastOfSession marks the closing act, and only it', () => {
   const ex = parseExchanges(
     writeTranscript('close.jsonl', [u('first'), a('a1'), u('second'), a('a2'), u('third')].join('\n')),
   );
-  assert.equal(ex.length, 2);
+  assert.equal(ex.length, 3, 'the opener plus two closed turns');
   assert.equal(ex[0].lastOfSession, undefined);
-  assert.equal(ex[1].lastOfSession, true, '"ended it here" was invisible before this');
-  assert.equal(atOf(ex[1])?.lastOfSession, true, 'and it reaches the judgment');
+  assert.equal(ex[1].lastOfSession, undefined);
+  assert.equal(ex[2].lastOfSession, true, '"ended it here" was invisible before this');
+  assert.equal(atOf(ex[2])?.lastOfSession, true, 'and it reaches the judgment');
 });
 
 test('shape and lastOfSession do not change the hash', () => {

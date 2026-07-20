@@ -115,6 +115,19 @@ export interface Exchange {
  *  assistant's turn (measured 2026-07-16). */
 const CAP = 8000;
 
+/**
+ * The identity of one exchange — CONTENT ONLY, and it stays that way.
+ *
+ * Session was briefly added here, on the theory that an opener (no prompt, no assistant turn) has
+ * two empty fields and so hashes on the person's words alone, letting two sessions that both begin
+ * "ok lets continue" collapse into one. Measured on 4,896 real exchanges: **zero collisions**, with
+ * or without session in the key. It bought nothing observable and it broke a stated invariant —
+ * "same words = same hash, whatever we learned about the surroundings" — which is what lets a fact
+ * be added later without orphaning anything. So it was reverted.
+ *
+ * If it ever does bite, the reaction record carries its own uuid in the transcript and `moments.ts`
+ * can key on that. It has not bitten, so nothing was added for it.
+ */
 function hashOf(prompt: string, said: string, reaction: string): string {
   return createHash('sha256').update(`${prompt}\0${said}\0${reaction}`).digest('hex').slice(0, 16);
 }
@@ -182,7 +195,18 @@ export function exchangesOfTurns(turns: Turn[], session: string): Exchange[] {
     // `said` keeps its TAIL: the reaction answers the end of the turn, not its preamble.
     const saidRaw = said.join('\n').trim();
     const saidText = saidRaw.slice(-CAP);
-    if (prompt && saidText) {
+    // EMIT ON THE REACTION ALONE.
+    //
+    // This used to require `prompt && saidText`, on the reasoning that "a turn where it only ran
+    // tools has no understanding to transfer, so there is nothing to judge". That was correct for
+    // the judge's question and is wrong for discovery, which reads what the PERSON did — and a
+    // reply to work-in-progress is often the most informative moment in the archive.
+    //
+    // Measured on the reference archive: the old condition dropped 180 moments. 172 of them had no
+    // assistant text at all, 72 were session openers. Overall that is 3.7% — but the loss is
+    // CORRELATED with the thing being detected: an interrupt is most likely to land while the
+    // assistant is mid-tool and has not spoken yet, so it took **25 of 151 anchor moments, 16.6%**.
+    if (t.text) {
       const p = prompt.slice(0, CAP);
       const r = t.text.slice(0, CAP);
       out.push({
