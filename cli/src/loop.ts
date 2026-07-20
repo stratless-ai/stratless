@@ -40,7 +40,7 @@ import {
   synthesizeReportFromPatterns,
   artifactShapeProblem,
   mostRecent,
-  topTopics,
+  topProjects,
   type Corpus,
 } from './synthesize.js';
 import { acquireLock, releaseLock, lockFilePath } from './worker.js';
@@ -225,7 +225,7 @@ export async function runWorker(opts: { force?: boolean } = {}): Promise<number>
         const corpus: Corpus = {
           sessions,
           exchanges: signal.length,
-          topics: topTopics(signal),
+          projects: topProjects(signal),
           from: window[0].ts.slice(0, 10),
           to: window[window.length - 1].ts.slice(0, 10),
         };

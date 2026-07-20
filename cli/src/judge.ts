@@ -33,6 +33,7 @@ import { join } from 'node:path';
 import { atomicWriteFileSync, CorruptStoreError } from './atomic.js';
 import { runClaude } from './claude.js';
 import { runStreamBatch } from './stream.js';
+import { atOf, didOf, ranOf, contextLine, ranLine, type At, type Did, type Ran } from './facts.js';
 import type { Exchange } from './exchange.js';
 
 const CACHE = join(homedir(), '.stratless', 'judgments.json');
@@ -53,12 +54,32 @@ export interface Judgment {
   session: string;
   /** which pipeline version judged it — mismatch means stale, re-judge */
   v: number;
-  /** what the exchange was about — free text, forced only to be concrete */
-  topic: string;
+  /**
+   * DEAD 2026-07-20 — the judge no longer asks for it. Measured 99.5% unique (640 distinct values
+   * in 643 judgments): it named an episode, so it could never match another moment and therefore
+   * could never group anything. It also cost output tokens on every call, and output is ~17% of
+   * the bill. Kept OPTIONAL because every judgment cached before today carries one, and the old
+   * shape being a superset of the new is exactly what lets them stay valid — the same play that
+   * retired `verdict`. No PIPELINE_V bump, no re-judging.
+   */
+  topic?: string;
   /** what the person actually did — rich, free description; never a category */
   behavior: string;
-  /** the rendered one-liner (topic — behavior), for display and the writer's input */
+  /** the rendered one-liner (topic — behavior), for DISPLAY. It was never designed as an
+   *  interface, and the miner adopting it as its entire input is a known defect being unwound. */
   line: string;
+  /**
+   * THE FACTS (2026-07-20) — written by code from the exchange, never by the model. See `facts.ts`
+   * for why: the one certain signal we had was being laundered into prose and lost 95% of the time.
+   *
+   * Both are OPTIONAL and that is load-bearing. Entries judged before this existed carry neither,
+   * still pass `currentJudgment`, and therefore do not re-judge — the judge got better without
+   * spending anything on the 644 already in the cache.
+   */
+  at?: At;
+  did?: Did;
+  /** what the ASSISTANT did with its hands — present on the 57% of exchanges where it ran tools */
+  ran?: Ran;
 }
 
 /**
@@ -68,9 +89,14 @@ export interface Judgment {
  * asking for it — entries judged before carry it, entries judged after do not, and since the old
  * shape is a superset of the new one every cached judgment stays valid. No version bump, no
  * re-judging, no capacity spent to delete a field nobody reads.
+ *
+ * It deliberately does NOT look at `at`/`did` either, for the mirror-image reason: those arrived
+ * 2026-07-20 and the OLD shape is a subset of the new one. Requiring them would mark all 644
+ * cached judgments stale and re-judge them, which is exactly the spend Sun refused until the new
+ * judge has proven itself. PIPELINE_V therefore stays 2 (see [[judge-v2-design]]).
  */
 export function currentJudgment(j: Partial<Judgment> | undefined): j is Judgment {
-  return !!j && j.v === PIPELINE_V && typeof j.topic === 'string' && typeof j.behavior === 'string';
+  return !!j && j.v === PIPELINE_V && typeof j.behavior === 'string';
 }
 
 /**
@@ -83,10 +109,8 @@ assistant, ONE per message. Your job is to learn about the PERSON, not to grade 
 answer.
 
 Each message gives what the person asked, what the assistant said back, and how the person reacted.
-From the REACTION, record two things: what it was ABOUT, and what the person DID.
+From the REACTION, record ONE thing: what the person DID.
 
-- topic: name it concretely — "JWT expiry", "the deploy step", "why we need a queue" — never "the
-  code" or "the answer".
 - behavior: describe what the person actually DID, specifically, in their own words where short.
   Do NOT force it into a fixed category — this rich description is the raw material everything
   later learns from. Keep it under 200 characters: one dense sentence, not a paragraph.
@@ -94,16 +118,30 @@ From the REACTION, record two things: what it was ABOUT, and what the person DID
   ("provided a summary instead of…", "launched into implementation before…"), you have described
   the wrong party — rewrite it as what the person did. Write it so it could be true of them on
   another day too: a sentence that can only ever describe this one moment teaches nothing.
+  NEVER write "you" or "your". You are not a participant in this conversation, you are recording
+  it for a reader who was not there. "asked you to kill the verdict" is wrong; "asked the assistant
+  to kill the verdict" is right; "asked for the verdict to be killed" is better still, because it
+  keeps the sentence on the person.
 - Do NOT rule on whether they understood, agreed, or were satisfied. Redirecting, disagreeing,
   pushing back and cutting you off are things a person DOES — record the doing, never a verdict on
   it. Someone who grasps things fast and argues often must not come out reading as someone nothing
   ever reaches.
 - A "PERSON ALSO" line, when present, is a RECORDED FACT — they really did that, and you do not
   need to detect it from the wording. Use it in the behavior.
+- An "ASSISTANT ALSO RAN" line means the assistant DID WORK, not just talked — it edited files, ran
+  commands, searched the code. The person is then reacting to work performed, not to a description
+  of it. "ok good" after completed work is a different act from "ok good" after an explanation, and
+  the behavior should say which. The line lists tools and counts; it says nothing about whether the
+  work was right, and neither should you.
+- "CONTEXT" and "EARLIER THEY ASKED", when present, are computed by the system and trustworthy.
+  They tell you WHERE this moment sat: how far into the session, how long the person paused before
+  answering, what they were working on, and what they had asked one step earlier. Use them to read
+  the moment correctly — the fortieth exchange of a long session is not the first — but describe
+  only THIS moment. Never describe the earlier ask as if it just happened.
 
 Reply to EACH message with EXACTLY one line of JSON, no preamble, no markdown, no code fence.
-Nothing before the "{" and nothing after the "}". topic under 100 characters, behavior under 200:
-{"topic":"<concrete topic>","behavior":"<what the person did>"}`;
+Nothing before the "{" and nothing after the "}". behavior under 200 characters:
+{"behavior":"<what the person did>"}`;
 
 /**
  * THE SHAPE, ENFORCED BY THE TRANSPORT rather than requested in prose. Asking for "EXACTLY one line
@@ -117,10 +155,9 @@ Nothing before the "{" and nothing after the "}". topic under 100 characters, be
 export const JUDGE_SCHEMA = JSON.stringify({
   type: 'object',
   properties: {
-    topic: { type: 'string', maxLength: 100 },
     behavior: { type: 'string', maxLength: 200 },
   },
-  required: ['topic', 'behavior'],
+  required: ['behavior'],
   additionalProperties: false,
 });
 
@@ -148,6 +185,10 @@ const APERTURE_BOUNDS: Record<keyof Aperture, readonly [number, number]> = {
   reaction: [800, 1600],
 };
 const APERTURE_SAFETY = 1.2;
+
+/** How much of the PREVIOUS ask to show. Deliberately small and NOT aperture-fitted: this is a
+ *  reminder of where the conversation had got to, not a second exchange to be read closely. */
+const EARLIER_VIEW = 220;
 
 /** The floors — identical to the 0.2.4 static views, used when there is no window to fit from. */
 export const DEFAULT_APERTURE: Aperture = { prompt: 800, said: 1500, reaction: 800 };
@@ -188,7 +229,7 @@ function view(s: string, budget: number, headShare: number): string {
 
 /** The per-turn exchange rendering — a streamed turn carries ONLY this (rules ride the system
  *  prompt, sent once per session). Exported for tests. */
-export function judgeTurnBody(ex: Exchange, aperture: Aperture = DEFAULT_APERTURE): string {
+export function judgeTurnBody(ex: Exchange, aperture: Aperture = DEFAULT_APERTURE, prev?: Exchange): string {
   // What the person did with their hands, when there is anything to say. Omitted entirely when
   // there is not — most exchanges carry no control action, and an empty line would be noise on
   // every one of them.
@@ -201,10 +242,24 @@ export function judgeTurnBody(ex: Exchange, aperture: Aperture = DEFAULT_APERTUR
     ex.interrupted === 'tool-use' ? 'the answer stopped at a permission prompt' : '',
     ex.declined ? 'declined a proposed tool' : '',
   ].filter(Boolean);
+  // WHERE this moment sat. Code-computed, so the rules tell the model to trust it.
+  const context = contextLine(ex);
+  // ONE step back, and only one line of it. Each human message is BOTH the reaction to the previous
+  // turn AND the prompt for the next (`exchange.ts`), so the previous exchange's reaction is
+  // ALREADY below as `PERSON ASKED`. Re-showing the whole neighbour would pay twice for two thirds
+  // of it. The genuinely new information is what they asked one step earlier — hence one line.
+  const earlier = prev ? view(prev.prompt, EARLIER_VIEW, 1) : '';
+  const ran = ranOf(ex);
   return [
+    ...(context ? [`CONTEXT: ${context}`] : []),
+    ...(earlier ? [`EARLIER THEY ASKED: ${earlier}`] : []),
+    ...(context || earlier ? [''] : []),
     `PERSON ASKED: ${view(ex.prompt, aperture.prompt, 0.7)}`,
     '',
     `ASSISTANT SAID: ${view(ex.said, aperture.said, 0.2)}`,
+    // `said` is text only — tool calls are stripped — so without this line the judge reads a turn
+    // that edited twelve files as though it were a paragraph. 57% of exchanges carry one.
+    ...(ran ? [`ASSISTANT ALSO RAN: ${ranLine(ran)}`] : []),
     '',
     `PERSON REACTED: ${view(ex.reaction, aperture.reaction, 1)}`,
     ...(acts.length ? ['', `PERSON ALSO: ${acts.join(' · ')}`] : []),
@@ -212,21 +267,29 @@ export function judgeTurnBody(ex: Exchange, aperture: Aperture = DEFAULT_APERTUR
 }
 
 /** One-shot judge input — the per-call fallback: rules + exchange in a single prompt. */
-export function judgeInput(ex: Exchange, aperture: Aperture = DEFAULT_APERTURE): string {
-  return [JUDGE_RULES, '', judgeTurnBody(ex, aperture)].join('\n');
+export function judgeInput(ex: Exchange, aperture: Aperture = DEFAULT_APERTURE, prev?: Exchange): string {
+  return [JUDGE_RULES, '', judgeTurnBody(ex, aperture, prev)].join('\n');
 }
 
 /** Build a Judgment from a raw model reply — shared by the streamed and one-shot paths. */
 function toJudgment(ex: Exchange, raw: string): Judgment | undefined {
   const parsed = parseJudgeOutput(raw);
   if (!parsed) return undefined;
+  // The facts are attached HERE, from the exchange — never parsed out of the reply. A model that
+  // returned nothing at all would still not be able to lose them.
+  const at = atOf(ex);
+  const did = didOf(ex);
+  const ran = ranOf(ex);
   return {
     hash: ex.hash,
     ts: ex.ts,
     session: ex.session,
     v: PIPELINE_V,
     ...parsed,
-    line: `${parsed.topic} — ${parsed.behavior}`,
+    line: parsed.behavior, // `line` was topic + behavior; with topic dead it IS the behavior
+    ...(at ? { at } : {}),
+    ...(did ? { did } : {}),
+    ...(ran ? { ran } : {}),
   };
 }
 
@@ -236,11 +299,11 @@ function toJudgment(ex: Exchange, raw: string): Judgment | undefined {
  * block); refuses on a bad verdict or a missing field — silence over a malformed judgment.
  * Exported for tests.
  */
-export function parseJudgeOutput(raw: string): { topic: string; behavior: string } | undefined {
+export function parseJudgeOutput(raw: string): { behavior: string } | undefined {
   const m = raw.match(/\{[\s\S]*?\}/);
   if (!m) return undefined;
   try {
-    const o = JSON.parse(m[0]) as Partial<Record<'topic' | 'behavior', unknown>>;
+    const o = JSON.parse(m[0]) as Partial<Record<'behavior', unknown>>;
     // A BACKSTOP above the limits the prompt and schema state, not the design. It cuts on a word
     // boundary: 16% of behaviors used to hit the old cap mid-word, and this text is what the miner
     // mines, so half a word is damaged evidence (measured 2026-07-19).
@@ -261,19 +324,37 @@ export function parseJudgeOutput(raw: string): { topic: string; behavior: string
       const count = s.split(last).length - 1;
       return count % 2 === 1 ? s.slice(0, -1).trim() : s;
     };
-    const topic = unquote(clean(o.topic, 120));
     const behavior = unquote(clean(o.behavior, 240));
-    if (!topic || !behavior) return undefined;
-    return { topic, behavior };
+    if (!behavior) return undefined;
+    return { behavior };
   } catch {
     return undefined;
   }
 }
 
 /** Judge a single exchange. Returns undefined if the assistant couldn't answer — silence over guess. */
-export function judge(ex: Exchange, bin: string, aperture?: Aperture): Judgment | undefined {
-  const raw = runClaude(bin, judgeInput(ex, aperture), 'haiku', 'judge', undefined, JUDGE_SCHEMA);
+export function judge(ex: Exchange, bin: string, aperture?: Aperture, prev?: Exchange): Judgment | undefined {
+  const raw = runClaude(bin, judgeInput(ex, aperture, prev), 'haiku', 'judge', undefined, JUDGE_SCHEMA);
   return raw ? toJudgment(ex, raw) : undefined;
+}
+
+/**
+ * Map each exchange to the one before it IN ITS OWN SESSION.
+ *
+ * Adjacency is checked on `index`, not on array order: the window is sorted by timestamp and
+ * interleaves sessions, so "the previous element" is frequently a different conversation entirely.
+ * An exchange whose predecessor is not in the window simply has none — the judge then sees exactly
+ * what it saw before this feature existed. Exported for tests.
+ */
+export function previousInSession(exchanges: Exchange[]): Map<string, Exchange> {
+  const prevOf = new Map<string, Exchange>();
+  const lastOf = new Map<string, Exchange>();
+  for (const e of exchanges) {
+    const last = lastOf.get(e.session);
+    if (last && e.index !== undefined && last.index === e.index - 1) prevOf.set(e.hash, last);
+    lastOf.set(e.session, e);
+  }
+  return prevOf;
 }
 
 type Cache = Record<string, Judgment>;
@@ -386,13 +467,16 @@ export async function judgeAll(
   // Results are BANKED PER SESSION as they land (C3): a death mid-batch loses at most the chunk
   // in flight, never the paid-for verdicts of the sessions before it.
   const byHash = new Map(toJudge.map((e) => [e.hash, e]));
+  // Built from the WHOLE window, not just the unjudged subset: an exchange's predecessor is very
+  // often already cached, and it is still the right context to read this one against.
+  const prevOf = previousInSession(exchanges);
   const stream = await runStreamBatch(bin, {
     systemPrompt: JUDGE_RULES,
     role: 'judge',
     model: 'haiku',
     feature: 'judge',
     jsonSchema: JUDGE_SCHEMA, // the form is enforced by the transport, not requested in prose
-    items: toJudge.map((e) => ({ id: e.hash, prompt: judgeTurnBody(e, opts.aperture) })),
+    items: toJudge.map((e) => ({ id: e.hash, prompt: judgeTurnBody(e, opts.aperture, prevOf.get(e.hash)) })),
     onTurn: (done, total) => opts.onProgress?.(done, total),
     onSessionResults: (chunk) => {
       for (const [hash, text] of chunk) {
@@ -410,7 +494,7 @@ export async function judgeAll(
     const ex = byHash.get(item.id);
     if (ex) {
       const t0 = Date.now();
-      const j = judge(ex, bin, opts.aperture);
+      const j = judge(ex, bin, opts.aperture, prevOf.get(ex.hash));
       accept(ex, j);
       if (j) {
         turnsMs.push(Date.now() - t0); // a refused call is not a verdict — its wall stays out of the rates

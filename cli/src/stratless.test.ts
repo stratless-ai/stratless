@@ -7,7 +7,7 @@
  */
 import { strict as assert } from 'node:assert';
 import { mkdtempSync, readFileSync, writeFileSync, rmSync, utimesSync, chmodSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { test, before, after } from 'node:test';
 
@@ -17,7 +17,8 @@ import { makePalette } from './palette.js';
 import { shouldCheck, newerThan, dailyCheck, readNotify, writeNotify } from './notify.js';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { parseExchanges, loadRecentExchanges, findExchange } from './exchange.js';
+import { parseExchanges, loadRecentExchanges, findExchange, markFirstOfDay, projectOf, type Exchange } from './exchange.js';
+import { atOf, didOf, ranOf, ranLine, contextLine, humanGap } from './facts.js';
 import { injectProfile, removeProfile, ensureLoaded } from './sink.js';
 import { readState, writeState, synthesisDue, readRenders, writeRender, readBuildCorpus, writeBuildCorpus } from './state.js';
 import { pendingCount, PIPELINE_V as PV } from './judge.js';
@@ -50,9 +51,12 @@ import {
   parseJudgeOutput,
   currentJudgment,
   fitAperture,
+  previousInSession,
   PIPELINE_V,
 } from './judge.js';
 import { installStopHook, readSettings } from './init.js';
+import { shuffleDeterministic, distractorsFor, buildTruthSet, renderSheet, renderSheetJson, scoreSheet } from './truth.js';
+import type { Judgment } from './judge.js';
 
 let dir: string;
 
@@ -189,6 +193,212 @@ test('control actions do not leak into the NEXT exchange', () => {
   assert.equal(ex.length, 2);
   assert.equal(ex[0].interrupted, 'plain', 'the interrupt belongs to the turn it happened in');
   assert.equal(ex[1].interrupted, undefined, 'and is cleared before the next one');
+});
+
+// ── THE FACTS: what the code knows for certain, carried as data (judge v2, 2026-07-20) ──────────
+//
+// Why these exist, measured: `interrupted` used to reach the judge ONLY as an English sentence in a
+// "PERSON ALSO" line. Across the corpus, 140 exchanges carry a control action, 20 of them had been
+// judged, and exactly ONE judgment mentions the fact — a 95% loss on the one signal in the product
+// that is free, objective and certain. Facts now travel as fields. These tests pin that they do,
+// and that adding one can never orphan a cached judgment.
+
+const richUser = (text: string, ts: string, extra: Record<string, unknown> = {}) =>
+  JSON.stringify({ type: 'user', message: { content: text }, timestamp: ts, ...extra });
+
+test('THE HASH IGNORES THE FACTS — project and branch must not orphan a cached judgment', () => {
+  const words = ['why a queue?', 'bursts outrun the worker', 'ok that lands'];
+  const bare = parseExchanges(
+    writeTranscript('bare.jsonl', [u(words[0]), a(words[1]), u(words[2])].join('\n')),
+  );
+  const cwd = join(homedir(), 'stratless-mono', 'cli');
+  const rich = parseExchanges(
+    writeTranscript(
+      'rich.jsonl',
+      [
+        richUser(words[0], '2026-07-01T10:00:00Z', { cwd, gitBranch: 'judge-v2' }),
+        a(words[1]),
+        richUser(words[2], '2026-07-01T10:00:09Z', { cwd, gitBranch: 'judge-v2' }),
+      ].join('\n'),
+    ),
+  );
+  assert.equal(rich[0].hash, bare[0].hash, 'same words = same hash, whatever we learned about the surroundings');
+  assert.equal(rich[0].project, 'stratless-mono/cli', 'home-relative — the home directory never lands in the store');
+  assert.equal(rich[0].branch, 'judge-v2');
+  assert.equal(bare[0].project, undefined, 'and a transcript without them simply has none');
+});
+
+test('PROJECT LABELS MUST NOT COLLIDE — the basename version merged six directories into one', () => {
+  const a1 = projectOf(join(homedir(), 'stratless-mono', 'cli', 'src'));
+  const b1 = projectOf(join(homedir(), 'stratless', 'apps', 'web', 'src'));
+  assert.notEqual(a1, b1, 'basename() called both of these "src" — a false grouping in the one field meant to group truly');
+  assert.equal(projectOf(join(homedir(), 'a', 'b')), 'a/b');
+  assert.equal(projectOf('/opt/elsewhere'), '/opt/elsewhere', 'a path outside HOME is kept whole rather than mangled');
+});
+
+test('position and rhythm are computed once the session is whole', () => {
+  const ex = parseExchanges(
+    writeTranscript(
+      'pos.jsonl',
+      [
+        u('first ask', '2026-07-01T10:00:00Z'),
+        a('first answer', '2026-07-01T10:00:05Z'),
+        u('second ask', '2026-07-01T10:01:00Z'),
+        a('second answer', '2026-07-01T10:01:05Z'),
+        u('third ask', '2026-07-01T10:03:00Z'),
+      ].join('\n'),
+    ),
+  );
+  assert.equal(ex.length, 2);
+  assert.deepEqual(
+    ex.map((e) => e.index),
+    [0, 1],
+    'the judge could not tell the 1st exchange from the 259th; now it can',
+  );
+  assert.equal(ex[0].ofSession, 2);
+  assert.equal(ex[0].gapSec, undefined, 'the first exchange has nothing to measure from — absent, never a fabricated 0');
+  assert.equal(ex[1].gapSec, 120, 'two minutes between one reaction and the next');
+});
+
+test('markFirstOfDay marks exactly one exchange per working day', () => {
+  const list = [
+    { ts: '2026-07-01T10:00:00Z' },
+    { ts: '2026-07-01T12:00:00Z' },
+    { ts: '2026-07-02T12:00:00Z' },
+  ] as Exchange[];
+  markFirstOfDay(list);
+  assert.deepEqual(list.map((e) => e.firstOfDay), [true, undefined, true]);
+});
+
+test('THE UPGRADE IS FREE — a judgment with no facts is still current, so nothing re-judges', () => {
+  const old = { hash: 'h', ts: '2026-07-01T10:00:00Z', session: 's', v: PIPELINE_V, topic: 't', behavior: 'b', line: 'l' };
+  assert.equal(currentJudgment(old), true, 'the 644 already in the cache stay valid — this is why PIPELINE_V stays 2');
+});
+
+test('the fact the judge dropped 19 times in 20 now travels as data, not prose', () => {
+  const ex = parseExchanges(
+    writeTranscript('fact.jsonl', [u('run the deploy'), a('starting'), interruptRec(), u('no, stop')].join('\n')),
+  );
+  assert.equal(didOf(ex[0])?.interrupted, 'plain', 'a field the model cannot decline to mention');
+});
+
+// ── SHOWING the facts to the judge (Block 2 piece 1) ────────────────────────────────────────────
+//
+// Recording a fact makes it unlosable; showing it makes the sentence better informed. Because the
+// recording no longer depends on the model, this is purely additive — the tests below pin that an
+// exchange which knows nothing renders EXACTLY as it always did, so nothing can regress.
+
+test('the context line frames the moment: position, pause, project', () => {
+  const ex = {
+    ts: '2026-07-01T10:00:00Z',
+    index: 39,
+    ofSession: 118,
+    gapSec: 264,
+    project: 'stratless-mono/cli',
+    branch: 'judge-v2',
+  } as Exchange;
+  assert.equal(contextLine(ex), 'exchange 40 of 118 · 4 min later · stratless-mono/cli (judge-v2)');
+});
+
+test('the start of a session says so instead of reporting a gap it does not have', () => {
+  const ex = { ts: '2026-07-01T10:00:00Z', index: 0, ofSession: 12, firstOfDay: true } as Exchange;
+  assert.equal(contextLine(ex), 'exchange 1 of 12 · start of the session · first of the day');
+});
+
+test('gaps are rounded to rhythm, not reported as false precision', () => {
+  assert.equal(humanGap(45), '45s later');
+  assert.equal(humanGap(264), '4 min later');
+  assert.equal(humanGap(1982), '33 min later');
+  assert.equal(humanGap(7200), '2 h later');
+});
+
+test('AN EXCHANGE THAT KNOWS NOTHING RENDERS EXACTLY AS BEFORE — no regression on old material', () => {
+  const bare = { prompt: 'why a queue?', said: 'bursts outrun the worker', reaction: 'ok that lands' } as Exchange;
+  const body = judgeTurnBody(bare);
+  assert.ok(body.startsWith('PERSON ASKED:'), 'no facts means no CONTEXT line and no leading blank');
+  assert.ok(!body.includes('CONTEXT'));
+  assert.ok(!body.includes('EARLIER'));
+});
+
+test('the earlier ask is shown, and it is the one genuinely new line', () => {
+  const prev = { prompt: 'what does the miner do', reaction: 'and how much does it cost' } as Exchange;
+  const ex = { prompt: 'and how much does it cost', said: 'about $24', reaction: 'too much', index: 4, ofSession: 9 } as Exchange;
+  const body = judgeTurnBody(ex, undefined, prev);
+  assert.ok(body.includes('EARLIER THEY ASKED: what does the miner do'));
+  assert.ok(body.includes('PERSON ASKED: and how much does it cost'));
+  assert.equal(
+    prev.reaction,
+    ex.prompt,
+    'each message is the reaction to one turn AND the prompt for the next — which is why only the earlier ASK is new',
+  );
+});
+
+test('the previous exchange is never taken from another session', () => {
+  const win = [
+    { hash: 'a1', session: 's1', index: 0 },
+    { hash: 'b1', session: 's2', index: 0 },
+    { hash: 'a2', session: 's1', index: 1 },
+    { hash: 'b9', session: 's2', index: 7 },
+  ] as Exchange[];
+  const prevOf = previousInSession(win);
+  assert.equal(prevOf.get('a2')?.hash, 'a1', 'adjacency is by index within a session, not by position in the window');
+  assert.equal(prevOf.get('a1'), undefined, 'the first of a session has no predecessor');
+  assert.equal(prevOf.get('b1'), undefined, 'and the interleaved session is never borrowed from');
+  assert.equal(prevOf.get('b9'), undefined, 'a gap in indices means the predecessor is outside the window — none, not wrong');
+});
+
+// ── THE ASSISTANT'S HANDS — the largest fact the judge was never given (57% of exchanges) ───────
+
+const toolAsst = (text: string, tools: string[], ts = '2026-07-01T10:00:05Z') =>
+  JSON.stringify({
+    type: 'assistant',
+    timestamp: ts,
+    message: { content: [{ type: 'text', text }, ...tools.map((name) => ({ type: 'tool_use', name, input: {} }))] },
+  });
+
+test('tools the assistant ran are carried, and do not change the hash', () => {
+  const words = ['fix the parser', 'done', 'ok good'];
+  const bare = parseExchanges(writeTranscript('notools.jsonl', [u(words[0]), a(words[1]), u(words[2])].join('\n')));
+  const withTools = parseExchanges(
+    writeTranscript('tools.jsonl', [u(words[0]), toolAsst(words[1], ['Edit', 'Bash', 'Edit']), u(words[2])].join('\n')),
+  );
+  assert.equal(withTools[0].hash, bare[0].hash, 'the facts never touch the cache key');
+  assert.deepEqual(withTools[0].tools, ['Edit', 'Bash', 'Edit'], 'duplicates kept — they are the SIZE of the work');
+  assert.equal(bare[0].tools, undefined);
+  assert.deepEqual(ranOf(withTools[0]), { tools: ['Edit', 'Bash'], calls: 3 }, 'names deduped, calls counted');
+  assert.equal(ranOf(bare[0]), undefined, 'a turn that only talked has no `ran` at all');
+});
+
+test('the assistant work line is neutral, and states size only when it adds something', () => {
+  assert.equal(ranLine({ tools: ['Edit', 'Bash'], calls: 3 }), 'Edit · Bash (3 calls)');
+  assert.equal(ranLine({ tools: ['Read'], calls: 1 }), 'Read', 'one call, one name — a count would be noise');
+});
+
+test('"ok good" after work reads differently from "ok good" after prose', () => {
+  const ex = parseExchanges(
+    writeTranscript('work.jsonl', [u('fix the parser'), toolAsst('done', ['Edit', 'Bash']), u('ok good')].join('\n')),
+  );
+  const body = judgeTurnBody(ex[0]);
+  assert.ok(body.includes('ASSISTANT ALSO RAN: Edit · Bash'), 'the judge is told work happened');
+  assert.ok(body.indexOf('ASSISTANT ALSO RAN') > body.indexOf('ASSISTANT SAID'), 'it annotates the turn it belongs to');
+});
+
+test('tools do not leak into the next exchange', () => {
+  const ex = parseExchanges(
+    writeTranscript(
+      'toolleak.jsonl',
+      [u('first'), toolAsst('a1', ['Edit']), u('second'), a('a2'), u('third')].join('\n'),
+    ),
+  );
+  assert.equal(ex.length, 2);
+  assert.deepEqual(ex[0].tools, ['Edit']);
+  assert.equal(ex[1].tools, undefined, 'reset with `said`, like every other per-turn fact');
+});
+
+test('empty facts are absent, never empty objects', () => {
+  const bare = { prompt: 'p', said: 's', reaction: 'r', ts: '2026-07-01T10:00:00Z', session: 's', hash: 'h' } as Exchange;
+  assert.equal(atOf(bare), undefined);
+  assert.equal(didOf(bare), undefined, 'roughly 97% of exchanges carry no control action at all');
 });
 
 test('each real human message is the reaction to one turn AND the prompt for the next', () => {
@@ -1037,10 +1247,21 @@ test('EVERY judgment reaches the writer — the `none` gate is gone with the ver
 // ── judgment v2: strict FORM guaranteed in code, free VOCABULARY in the fields ─────────────────
 
 test('parseJudgeOutput: valid JSON parses into validated fields', () => {
-  const p = parseJudgeOutput('{"topic":"the deploy step","behavior":"accepted but pivoted to cost"}');
+  const p = parseJudgeOutput('{"behavior":"accepted but pivoted to cost"}');
   assert.ok(p, 'well-formed output parses');
-  assert.equal(p.topic, 'the deploy step');
   assert.equal(p.behavior, 'accepted but pivoted to cost');
+});
+
+test('TOPIC IS DEAD — a stale topic is ignored, and its absence is not a failure', () => {
+  const withStale = parseJudgeOutput('{"topic":"the deploy step","behavior":"pivoted to cost"}');
+  assert.equal(withStale?.behavior, 'pivoted to cost', 'an old-shaped reply still parses');
+  assert.equal((withStale as Record<string, unknown>).topic, undefined, 'and the dead field is dropped');
+  assert.equal(parseJudgeOutput('{"topic":"only a topic"}'), undefined, 'behavior is the only required field now');
+});
+
+test('a judgment cached with a topic is still current — no re-judging to delete a field', () => {
+  const old = { hash: 'h', ts: '2026-07-01T10:00:00Z', session: 's', v: PIPELINE_V, topic: 'the deploy step', behavior: 'b', line: 'l' };
+  assert.equal(currentJudgment(old), true, 'the old shape is a superset — same play that retired `verdict`');
 });
 
 test('parseJudgeOutput: tolerates prose and stale fields, refuses a missing one', () => {
@@ -1053,7 +1274,7 @@ test('parseJudgeOutput: tolerates prose and stale fields, refuses a missing one'
     'a leftover verdict field is ignored, never a reason to refuse — the old shape is a superset',
   );
   assert.equal(parseJudgeOutput('{"topic":"x"}'), undefined, 'missing behavior = refuse');
-  assert.equal(parseJudgeOutput('{"behavior":"y"}'), undefined, 'missing topic = refuse');
+  assert.ok(parseJudgeOutput('{"behavior":"y"}'), 'behavior ALONE is the contract now — topic died 2026-07-20');
   assert.equal(parseJudgeOutput('transferred — an old v1 line — moved on'), undefined, 'no JSON = refuse, re-judge');
 });
 
@@ -1196,3 +1417,153 @@ test('readSettings: a valid settings.json comes back parsed, untouched', () => {
   assert.equal(read.settings.cleanupPeriodDays, 30);
 });
 
+
+// ── THE TRUTH TEST — the first instrument that asks whether a judgment is RIGHT ─────────────────
+//
+// Everything else measures whether the machinery works. These pin the properties that make a SCORE
+// mean something: a rigged sheet, an unreproducible shuffle, or a decoy from the same conversation
+// would each produce a number that looks like evidence and is not.
+
+const jm = (o: Partial<Judgment> & { hash: string }): Judgment =>
+  ({ ts: '2026-07-01T10:00:00Z', session: 's1', v: PIPELINE_V, behavior: `did thing ${o.hash}`, line: 'l', ...o }) as Judgment;
+
+test('the shuffle is reproducible, and differs between items', () => {
+  const items = ['a', 'b', 'c', 'd', 'e'];
+  assert.deepEqual(shuffleDeterministic(items, 'seed-1'), shuffleDeterministic(items, 'seed-1'), 'same seed = same sheet, so a score can be re-checked');
+  assert.notDeepEqual(shuffleDeterministic(items, 'seed-1'), shuffleDeterministic(items, 'seed-2'), 'different items must not share an ordering');
+  assert.deepEqual([...shuffleDeterministic(items, 'x')].sort(), items, 'nothing is lost or invented');
+});
+
+test('DECOYS NEVER COME FROM THE TARGET\'S OWN SESSION', () => {
+  const target = jm({ hash: 't', session: 'same', at: { project: 'p' } });
+  const pool = [
+    target,
+    jm({ hash: 'x1', session: 'same', at: { project: 'p' } }),
+    jm({ hash: 'x2', session: 'same', at: { project: 'p' } }),
+    jm({ hash: 'ok1', session: 'other', at: { project: 'p' } }),
+    jm({ hash: 'ok2', session: 'other2', at: { project: 'p' } }),
+  ];
+  const d = distractorsFor(target, pool);
+  assert.equal(d.length, 2);
+  assert.ok(d.every((j) => j.session !== 'same'), 'a judgment from the same conversation may describe the SAME act — a wrong answer could be right');
+  assert.ok(d.every((j) => j.hash !== 't'), 'and never the target itself');
+});
+
+test('decoys prefer the same project, so subject matter cannot give the answer away', () => {
+  const target = jm({ hash: 't', session: 's1', at: { project: 'stratless-mono/cli' } });
+  const pool = [
+    target,
+    jm({ hash: 'near1', session: 's2', at: { project: 'stratless-mono/cli' } }),
+    jm({ hash: 'near2', session: 's3', at: { project: 'stratless-mono/cli' } }),
+    jm({ hash: 'far1', session: 's4', at: { project: 'some-other-repo' } }),
+  ];
+  assert.deepEqual(distractorsFor(target, pool).map((j) => j.hash).sort(), ['near1', 'near2']);
+});
+
+test('a question that cannot get two decoys is DROPPED, not shipped with a different baseline', () => {
+  const ex = () => ({ prompt: 'p', said: 's', reaction: 'r' });
+  const thin = [jm({ hash: 'a', session: 's1' }), jm({ hash: 'b', session: 's1' })]; // same session: no legal decoys
+  assert.equal(buildTruthSet(thin, ex, { n: 2 }).length, 0, 'a 2-way question has a 50% baseline and would corrupt the arithmetic');
+});
+
+test('THE SHEET NEVER LEAKS THE ANSWER', () => {
+  const pool = Array.from({ length: 9 }, (_, i) => jm({ hash: `h${i}`, session: `s${i}`, at: { project: 'p' }, behavior: `behavior number ${i}` }));
+  const items = buildTruthSet(pool, () => ({ prompt: 'what about X', said: 'a long answer', reaction: 'go' }), { n: 3 });
+  assert.ok(items.length >= 1);
+  const sheet = renderSheet(items);
+  for (const it of items) {
+    assert.ok(!sheet.includes(it.hash), 'no hash in the sheet');
+    assert.ok(sheet.includes(it.candidates[it.answer]), 'the true sentence is present…');
+    assert.equal(sheet.includes(`**${'ABC'[it.answer]}.** ${it.candidates[it.answer]}\n\n**Answer:** ${'ABC'[it.answer]}`), false, '…but never pre-filled');
+  }
+  assert.ok(!/answer[^:]*:\s*[ABC]\b/i.test(sheet.replace(/\*\*Answer:\*\* $/gm, '')), 'no answer key anywhere in the rendered sheet');
+});
+
+test('QUOTES ARE MASKED IN EVERY CANDIDATE — the first dry run was solvable by string matching', () => {
+  const pool = [
+    jm({ hash: 't', session: 's1', at: { project: 'p' }, behavior: `said 'yes go check the container limits' and escalated` }),
+    jm({ hash: 'd1', session: 's2', at: { project: 'p' }, behavior: `asked "what about the schema" first` }),
+    jm({ hash: 'd2', session: 's3', at: { project: 'p' }, behavior: 'redirected to the parser without quoting anything' }),
+  ];
+  const [item] = buildTruthSet(pool, () => ({ prompt: 'containers for ffmpeg?', said: 'yes', reaction: 'yes go check the container limits' }), { n: 1 });
+  assert.ok(item, 'a question was built');
+  assert.ok(!item.candidates.some((c) => c.includes('yes go check the container limits')), 'the reaction is never repeated back inside a candidate');
+  assert.ok(item.candidates.some((c) => c.includes("'…'")), 'the leaky quote is masked…');
+  assert.ok(item.candidates.some((c) => c.includes('"…"')), '…and so is a DECOY\'s quote, so the mask is not itself a tell');
+});
+
+test('the fillable JSON carries no key and ships the answer field EMPTY', () => {
+  const pool = Array.from({ length: 9 }, (_, i) => jm({ hash: `j${i}`, session: `s${i}`, at: { project: 'p' }, behavior: `behavior ${i}` }));
+  const items = buildTruthSet(pool, () => ({ prompt: 'q', said: 'a', reaction: 'r' }), { n: 3 });
+  const parsed = JSON.parse(renderSheetJson(items)) as { questions: Record<string, string>[] };
+  assert.equal(parsed.questions.length, items.length);
+  for (const q of parsed.questions) assert.equal(q.answer, '', 'a pre-filled answer would be an invitation to agree');
+  for (const it of items) assert.ok(!renderSheetJson(items).includes(it.hash), 'no hash, so the key cannot be re-derived from the sheet');
+  assert.equal(JSON.stringify(parsed).includes('"answerIndex"') || JSON.stringify(parsed).includes('"distractorHashes"'), false, 'no key fields leak into the fillable shape');
+});
+
+test('scoring: accuracy is against ANSWERED items, and "none of these" is counted apart', () => {
+  const items = [
+    { hash: 'a', prompt: '', said: '', reaction: '', candidates: ['x', 'y', 'z'], answer: 0, distractorHashes: [] },
+    { hash: 'b', prompt: '', said: '', reaction: '', candidates: ['x', 'y', 'z'], answer: 1, distractorHashes: [] },
+    { hash: 'c', prompt: '', said: '', reaction: '', candidates: ['x', 'y', 'z'], answer: 2, distractorHashes: [] },
+    { hash: 'd', prompt: '', said: '', reaction: '', candidates: ['x', 'y', 'z'], answer: 0, distractorHashes: [] },
+  ];
+  const s = scoreSheet(items, ['A', 'B', 'A', '-']);
+  assert.equal(s.correct, 2, 'A and B land; the third picked A where C was right');
+  assert.equal(s.none, 1, '"none of these fit" is a MISCHARACTERISATION signal, not a wrong guess');
+  assert.equal(s.answered, 3, 'and it is excluded from the denominator');
+  assert.ok(Math.abs(s.accuracy - 2 / 3) < 1e-9);
+  assert.ok(Math.abs(s.chance - 1 / 3) < 1e-9, 'the baseline the score must beat to mean anything');
+});
+
+// ── SHAPE + lastOfSession: the fact the truth test asked for ────────────────────────────────────
+//
+// Sun, 2026-07-20, on why he asks for a double-check: "(1) im lazy to review the code because the
+// task is too complex, i could not follow, so i just blindly trust AI to do the work AND review
+// it. (2) or when the work done has doubts." Identical words, opposite states, opposite correct
+// responses. The judge recorded every one as (2). Shape is the observable difference — and unlike
+// the state itself it is arithmetic, so no model is asked to guess.
+
+test('shape records TRUE lengths, taken before the 8k cap', () => {
+  const big = 'x'.repeat(9000);
+  const ex = parseExchanges(writeTranscript('shape.jsonl', [u('short ask'), a(big), u('go')].join('\n')));
+  assert.equal(ex[0].shape?.ask, 9, 'the ask');
+  assert.equal(ex[0].shape?.said, 9000, 'the real size of the answer, not the capped 8000');
+  assert.equal(ex[0].shape?.reply, 2, 'and the reply');
+  assert.equal(ex[0].said.length, 8000, 'while the TEXT is still capped for the hash and the view');
+});
+
+test('the generic-ask-after-a-long-answer shape is visible in the data', () => {
+  const ex = parseExchanges(
+    writeTranscript('states.jsonl', [
+      u('fix the parser'),
+      a('x'.repeat(4000)),
+      u('double check the work done'),
+      a('verified'),
+      u('double check the token expiry in auth.ts, i think it is wrong'),
+    ].join('\n')),
+  );
+  assert.equal(ex.length, 2);
+  const [lost, doubting] = ex;
+  assert.ok(lost.shape!.said / lost.shape!.reply > 100, 'a long answer met with a short generic ask');
+  assert.ok(doubting.shape!.reply > lost.shape!.reply, 'versus a longer, specific one');
+});
+
+test('lastOfSession marks the closing act, and only it', () => {
+  const ex = parseExchanges(
+    writeTranscript('close.jsonl', [u('first'), a('a1'), u('second'), a('a2'), u('third')].join('\n')),
+  );
+  assert.equal(ex.length, 2);
+  assert.equal(ex[0].lastOfSession, undefined);
+  assert.equal(ex[1].lastOfSession, true, '"ended it here" was invisible before this');
+  assert.equal(atOf(ex[1])?.lastOfSession, true, 'and it reaches the judgment');
+});
+
+test('shape and lastOfSession do not change the hash', () => {
+  const words = [u('why a queue?'), a('bursts outrun the worker'), u('ok')].join('\n');
+  const one = parseExchanges(writeTranscript('h1.jsonl', words));
+  const two = parseExchanges(writeTranscript('h2.jsonl', words));
+  assert.ok(one[0].shape, 'shape is present');
+  assert.equal(one[0].hash, two[0].hash, 'same words = same hash, facts and all');
+});

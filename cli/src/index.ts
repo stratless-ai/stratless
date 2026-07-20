@@ -18,7 +18,7 @@ import { dailyCheck, fetchLatest, newerThan } from './notify.js';
 import { health } from './canary.js';
 import { loadRecentExchanges, sessionCount, findExchange } from './exchange.js';
 import { judgeAll, cacheHealth, fitAperture, allJudgments, pendingCount, type Judgment } from './judge.js';
-import { topTopics, type Corpus } from './synthesize.js';
+import { topProjects, type Corpus } from './synthesize.js';
 import { loadPatterns, displayOrder, matchReceiptPrefix, MIN_RECEIPTS, type PatternStore } from './miner.js';
 import { removeProfile, humanMdPath, claudeMdPath } from './sink.js';
 import { readRenders, writeRender, writeBuildCorpus, readBuildCorpus, type RenderMeta } from './state.js';
@@ -257,7 +257,7 @@ async function profiler(rest: string[] = []): Promise<void> {
     const corpus: Corpus = {
       sessions,
       exchanges: signal.length,
-      topics: topTopics(signal),
+      projects: topProjects(signal),
       from: window[0].ts.slice(0, 10),
       to: window[window.length - 1].ts.slice(0, 10),
     };

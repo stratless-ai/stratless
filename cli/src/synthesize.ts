@@ -36,8 +36,10 @@ const synthModel = (): string => process.env.STRATLESS_SYNTH_MODEL || 'sonnet';
 export interface Corpus {
   sessions: number;
   exchanges: number;
-  /** the most-judged topics, most first — the pile's own centre of gravity */
-  topics?: string[];
+  /** what the person actually works on, most first — the pile's own centre of gravity.
+   *  Was `topics` until 2026-07-20: topics measured 99.5% UNIQUE, so "most common" returned
+   *  singletons. `project` repeats (47 distinct across the archive) and no model produced it. */
+  projects?: string[];
   /** earliest / latest exchange dates (YYYY-MM-DD), to describe the span */
   from?: string;
   to?: string;
@@ -46,6 +48,9 @@ export interface Corpus {
 function ground(corpus: Corpus): string {
   const bits = [`${corpus.sessions} sessions`, `${corpus.exchanges} judged exchanges`];
   if (corpus.from && corpus.to) bits.push(`${corpus.from} → ${corpus.to}`);
+  // Wired in 2026-07-20. The old `topics` slot was COMPUTED, STORED, AND NEVER READ — ground()
+  // ignored it entirely, so the writer never saw the pile's subject matter at all.
+  if (corpus.projects?.length) bits.push(`mostly ${corpus.projects.slice(0, 4).join(', ')}`);
   return bits.join(' · ');
 }
 
@@ -399,14 +404,20 @@ export function synthesizeReport(judgments: Judgment[], corpus: Corpus, bin: str
   return out ? deDash(out) : undefined;
 }
 
-/** The pile's own centre of gravity — the topics that come up most, for grounding + `stats`.
- *  (v2: reads the structured topic field — no more parsing the rendered line by its separator.) */
-export function topTopics(judgments: Judgment[], n = 8): string[] {
+/**
+ * The pile's own centre of gravity — what the person works on most, for grounding + `stats`.
+ *
+ * Was `topTopics`, reading the judge's `topic` field. That field is dead (99.5% unique, so it could
+ * never group) and this function was returning singletons dressed as a ranking. `at.project` is the
+ * replacement: 47 distinct values across the archive, they repeat, and no language model produced
+ * any of them.
+ */
+export function topProjects(judgments: Judgment[], n = 8): string[] {
   const counts = new Map<string, number>();
   for (const j of judgments) {
-    const topic = j.topic?.trim().toLowerCase();
-    if (!topic) continue;
-    counts.set(topic, (counts.get(topic) ?? 0) + 1);
+    const project = j.at?.project?.trim();
+    if (!project) continue;
+    counts.set(project, (counts.get(project) ?? 0) + 1);
   }
   return [...counts.entries()]
     .sort((a, b) => b[1] - a[1])

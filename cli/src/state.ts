@@ -181,7 +181,7 @@ export function writeRender(kind: 'profile' | 'report', meta: RenderMeta, file: 
  */
 export interface BuildCorpus {
   builtAt: string;
-  corpus: { sessions: number; exchanges: number; topics?: string[]; from?: string; to?: string };
+  corpus: { sessions: number; exchanges: number; projects?: string[]; from?: string; to?: string };
   /** the signal judgments' content hashes — reloaded from the cache at read time, never re-judged */
   signalHashes: string[];
 }
@@ -202,7 +202,7 @@ export function readBuildCorpus(file: string = buildCorpusPath()): BuildCorpus |
       corpus: {
         sessions: Number(c.sessions),
         exchanges: Number(c.exchanges),
-        ...(Array.isArray(c.topics) ? { topics: c.topics.filter((t): t is string => typeof t === 'string') } : {}),
+        ...(Array.isArray(c.projects) ? { projects: c.projects.filter((t): t is string => typeof t === 'string') } : {}),
         ...(typeof c.from === 'string' ? { from: c.from } : {}),
         ...(typeof c.to === 'string' ? { to: c.to } : {}),
       },
