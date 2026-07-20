@@ -6,7 +6,7 @@ title: Install
 
 **Your AI has no idea who it's talking to.** So it explains everything at one altitude: over your head, or under it.
 
-stratless reads your coding assistant's own session history, the conversations it already keeps on your disk, and judges whether understanding actually transferred in each exchange. From that it writes a **HUMAN.md**: a short profile of how you work, what you know, and where you get stuck. Your assistant loads it at the start of every session, so it meets you at your level.
+stratless reads your coding assistant's own session history, the conversations it already keeps on your disk, and records what you actually did in each exchange. From that it writes a **HUMAN.md**: a short profile of how you work, what you know, and where you get stuck. Your assistant loads it at the start of every session, so it meets you at your level.
 
 It runs on your machine. There is no account, no API key, no cloud, and no server.
 

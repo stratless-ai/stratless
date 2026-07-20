@@ -5,59 +5,131 @@
 
 /* ── fonts ──────────────────────────────────────────────────────────────── */
 /* (Code retired 2026-07-06 — it's unicase, so as the body/UI font it forced all-caps UI text; body/UI now
-   uses Inter. Evogria = CTA only, Epetri = logo only, Space Grotesk = headlines, mono = technical labels.) */
-@font-face {
-  font-family: 'Evogria';
-  src: url('/fonts/evogria.woff2') format('woff2');
-  font-weight: 400;
-  font-style: normal;
-  font-display: optional;
-}
-@font-face {
-  font-family: 'Evogria';
-  src: url('/fonts/evogria-italic.woff2') format('woff2');
-  font-weight: 400;
-  font-style: italic;
-  font-display: optional;
-}
+   uses Inter. Evogria = CTA only, Epetri = logo only, Space Grotesk = headlines, mono = technical labels.)
+
+   THE LOADING STRATEGY, AND THE BUG THAT WROTE IT.
+   ------------------------------------------------
+   These faces shipped `font-display: optional` from 2026-07-16 (db5330f, "kill the font flash") until
+   2026-07-20. `optional` gives a font ~100ms to arrive; miss that and the browser uses the fallback AND IS
+   FORBIDDEN FROM EVER SWAPPING for that page load. On a FIRST visit the browser pays DNS + TLS + TCP before
+   the font request even starts, so it cannot win 100ms. Measured on production: only 3 of 12 first-ever
+   visits painted the real fonts — the other 9 rendered the whole site in system sans, permanently, having
+   downloaded all 163KB and thrown it away. One refresh fixed it 12/12, which is why nobody who had already
+   visited the site could see the bug.
+
+   `swap` is not a bug you fix with a preload. A preload changes DISCOVERY ORDER, not physics — it still
+   costs a round trip. So:
+
+     1. THE BRAND FACES ARE INLINED, not fetched. Epetri (wordmark) and Evogria (CTA) are subset to
+        printable ASCII and embedded below as data: URIs. Zero round trips, so they are correct on the
+        FIRST PAINT, always — no race to lose. All CSS is inlined into each prerendered page, so these
+        bytes arrive with the HTML. Cost: ~6.8KB per route. Worth it; these two carry the brand.
+     2. THE TEXT FACES USE `swap` + A METRIC-MATCHED FALLBACK. `swap` guarantees the real font eventually
+        renders. The paired `* Fallback` faces below scale Arial to the same advance widths and line box,
+        so the swap restyles glyphs almost without moving layout. Measured across all 10 routes × 4
+        gestures: worst CLS 0.0044 (docs prose), homepage 0.0003, and every shift is horizontal
+        (dy=0) — a centred heading breathing a pixel, never content pushed down the page. Google's
+        "good" threshold is 0.1, so this spends <5% of the budget. The forced-fallback render differs
+        from the real one by 0.24% on the h1 and 0.09% on the lede, with identical document height.
+        Under the old `optional` CLS was a true 0, but only because
+        nothing ever swapped — the metric was clean precisely because the bug was silent.
+
+   Regenerate the subsets (fonttools; produces the base64 below):
+     python3 -m fontTools.subset epetri.woff2  --unicodes=U+0020-007E --flavor=woff2 \
+       --layout-features='*' --no-hinting --output-file=epetri-ascii.woff2
+     python3 -m fontTools.subset evogria.woff2 --unicodes=U+0020-007E --flavor=woff2 \
+       --layout-features='*' --no-hinting --output-file=evogria-ascii.woff2
+   ASCII rather than the exact 25-char CTA charset on purpose: a future button label can never render a
+   missing glyph. That silent-brand-break is the class of bug this whole block exists to prevent. */
+
+/* Epetri — the wordmark ("tratless"), inlined. 2,620B → 1,620B subset. */
+/* `block`, not `swap`, for the two INLINED faces — and this distinction is the whole point.
+   `swap` paints fallback first and corrects later; for a fetched face that is right, because the
+   alternative is waiting on a network. But these two have NO network to wait for, only a few ms of
+   font decode, so `swap` buys nothing and costs a visible flash of the wrong wordmark and the wrong
+   CTA. `block` holds just those glyphs invisible for that decode and then paints them correct — the
+   brand never renders wrong, not for one frame. (Verified: at 400kbps/300ms the CTA read "Install"
+   in system sans under `swap`; under `block` it is "INSTALL" in Evogria from the first painted frame.)
+   The 3s `block` timeout is unreachable here — there is no request that can be slow. */
 @font-face {
   font-family: 'Epetri';
-  src: url('/fonts/epetri.woff2') format('woff2');
+  src: url('data:font/woff2;base64,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') format('woff2');
   font-weight: 400;
   font-display: block;
 }
+/* Evogria — the CTA face (unicase → all-caps punch), inlined. 19,316B → 3,564B subset.
+   The italic face was deleted 2026-07-20: `--font-cta` is consumed only by `.btn`, and no button is ever
+   italic, so evogria-italic.woff2 (20,356B) was unreachable payload. */
+@font-face {
+  font-family: 'Evogria';
+  src: url('data:font/woff2;base64,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') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+
 /* Space Grotesk (Google Fonts, OFL — free for commercial use) — the headline face. Has TRUE lowercase, so
    sentence-case headlines work (Evogria/Code/Epetri are all unicase). Self-hosted; 400-700 map to the Bold file. */
 @font-face {
   font-family: 'Space Grotesk';
   src: url('/fonts/space-grotesk.woff2') format('woff2');
   font-weight: 400 700;
-  font-display: optional;
+  font-display: swap;
 }
-/* Inter — the readable text face (same as Firecrawl), self-hosted (no Google Fonts fetch). Prose + subheads. */
+/* Inter — the readable text face (same as Firecrawl), self-hosted (no Google Fonts fetch). Prose + subheads.
+   Weights 500 and 600 were deleted 2026-07-20 (48,724B): 500's three consumers resolve to 400 by CSS font
+   matching with no synthetic bolding, and 600's one visible consumer (.nav-link.active) now uses 700, a
+   face we already ship. 700 must stay — it backs UA-default bold on <strong> across every docs page. */
 @font-face {
   font-family: 'Inter';
   src: url('/fonts/inter/inter-400.woff2') format('woff2');
   font-weight: 400;
-  font-display: optional;
-}
-@font-face {
-  font-family: 'Inter';
-  src: url('/fonts/inter/inter-500.woff2') format('woff2');
-  font-weight: 500;
-  font-display: optional;
-}
-@font-face {
-  font-family: 'Inter';
-  src: url('/fonts/inter/inter-600.woff2') format('woff2');
-  font-weight: 600;
-  font-display: optional;
+  font-display: swap;
 }
 @font-face {
   font-family: 'Inter';
   src: url('/fonts/inter/inter-700.woff2') format('woff2');
   font-weight: 700;
-  font-display: optional;
+  font-display: swap;
+}
+
+/* METRIC-MATCHED FALLBACKS — what makes `swap` free.
+   Arial scaled so its advance widths and line box match the real face, so when the webfont swaps in,
+   nothing reflows. Linux has no Arial; Liberation Sans and Arimo are metric-compatible stand-ins, and if
+   none resolve the family is simply skipped and the stack falls through to ui-sans-serif.
+   Values MEASURED, never guessed. size-adjust = (width of a representative string in the real face) /
+   (same string in Arial at the same weight); then ascent-override = (hhea.ascender / unitsPerEm) /
+   size-adjust, and descent likewise. Re-run if a font file is ever replaced.
+   ⚠️ MEASURE WITH A DOM SPAN, NOT `canvas.measureText`. Canvas silently substitutes when a family is
+   unavailable and reports the SUBSTITUTE's width with no error — during this fix that produced 91.04%
+   for Space Grotesk when the true figure is 101.55%, and shipped a fallback 9.7% too narrow. The
+   OS/2.xAvgCharWidth table field is also unreliable here (it gave 126%); its definition changed between
+   OS/2 versions and subset fonts recompute it over a different glyph set. Rendered spans are truth. */
+@font-face {
+  font-family: 'Space Grotesk Fallback';
+  src: local('Arial Bold'), local('Arial'), local('Liberation Sans'), local('Arimo');
+  size-adjust: 99.71%;
+  ascent-override: 98.69%;
+  descent-override: 29.29%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: 'Inter Fallback';
+  src: local('Arial'), local('Liberation Sans'), local('Arimo');
+  font-weight: 400;
+  size-adjust: 106.56%;
+  ascent-override: 90.91%;
+  descent-override: 22.64%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: 'Inter Fallback';
+  src: local('Arial Bold'), local('Arial'), local('Liberation Sans'), local('Arimo');
+  font-weight: 700;
+  size-adjust: 101.95%;
+  ascent-override: 95.03%;
+  descent-override: 23.66%;
+  line-gap-override: 0%;
 }
 
 /* ── tokens ─────────────────────────────────────────────────────────────── */
@@ -70,10 +142,13 @@
   --accent-deep: #3f7f97; /* deeper blue for primary CTAs (pale #a3cfdc reads weak on paper) */
   --accent-soft: rgba(163, 207, 220, 0.28);
 
-  --font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif; /* headlines (lowercase → sentence case) */
+  /* The `* Fallback` entries are the metric-matched Arial faces declared above — they sit BETWEEN the real
+     face and the generic stack so the pre-swap frame occupies identical space. Evogria and Epetri are
+     inlined (no network, no swap), so they need no fallback and keep the plain generic stack. */
+  --font-display: 'Space Grotesk', 'Space Grotesk Fallback', ui-sans-serif, system-ui, sans-serif; /* headlines (lowercase → sentence case) */
   --font-cta: 'Evogria', ui-sans-serif, system-ui, sans-serif; /* CTA buttons (unicase → all-caps punch) */
-  --font-body: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; /* body + UI (Inter) */
-  --font-read: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; /* readable prose — subhead + body (Inter, self-hosted) */
+  --font-body: 'Inter', 'Inter Fallback', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; /* body + UI (Inter) */
+  --font-read: 'Inter', 'Inter Fallback', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; /* readable prose — subhead + body (Inter, self-hosted) */
   --font-mark: 'Epetri', ui-monospace, monospace; /* wordmark / logo only */
   --font-mono: ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Menlo, monospace; /* code */
 

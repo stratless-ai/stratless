@@ -23,6 +23,25 @@ pnpm -r typecheck
 pnpm dev:web        # run stratless.com locally   (pnpm generate = static build)
 ```
 
+### Verifying a web change — `pnpm dev:web` is NOT enough
+
+`nuxi dev` serves every asset from localhost in under 5ms, so anything whose failure depends on
+network timing is invisible there. That blind spot cost four days: `font-display: optional` shipped
+2026-07-16, looked perfect in dev and in `nuxi generate`, and left **9 of every 12 first-time
+visitors** reading stratless.com in system sans — permanently, since `optional` forbids the swap.
+
+For anything touching CSS, fonts, or above-the-fold rendering, check the **production build over a
+cold, throttled connection**:
+
+```
+pnpm --filter ./web generate
+pnpm --filter ./web preview          # serves .output/public — what Cloudflare actually gets
+pnpm --filter ./web check:fonts      # automated: cold profile + throttling, in a real browser
+```
+
+In DevTools, "Disable cache" alone is not a first visit — use a fresh profile or an incognito window
+plus network throttling, because a warm DNS/TLS connection is most of what a first visitor pays for.
+
 ## Boundaries
 
 - 🚫 **Never auto-commit.** Stage explicit pathspecs, leave the tree green and uncommitted; a human commits.
@@ -31,5 +50,6 @@ pnpm dev:web        # run stratless.com locally   (pnpm generate = static build)
 - ✅ **Docs move with the code.** A PR that changes `cli/` behavior updates `web/content/docs/` and `cli/README.md` in the same PR — the site describing a previous version is a trust bug. (CI nudges: `.github/workflows/docs-nudge.yml`.)
 - ✅ **Numbers in copy are computed, never typed.** The site's version badge and line-count claim both come from the build (`web/nuxt.config.ts`); never hand-write either, anywhere.
 - ✅ **One sample profile.** The npm README sample, the hero terminal, and `web/content/samples/HUMAN.md` show the same profile — update them together or not at all.
-- ✅ Leave `pnpm -r typecheck`, `pnpm -r build`, and `pnpm test` green before handing work back.
+- ✅ **Fonts: two lists that must agree.** The `@font-face` sources in `web/assets/css/main.css` and the `<link rel=preload>` list in `web/nuxt.config.ts` describe the same set. They drifted once and shipped a four-day outage. `pnpm --filter ./web check:fonts` enforces it; CI runs it before deploy.
+- ✅ Leave `pnpm -r typecheck`, `pnpm -r build`, and `pnpm test` green before handing work back. For `web/` changes that touch rendering, also leave `pnpm --filter ./web check:fonts` green.
 - ✅ End commit messages with: `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`

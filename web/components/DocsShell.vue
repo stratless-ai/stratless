@@ -176,7 +176,9 @@ useSeo({
 .nav-link.active {
   color: var(--accent-deep);
   border-left-color: var(--accent-deep);
-  font-weight: 600;
+  /* 700, not 600: the Inter 600 face was dropped 2026-07-20 (24,452B for this one rule). 700 is a face we
+     already ship, so the weight cue survives without a fifth font request. */
+  font-weight: 700;
 }
 .docs-body {
   min-width: 0;

@@ -31,7 +31,7 @@
  */
 import { spawn } from 'node:child_process';
 import { recordUsage, type CallCost } from './usage.js';
-import { TOOLLESS_ARGS } from './claude.js';
+import { CLEAN_ARGS, TOOLLESS_ARGS } from './claude.js';
 
 /** Streamed prompts start with this — isRealPrompt drops `<`-prefixed messages (pinned by test). */
 export const SENTINEL_PREFIX = '<stratless-';
@@ -70,6 +70,9 @@ export interface StreamBatchResult {
 export interface StreamOpts {
   /** the instructions, sent once per session via --append-system-prompt */
   systemPrompt: string;
+  /** JSON Schema the reply must satisfy — rides --json-schema, enforcing the form in the transport
+   *  instead of asking for it in prose. Measured 4x shorter replies and zero parse failures. */
+  jsonSchema?: string;
   /** sentinel tag for this role, e.g. 'judge' | 'audit' — becomes `<stratless-judge>` */
   role: string;
   model?: string;
@@ -78,7 +81,7 @@ export interface StreamOpts {
   items: StreamItem[];
   /** per-turn watchdog; prototype measured 6–14s typical turns (default 90s) */
   turnTimeoutMs?: number;
-  /** rotate the session after this many turns — bounds the cached-prefix growth (default 25) */
+  /** rotate the session after this many turns — bounds the cached-prefix growth (default 8) */
   maxTurnsPerSession?: number;
   /** MAX_THINKING_TOKENS for the child; undefined = inherit. The dogfood decides the default. */
   maxThinkingTokens?: number;
@@ -143,7 +146,9 @@ function runSession(bin: string, opts: StreamOpts, items: StreamItem[]): Promise
         '--output-format', 'stream-json',
         '--verbose',
         ...TOOLLESS_ARGS, // C9: the borrow asks; it never gets hands
+        ...CLEAN_ARGS, // and it arrives knowing nothing but the question — see claude.ts
         ...(opts.model ? ['--model', opts.model] : []),
+        ...(opts.jsonSchema ? ['--json-schema', opts.jsonSchema] : []),
         '--append-system-prompt', opts.systemPrompt,
       ],
       { stdio: ['pipe', 'pipe', 'pipe'], env },
@@ -310,11 +315,18 @@ export async function runStreamBatch(bin: string, opts: StreamOpts): Promise<Str
   }
   const results = new Map<string, string>();
   const turnsMs: number[] = [];
-  // Rotation tuning (dogfood 2026-07-17): at 25 turns the growing prefix (~2.5k tokens/turn,
-  // re-read by every later turn) ate most of the streaming win — 12 balances boot amortization
-  // against the growth tax. STRATLESS_STREAM_ROTATE overrides for measurement.
+  // Rotation tuning. 25 → 12 (dogfood 2026-07-17): the growing prefix, re-read by every later
+  // turn, ate most of the streaming win. 12 → 8 (measured 2026-07-19): the boot toll fell ~3.5x
+  // when `--tools ""` entered the spawn (25.6k → 7.2k tokens), so a rotation tuned against the
+  // old toll was carrying more prefix than it needed to. Swept 2/4/8/12 over a fixed sample:
+  // 8 came out ~17% cheaper per verdict than 12 ($0.0098 vs $0.0118) at the same session count.
+  //
+  // The floor is stability, not cost: rotation 2 spent TWELVE sessions to land seven verdicts —
+  // rapid spawn/kill cycles die before their first result and still pay a full boot. Do not chase
+  // the prefix below this without re-checking the failure rate, which dominates cost by ~9x.
+  // STRATLESS_STREAM_ROTATE overrides for measurement.
   const envRotate = Number(process.env.STRATLESS_STREAM_ROTATE);
-  const rotate = opts.maxTurnsPerSession ?? (Number.isFinite(envRotate) && envRotate > 0 ? envRotate : 12);
+  const rotate = opts.maxTurnsPerSession ?? (Number.isFinite(envRotate) && envRotate > 0 ? envRotate : 8);
   const envBackoff = Number(process.env.STRATLESS_BACKOFF_BASE_MS);
   const backoffBase = opts.backoffBaseMs ?? (Number.isFinite(envBackoff) && envBackoff > 0 ? envBackoff : 1000);
   let retries = 0; // total backoff retries this batch — the reported truth

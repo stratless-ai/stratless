@@ -25,8 +25,13 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          git fetch -q origin "${{ github.base_ref }}"
-          changed="$(git diff --name-only "origin/${{ github.base_ref }}"...HEAD)"
+          # Compare against the base SHA from the event, never the base BRANCH NAME. A PR stacked on
+          # another branch keeps that branch as its base; once the lower PR merges, the branch is
+          # deleted and `git fetch origin <name>` exits 128, failing this job for a reason that has
+          # nothing to do with the diff. The SHA is immutable and stays fetchable. (PR #27, 2026-07-20.)
+          base="${{ github.event.pull_request.base.sha }}"
+          git fetch -q origin "$base" || true
+          changed="$(git diff --name-only "$base"...HEAD)"
           echo "$changed"
           if echo "$changed" | grep -qE '^(web/content/docs/|cli/README\.md)'; then
             echo "docs moved too — nothing to say."
