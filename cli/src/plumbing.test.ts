@@ -21,10 +21,8 @@ import { acquireLock, releaseLock, readLock, lockIsStale, spawnDetached } from '
 import { summarizeTurns, appendRun, stageRates, etaMs, startRun, STOPWATCH_KEEP } from './stopwatch.js';
 import { runStreamBatch, isTransientFailure } from './stream.js';
 import { runClaude, parseJsonResult, CLEAN_ARGS, TOOLLESS_ARGS } from './claude.js';
-import { mostRecent } from './synthesize.js';
 import { readState, writeState, type RunRecord } from './state.js';
 import { readUsage, recordUsage } from './usage.js';
-import type { Judgment } from './judge.js';
 
 let dir: string;
 /** Where the compiled modules live — child-process fixtures import them by absolute URL. */
@@ -523,30 +521,6 @@ test('C9: the streamed session spawns tool-less too', async () => {
   }
 });
 
-// ── C10 — recency is right-way-up: MOST RECENT means newest, by timestamp, from any order ──────
-
-const j = (ts: string): Judgment => ({
-  hash: `h-${ts}`,
-  ts,
-  session: 's',
-  v: 2,
-  topic: 't',
-  behavior: 'b',
-  line: `line ${ts}`,
-});
-
-test('C10: mostRecent returns the newest N newest-first, whatever order the caller holds', () => {
-  const days = ['2026-07-01', '2026-07-05', '2026-07-03', '2026-07-17', '2026-07-10'].map((d) => j(`${d}T10:00:00Z`));
-  const newestFirst = mostRecent(days, 3).map((x) => x.ts.slice(0, 10));
-  assert.deepEqual(newestFirst, ['2026-07-17', '2026-07-10', '2026-07-05'], 'newest three, newest first');
-  const reversed = mostRecent([...days].reverse(), 3).map((x) => x.ts.slice(0, 10));
-  assert.deepEqual(reversed, newestFirst, 'input order is irrelevant — B2 can never come back');
-  assert.equal(mostRecent(days, 99).length, 5, 'n past the end takes everything');
-  // The exact shape of B2: a newest-first pile sliced with .slice(-25) took the OLDEST. Pin the fix.
-  const pile = Array.from({ length: 40 }, (_, i) => j(`2026-06-${String((i % 30) + 1).padStart(2, '0')}T0${i % 10}:00:00Z`));
-  const sortedNewestFirst = [...pile].sort((a, b) => b.ts.localeCompare(a.ts));
-  assert.deepEqual(mostRecent(sortedNewestFirst, 25), sortedNewestFirst.slice(0, 25), 'the newest 25, not the oldest');
-});
 
 // ── C11 — no unmetered call, no pin escape, unsaid ─────────────────────────────────────────────
 

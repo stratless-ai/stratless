@@ -23,29 +23,14 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { atomicWriteFileSync, CorruptStoreError } from './atomic.js';
 import { findAssistant } from './claude.js';
-import { loadRecentExchanges, sessionCount } from './exchange.js';
-import { judgeAll, cachedCount, allJudgments, fitAperture } from './judge.js';
-import { mine, auditPatterns, gradePatterns, loadPatterns } from './miner.js';
+import { loadRecentExchanges } from './exchange.js';
 import { dailyCheck } from './notify.js';
 import { refreshArmed } from './init.js';
-import { injectProfile, ensureLoaded, humanMdPath } from './sink.js';
-import { readState, writeState, synthesisDue, writeRender, writeBuildCorpus, SYNTH_EVERY } from './state.js';
-import { startRun } from './stopwatch.js';
+import { readState, SYNTH_EVERY } from './state.js';
 import { readUsage, diffUsage, fmtTokens } from './usage.js';
 import { killActiveSession } from './stream.js';
-import {
-  synthesizeProfile,
-  synthesizeReport,
-  synthesizeProfileFromPatterns,
-  synthesizeReportFromPatterns,
-  artifactShapeProblem,
-  mostRecent,
-  topProjects,
-  type Corpus,
-} from './synthesize.js';
 import { acquireLock, releaseLock, lockFilePath } from './worker.js';
 import { writeProgress } from './progress.js';
-import type { Judgment } from './judge.js';
 
 const STRATLESS_DIR = join(homedir(), '.stratless');
 
@@ -83,39 +68,17 @@ export function installedVersion(): string {
   }
 }
 
-export interface Rendered {
-  text?: string;
-  /** the numbers-lint refused: these numerals were invented */
-  invented?: string[];
-  /** the shape lint refused: what the output looked like instead of an artifact */
-  malformed?: string;
-}
-
 /**
- * Build either rendering — from the mined patterns when they exist, else the flat pile read.
- * Pure of terminal concerns: both refusal lints (invented numbers, artifact shape) come back as
- * data; the CLI and the worker each say no in their own voice. No refusal ever loads.
+ * `Rendered` and `buildRendered` lived here: they chose between the flat-pile synthesis and the
+ * pattern-era one, then ran the two refusal lints. Both synthesis paths are gone with the miner.
+ *
+ * THE LINTS MUST COME BACK in stage 4, and they are the part worth remembering rather than the
+ * plumbing. The numbers-lint refuses a rendering containing a numeral that is not in the evidence.
+ * The shape lint exists because a chatter reply was once LOADED as HUMAN.md in production
+ * (2026-07-18) — the artifact has to look like an artifact. `write.ts` assembles the file in code
+ * rather than asking a model for it, which removes the *source* of both failures; that is a reason
+ * to expect the lints to stay quiet, not a reason to ship without them.
  */
-export function buildRendered(kind: 'profile' | 'report', signal: Judgment[], corpus: Corpus, bin: string): Rendered {
-  const store = loadPatterns();
-  let out: Rendered;
-  let patternEra = false;
-  if (!store.patterns.length) {
-    const text = kind === 'profile' ? synthesizeProfile(signal, corpus, bin) : synthesizeReport(signal, corpus, bin);
-    out = text ? { text } : {};
-  } else {
-    patternEra = true;
-    const synth = kind === 'profile' ? synthesizeProfileFromPatterns : synthesizeReportFromPatterns;
-    out = synth(store.patterns, mostRecent(signal, 25), corpus, bin);
-  }
-  if (out.text) {
-    // THE SHAPE LINT (C9's second half, pulled forward after B1 struck production 2026-07-18:
-    // a chatter reply was LOADED as HUMAN.md). The artifact must look like an artifact.
-    const problem = artifactShapeProblem(out.text, { kind, patternEra });
-    if (problem) return { malformed: problem };
-  }
-  return out;
-}
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -193,124 +156,18 @@ export async function runWorker(opts: { force?: boolean } = {}): Promise<number>
     if (!window.length) {
       summary.push('no conversations found yet — talk to your assistant a few times, then run `stratless update`');
     } else {
-      for (const e of window) knownHashes.add(e.hash);
-      const sw = startRun();
-      const sessions = sessionCount(window);
-      const aperture = fitAperture(window);
-      const tJudge = Date.now();
-      const run = await judgeAll([...window].reverse(), bin, {
-        limit: judgeLimit(),
-        aperture,
-        onProgress: (done, total) => writeProgress({ phase: 'judging', startedAt, done, total }),
-      });
-      sw.stage('judge', Date.now() - tJudge, run.fresh, run.turnsMs);
-      if (!run.judgments.length) {
-        sw.record();
-        return fail(['could not read a single exchange — is `claude -p` working?']);
-      }
-
-      const state = readState();
-      const gate = synthesisDue(state, cachedCount(), new Date(), { every: synthEvery() });
-      const noProfile = !existsSync(humanMdPath());
-
-      if (!force && !noProfile && !gate.due) {
-        writeState({ ...state, aperture: { ...aperture, computedAt: new Date().toISOString() } });
-        if (run.fresh) sw.record();
-        ensureLoaded();
-        const judged = run.fresh ? `judged ${run.fresh} new` : 'nothing new to judge';
-        summary.push(`profile is fresh enough (${judged} · ${gate.newSince}/${synthEvery()} toward the next build)`);
-      } else {
-        // The expensive rungs — mine, audit, grade, write, load — behind the one gate.
-        const signal = run.judgments;
-        const corpus: Corpus = {
-          sessions,
-          exchanges: signal.length,
-          projects: topProjects(signal),
-          from: window[0].ts.slice(0, 10),
-          to: window[window.length - 1].ts.slice(0, 10),
-        };
-        const pile = allJudgments();
-        writeProgress({ phase: 'mining', startedAt });
-        const tMine = Date.now();
-        const mined = mine(pile, bin);
-        sw.stage('mine', Date.now() - tMine, mined.assigned);
-        writeProgress({ phase: 'auditing', startedAt });
-        const tAudit = Date.now();
-        const audited = await auditPatterns(pile, bin);
-        sw.stage('audit', Date.now() - tAudit, audited.calls);
-        writeProgress({ phase: 'grading', startedAt });
-        const tGrade = Date.now();
-        const graded = await gradePatterns(pile, bin);
-        sw.stage('grade', Date.now() - tGrade, graded.graded);
-
-        writeProgress({ phase: 'writing', startedAt });
-        const tSynth = Date.now();
-        const built = buildRendered('profile', signal, corpus, bin);
-        sw.stage('synthesis', Date.now() - tSynth, built.text ? 1 : 0);
-        sw.record();
-        if (built.invented?.length) {
-          return fail([
-            `refused: the writer invented numbers (${built.invented.join(', ')}) — nothing was written or loaded`,
-            'this build is discarded; try again with `stratless update --now`',
-          ]);
-        }
-        if (built.malformed) {
-          return fail([
-            `refused: the writer returned ${built.malformed} instead of a profile — nothing was written or loaded`,
-            'this build is discarded; try again with `stratless update --now`',
-          ]);
-        }
-        if (!built.text) {
-          return fail(['could not build the profile — the assistant returned nothing; silence beats a guess']);
-        }
-
-        const builtAt = new Date().toISOString();
-        atomicWriteFileSync(join(STRATLESS_DIR, 'profile.txt'), `${built.text}\n`);
-        writeRender('profile', { builtAt, sessions, exchanges: signal.length });
-        // Freeze this build's corpus so `profile --read` can render the human-facing note over
-        // EXACTLY this evidence later (lazy, no re-read) — never a divergent window.
-        writeBuildCorpus({ builtAt, corpus, signalHashes: signal.map((j) => j.hash) });
-        const { humanMd, claudeMd } = injectProfile(built.text);
-        writeState({
-          ...readState(),
-          lastSynthesisAt: builtAt,
-          judgmentsAtLastSynthesis: cachedCount(),
-          aperture: { ...aperture, computedAt: builtAt },
-        });
-
-        const why = force ? 'forced with --now' : noProfile ? 'first load' : gate.reason;
-        const spend = run.fresh ? `${run.fresh} new, ${run.cached} from cache` : `all ${run.cached} from cache`;
-        const more = run.deferred ? ` · ${run.deferred} left for next run` : '';
-        const gradeNote = graded.graded
-          ? ` · graded ${graded.graded}${graded.surprised ? ` (${graded.surprised} surprised${graded.flagged ? `, ${graded.flagged} flagged` : ''})` : ''}`
-          : '';
-        const mineNote = mined.mined
-          ? ` · mined ${mined.assigned} → ${audited.store.patterns.length} patterns${audited.evicted ? `, ${audited.evicted} receipts evicted` : ''}${gradeNote}`
-          : gradeNote;
-        summary.push(`profile refreshed and loaded (${why} · ${spend}${more}${mineNote})`);
-        summary.push(`wrote ${humanMd}`);
-        summary.push(`pointed ${claudeMd} at it (via @import)`);
-      }
-
-      // THE RE-SCAN — one look back for exchanges that arrived WHILE working. Arrivals only
-      // (never the deferred backlog: the announced bill is a promise, and the window drains over
-      // runs by design), rung 1 only (gates wait for the next wake — no silent second mine).
-      const window2 = loadRecentExchanges(JUDGE_WINDOW);
-      const arrivals = window2.filter((e) => !knownHashes.has(e.hash));
-      if (arrivals.length) {
-        const sw2 = startRun();
-        const t2 = Date.now();
-        const run2 = await judgeAll([...arrivals].reverse(), bin, {
-          limit: judgeLimit(),
-          aperture: fitAperture(window2),
-          onProgress: (done, total) => writeProgress({ phase: 'judging', startedAt, done, total }),
-        });
-        sw2.stage('judge', Date.now() - t2, run2.fresh, run2.turnsMs);
-        if (run2.fresh) {
-          sw2.record();
-          summary.push(`also judged ${run2.fresh} new that arrived during the build`);
-        }
-      }
+      // STAGE 0 of the discovery pipeline. Everything that used to happen here — judge, mine, audit,
+      // grade, write — has been removed rather than kept alive alongside its replacement, so that the
+      // compiler names every real dependency instead of leaving us to guess the blast radius.
+      //
+      // The plumbing around it deliberately stays: the lock, the progress frames, the re-scan window,
+      // the version check, the receipt. Those are not what was wrong, they are well tested, and
+      // keeping them exercised means stages 1-4 slot into a harness that already works.
+      //
+      // Until stage 2 lands, this spends nothing and says so.
+      summary.push(
+        `read ${window.length} exchange${window.length === 1 ? '' : 's'} · the profile pipeline is being rebuilt, so nothing was judged or written`,
+      );
     }
 
     // The daily version line rides ONLY on --auto consent (the installed hook is the consent
