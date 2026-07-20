@@ -13,6 +13,17 @@ pnpm install
 pnpm dev
 ```
 
+### Before you ship a rendering change
+
+`pnpm dev` serves fonts and CSS from localhost in <5ms, which hides anything that depends on network
+timing. Check the real build over a cold, throttled connection instead:
+
+```
+pnpm generate      # the static build Cloudflare receives
+pnpm preview       # serve .output/public
+pnpm check:fonts   # cold browser profile + throttling; the gate CI runs before deploy
+```
+
 ## What's in here
 
 Nuxt 3, `markdown-it`, and **nothing else**. No modules. The docs renderer is 83 lines

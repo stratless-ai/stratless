@@ -53,22 +53,26 @@ export default defineNuxtConfig({
         // the platform's corner mask never exposes gaps. Regenerate: wrap favicon.svg in a 180×180
         // page on #A3CFDC, screenshot with headless chrome (same trick as scripts/og-card.html).
         { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png' },
-        // PRELOAD EVERY ABOVE-THE-FOLD FONT.
+        // PRELOAD EVERY FONT THAT IS STILL FETCHED.
         //
-        // All four are `font-display: swap`, so without a preload the browser paints the page in
-        // ui-sans-serif, THEN the real font arrives and every headline, paragraph and button
-        // visibly jumps. That flash-of-the-wrong-font on each refresh is the "default that isn't
-        // the main view" — the fonts are discovered late, inside the CSS, after the first paint.
+        // This list must equal the set of url('/fonts/…') sources in assets/css/main.css. It drifted
+        // once and it cost us: from 2026-07-16 to 2026-07-20 this comment claimed "all four are
+        // font-display: swap" while the CSS actually said `optional`, because db5330f changed main.css
+        // and never touched this file. `optional` gives a font ~100ms and then FORBIDS the swap, so 9
+        // of every 12 first-time visitors rendered the entire site in system sans — permanently, after
+        // downloading all 163KB. See the long note above the @font-face blocks in main.css.
         //
-        // The preload hint moves them into the very first request wave, so they land before the
-        // text does and nothing swaps. Only epetri (2.6KB, the logo) was preloaded before, which is
-        // why the logo was the one thing that never flickered.
+        // What a preload does and does not do: it moves discovery into the first request wave. It does
+        // NOT remove the round trip. On a cold connection (DNS + TLS + TCP) no preload can beat a 100ms
+        // deadline — which is exactly why the fix was to stop depending on winning that race, not to
+        // add more hints. Epetri and Evogria are no longer here because they are now inlined as data:
+        // URIs in main.css: zero round trips, correct on the first paint, no race to lose.
         //
-        // Every one of these is visible in the hero:
-        { rel: 'preload', as: 'font', type: 'font/woff2', href: '/fonts/space-grotesk.woff2', crossorigin: '' }, // h1
-        { rel: 'preload', as: 'font', type: 'font/woff2', href: '/fonts/inter/inter-400.woff2', crossorigin: '' }, // body
-        { rel: 'preload', as: 'font', type: 'font/woff2', href: '/fonts/evogria.woff2', crossorigin: '' }, // the CTA buttons
-        { rel: 'preload', as: 'font', type: 'font/woff2', href: '/fonts/epetri.woff2', crossorigin: '' }, // the logo wordmark
+        // The three below are `font-display: swap` with metric-matched fallbacks, so a late arrival
+        // restyles text without moving it. Preloading still buys a faster correct frame.
+        { rel: 'preload', as: 'font', type: 'font/woff2', href: '/fonts/space-grotesk.woff2', crossorigin: '' }, // h1-h4
+        { rel: 'preload', as: 'font', type: 'font/woff2', href: '/fonts/inter/inter-400.woff2', crossorigin: '' }, // body + prose
+        { rel: 'preload', as: 'font', type: 'font/woff2', href: '/fonts/inter/inter-700.woff2', crossorigin: '' }, // <strong>, active nav
       ],
       meta: [
         { name: 'description', content: DESC },

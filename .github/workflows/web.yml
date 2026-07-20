@@ -34,6 +34,16 @@ jobs:
       # nuxi generate prerenders every route to static HTML. A broken import or a failed prerender
       # dies HERE — the gate before anything reaches the domain.
       - run: pnpm --filter ./web generate
+      # THE FONT GATE — the check that did not exist when `font-display: optional` shipped and left 9
+      # of every 12 first-time visitors reading the site in system sans for four days. `nuxi generate`
+      # cannot catch that (it never evaluates @font-face) and the smoke test below cannot either (it
+      # discards the body). This drives a real browser with a cold profile on a throttled link, which
+      # is the only condition where the failure exists. It runs BEFORE deploy, so a regression stops
+      # here instead of reaching the domain. Details: web/scripts/check-fonts.mjs
+      - name: font gate
+        run: pnpm --filter ./web check:fonts
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
       - name: deploy
         run: pnpm --filter ./web exec wrangler pages deploy .output/public --project-name=stratless --branch=main --commit-dirty=true
         env:
