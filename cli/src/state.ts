@@ -62,6 +62,9 @@ export interface SynthState {
   aperture?: { prompt: number; said: number; reaction: number; computedAt: string };
   /** the stopwatch (C8): the last runs' measured walls — every ETA and quote derives from these */
   stopwatch?: RunRecord[];
+  /** the last build's scoreboard rate (corrections per 100 messages), for the next build's delta —
+   *  "corrections: 5.2 per 100 messages (was 6.1 last build)". The one number the person watches. */
+  scoreboard?: { rate: number; at: string };
 }
 
 /** Read the state. Missing or corrupt reads as never-synthesized and never throws. */
@@ -86,6 +89,10 @@ export function readState(file: string = statePath()): SynthState {
     }
     const runs = validRuns(raw.stopwatch);
     if (runs.length) out.stopwatch = runs;
+    const sb = raw.scoreboard;
+    if (sb && typeof sb === 'object' && Number.isFinite(Number(sb.rate)) && typeof sb.at === 'string') {
+      out.scoreboard = { rate: Number(sb.rate), at: sb.at };
+    }
     return out;
   } catch {
     return {}; // fails open — one extra synthesis, never a crash

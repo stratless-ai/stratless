@@ -105,6 +105,16 @@ export function runClaude(
   /** JSON Schema the reply must satisfy (--json-schema). The JSON rung only: the plain-text rung
    *  exists for a CLI too old to know --output-format json, which will not know this either. */
   schema?: string,
+  /**
+   * MAX_THINKING_TOKENS for the borrowed child. Undefined inherits the environment (extended
+   * thinking on); 0 turns it off. Assignment is a mechanical per-item presence check where thinking
+   * is pure waste — measured 43,516 output tokens for a 5,334-token answer, ~3x the bill — so it
+   * passes 0. Discovery, a genuine reasoning pass, leaves it unset. `stream.ts` already caps its
+   * own child this way (MAX_THINKING_TOKENS on the spawn env); this brings the one-shot rung to the
+   * same parity, which it lacked — a worker's runClaude call inherited an uncapped environment and
+   * paid the full 3x, invisibly.
+   */
+  maxThinkingTokens?: number,
 ): string | undefined {
   // Prefer JSON (metered, is_error-checked); fall back to plain text on the SAME pinned model for
   // a CLI without JSON output. THE PROMPT COMES BEFORE --tools: `--tools` is variadic and would
@@ -116,10 +126,16 @@ export function runClaude(
     { args: ['-p', ...modelArgs, ...CLEAN_ARGS, input, ...TOOLLESS_ARGS], json: false },
   ];
 
+  // The child inherits our environment, save for the thinking cap when the caller sets one. Built
+  // once — both rungs spawn the same child.
+  const childEnv =
+    maxThinkingTokens === undefined ? process.env : { ...process.env, MAX_THINKING_TOKENS: String(maxThinkingTokens) };
+
   for (const { args, json } of attempts) {
     try {
       const out = execFileSync(bin, args, {
         encoding: 'utf8',
+        env: childEnv,
         timeout: timeoutMs, // sized PER CALL: a one-line judgment needs little; a mining pass over
         // dozens of judgments legitimately thinks for minutes (dogfood 2026-07-17: the default
         // 120s made mining structurally impossible — every attempt timed out, silently)

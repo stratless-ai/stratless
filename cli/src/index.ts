@@ -4,7 +4,7 @@
  *
  *   stratless init      keep your history (add --auto for the after-session refresh)
  *   stratless profile   see the model of you — LOOKS, never spends; update LOADS
- *   stratless update    read what's new; rebuild + load the profile when due (--now: always)
+ *   stratless update    read what's new; rebuild + load the profile
  *   stratless stop      turn it off — stop refreshing and unload the profile
  *   stratless status    stratless's own state: on or off, and what it has cost
  *   stratless stats     your assistant's activity in a project, in raw counts
@@ -178,7 +178,7 @@ async function profiler(_rest: string[] = []): Promise<void> {
  * exchanges costs cents; the SYNTHESIS is the expensive read (~32 judge calls' worth — measured,
  * 2026-07-16), so it is gated: sessions accumulate judgments, the profile consumes them in batches.
  * Due = enough new evidence (synthEvery) · a stale profile with anything new at all (the backstop)
- * · no profile on disk yet · the cache was reset · or `--now`. A gated skip still guarantees an
+ * · no profile on disk yet · the cache was reset. A gated skip still guarantees an
  * existing profile is loaded (covers `update` after `stop`) — the skip is invisible, only the cost
  * is missing.
  */
@@ -258,8 +258,7 @@ async function tailWorker(spawnedAtMs: number, prevStamp: string): Promise<numbe
  * and pipes get one line and their prompt back. Ctrl-C mid-watch detaches the display, never the
  * work; the kill ladder is printed at that exact moment of intent.
  */
-async function update(rest: string[]): Promise<void> {
-  const force = rest.includes('--now');
+async function update(_rest: string[]): Promise<void> {
   const bin = findAssistant();
   if (!bin) {
     console.error(`\n  ${C.bad('stratless needs your assistant to read your history.')}`);
@@ -275,7 +274,7 @@ async function update(rest: string[]): Promise<void> {
 
   const holder = readLock();
   const alive = !!(holder && !lockIsStale(holder));
-  // A foreground command (profile/report --now in another terminal) holds the same lock but
+  // A foreground command (another stratless command in another terminal) holds the same lock but
   // narrates nothing — tailing it would render a LEFTOVER frame as this run's outcome. Respect it.
   if (alive && holder!.kind !== 'worker') {
     console.log(`\n  ${C.it('another stratless command is running')} ${C.dim(`(pid ${holder!.pid}) — nothing was spent; try again when it finishes.`)}\n`);
@@ -288,9 +287,6 @@ async function update(rest: string[]): Promise<void> {
   if (alive) {
     const watching = process.stderr.isTTY ? ' — watching it' : '';
     console.log(`\n  ${C.dim(`a refresh is already running (pid ${holder!.pid})${watching}`)}`);
-    if (force) {
-      console.log(`  ${C.dim(`note: it may not be a forced rebuild; if you still want one, run \`${hint('stratless update --now')}\` after it finishes`)}`);
-    }
   } else {
     // The bill is announced BEFORE the worker spends a token — same disclosure, new mouth. The
     // estimate came from the judge's pending count; the discovery pipeline has to be able to price
@@ -300,7 +296,7 @@ async function update(rest: string[]): Promise<void> {
     if (abs) env.STRATLESS_CLAUDE_BIN = abs; // C5: the claude path, captured while the PATH is real
     spawnedAtMs = Date.now();
     const entry = fileURLToPath(import.meta.url);
-    const pid = spawnDetached(process.execPath, [entry, '__worker', ...(force ? ['--now'] : [])], env);
+    const pid = spawnDetached(process.execPath, [entry, '__worker'], env);
     if (!pid) {
       console.error(`\n  ${C.bad('could not start the background refresh.')}\n`);
       process.exit(1);
@@ -436,11 +432,11 @@ async function status(rest: string[] = []): Promise<void> {
 const COMMAND_ARGS: Record<string, { flags: string[]; positionals: number }> = {
   init: { flags: ['--auto'], positionals: 0 },
   profile: { flags: [], positionals: 0 },
-  update: { flags: ['--now'], positionals: 0 },
+  update: { flags: [], positionals: 0 },
   status: { flags: ['--check'], positionals: 0 },
   stats: { flags: [], positionals: 0 },
   stop: { flags: [], positionals: 0 },
-  __worker: { flags: ['--now'], positionals: 0 },
+  __worker: { flags: [], positionals: 0 },
 };
 
 /** Tiny edit distance — enough for a did-you-mean on short flags, no dependency. */
@@ -478,14 +474,6 @@ async function main(): Promise<void> {
 
   if (cmd === '--version' || cmd === '-v' || cmd === 'version') {
     console.log(`stratless ${installedVersion()}`);
-    return;
-  }
-
-  // `profile --now` retired: profile only looks now. Nudge to the command that rebuilds AND loads
-  // (before strict-args rejects the unknown flag with a less helpful message).
-  if (cmd === 'profile' && args.includes('--now')) {
-    console.log(`\n  ${C.it('profile only looks; it does not rebuild.')}`);
-    console.log(`  ${C.dim(`to rebuild your profile and load it: ${C.b(hint('stratless update --now'))}`)}\n`);
     return;
   }
 
@@ -551,7 +539,7 @@ async function main(): Promise<void> {
 
     ${C.b('stratless init')}       ${C.dim('keep your history safe (add --auto for background refresh)')}
     ${C.b('stratless profile')}    ${C.dim('see the model of you — free, instant, never spends')}
-    ${C.b('stratless update')}     ${C.dim('read what is new; rebuild + load the profile when due (--now: always)')}
+    ${C.b('stratless update')}     ${C.dim('read what is new; rebuild + load the profile')}
     ${C.b('stratless stop')}       ${C.dim('turn it off — stop refreshing and unload the profile')}
     ${C.b('stratless status')}     ${C.dim("stratless's own state and what it has cost (--check: newer version?)")}
     ${C.b('stratless stats')}      ${C.dim("your assistant's activity in a project: raw counts, free")}
@@ -567,7 +555,7 @@ async function main(): Promise<void> {
   try {
     if (cmd === '__worker') {
       // hidden: the doorbells spawn this — the worker process's whole life is runWorker()
-      process.exitCode = await runWorker({ force: args.includes('--now') });
+      process.exitCode = await runWorker();
       return;
     }
     if (cmd === 'stats') return stats(cwd);
