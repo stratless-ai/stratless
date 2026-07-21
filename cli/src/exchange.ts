@@ -21,8 +21,19 @@ import { DEFAULT_ROOTS, PASTE_BOUND, dayKey, readSessions, turnsOfFile, type Tur
 export interface Exchange {
   /** what the person asked that opened this turn — their words */
   prompt: string;
-  /** what the assistant said back, its own words (text only; tool calls stripped) */
+  /** what the assistant said back, its own words (text only; tool calls stripped). Keeps the TAIL —
+   *  the reaction answers the END of the turn — so for a turn over the cap this is its ending. */
   said: string;
+  /**
+   * The OPENING of that same turn — the head, a FACT outside the hash.
+   *
+   * `said` keeps the tail because the reaction answers the end; `saidHead` keeps the start because
+   * the start is often the TRIGGER. "why are you coding suddenly?" reacts to the assistant
+   * ANNOUNCING it would code, which lives in the opening move and nowhere else. For a long turn the
+   * head cannot be recovered from `said` (that is the tail window), so it is captured separately.
+   * Absent when the assistant said nothing — an opener, or a tool-only turn.
+   */
+  saidHead?: string;
   /** how the person reacted — the next thing they said. THIS carries the signal. */
   reaction: string;
   /** ISO timestamp of the reaction (falls back to the AI turn's) */
@@ -114,6 +125,10 @@ export interface Exchange {
  *  under 600 chars anyway), but `said` keeps its TAIL — the reaction answers the END of the
  *  assistant's turn (measured 2026-07-16). */
 const CAP = 8000;
+
+/** How much of the assistant's OPENING to keep as a fact. Small: the opening MOVE (jump to action,
+ *  hedge, restate) is legible in the first few hundred characters; a moment stores less again. */
+const SAID_HEAD = 800;
 
 /**
  * The identity of one exchange — CONTENT ONLY, and it stays that way.
@@ -216,6 +231,9 @@ export function exchangesOfTurns(turns: Turn[], session: string): Exchange[] {
         ts: t.ts || saidTs,
         session,
         hash: hashOf(p, saidText, r),
+        // The head is a fact, outside the hash — the same slice discipline as `said`, from the other
+        // end. Absent when the assistant said nothing at all.
+        ...(saidRaw ? { saidHead: saidRaw.slice(0, SAID_HEAD) } : {}),
         ...(interrupted ? { interrupted } : {}),
         ...(declined ? { declined } : {}),
         // Facts — outside the hash by construction: hashOf() is called above with the three text
