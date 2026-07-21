@@ -30,6 +30,7 @@ export const MIN_CONVERSATIONS = 3;
 const MIN_FOR_TREND = 6;
 const RISE = 1.3;
 const FADE = 0.7;
+const WEEK_MS = 7 * 24 * 3600 * 1000;
 
 /** A moment paired with the categories it carries — the join every metric reads. */
 export interface Labelled {
@@ -87,6 +88,20 @@ export function direction(labelled: Labelled[], name: string): 'rising' | 'fadin
   return undefined;
 }
 
+/** True when a single ISO week holds at least half a category's moments — concentrated in a bad
+ *  stretch, a fact neither the count nor the trend captures. */
+function isBurst(carry: Labelled[]): boolean {
+  const weeks = new Map<number, number>();
+  for (const l of carry) {
+    const t = Date.parse(l.moment.ts);
+    if (Number.isFinite(t)) {
+      const w = Math.floor(t / WEEK_MS);
+      weeks.set(w, (weeks.get(w) ?? 0) + 1);
+    }
+  }
+  return weeks.size > 0 && Math.max(...weeks.values()) / carry.length >= 0.5;
+}
+
 /** One category's full arithmetic. */
 export interface CategoryStat {
   name: string;
@@ -94,6 +109,8 @@ export interface CategoryStat {
   count: number;
   sessions: number;
   lift: number;
+  /** an ISO week holds ≥50% of the members — concentrated in a bad stretch vs spread evenly */
+  burst: boolean;
   direction?: 'rising' | 'fading';
   bornAt: string;
   firstSeen?: string;
@@ -109,7 +126,7 @@ export function tally(labelled: Labelled[], categories: Category[]): CategorySta
   return categories.map((c) => {
     const carry = labelled.filter((l) => l.kinds.includes(c.name));
     if (!carry.length) {
-      return { name: c.name, description: c.description, count: 0, sessions: 0, lift: 0, bornAt: c.bornAt, ...(c.scope ? { scope: c.scope } : {}) };
+      return { name: c.name, description: c.description, count: 0, sessions: 0, lift: 0, burst: false, bornAt: c.bornAt, ...(c.scope ? { scope: c.scope } : {}) };
     }
     const neg = carry.filter((l) => isNegative(l.moment)).length;
     const ord = carry.filter((l) => l.moment.pile === 'ordinary').length;
@@ -121,6 +138,7 @@ export function tally(labelled: Labelled[], categories: Category[]): CategorySta
       count: carry.length,
       sessions: new Set(carry.map((l) => l.moment.session)).size,
       lift: computeLift(neg, negTotal, ord, ordTotal),
+      burst: isBurst(carry),
       ...(dir ? { direction: dir } : {}),
       bornAt: c.bornAt,
       firstSeen: ts[0],

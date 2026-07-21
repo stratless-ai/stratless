@@ -93,6 +93,17 @@ test('direction: rising when the late half is denser; undefined below the eviden
   assert.equal(direction(few, 'x'), undefined, 'three points is not a trend');
 });
 
+test('tally: burst flags a category concentrated in one week', () => {
+  seq = 0;
+  const labelled: Labelled[] = [];
+  for (const d of [1, 8, 15, 22, 29]) labelled.push(lab('ordinary', `sp${d}`, ['spread'], day(d))); // one per week
+  for (let i = 0; i < 5; i++) labelled.push(lab('ordinary', `bu${i}`, ['bursty'], day(10))); // five in one week
+  labelled.push(lab('ordinary', 'bu5', ['bursty'], day(25))); // + one later
+  const stats = tally(labelled, [cat('spread'), cat('bursty')]);
+  assert.equal(stats.find((s) => s.name === 'spread')!.burst, false, 'spread across weeks is not bursty');
+  assert.equal(stats.find((s) => s.name === 'bursty')!.burst, true, 'concentrated in one week is bursty');
+});
+
 test('scoreboardLine: bare, then with the last-build delta', () => {
   const board = { rate: 5.2, signalMoments: 3, total: 58, signalCategories: ['drift'] };
   assert.equal(scoreboardLine(board), 'corrections: 5.2 per 100 messages');

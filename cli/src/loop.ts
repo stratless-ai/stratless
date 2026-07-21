@@ -30,10 +30,12 @@ import { buildMoments, loadMoments } from './moments.js';
 import { loadCategories } from './categories.js';
 import { assignMoments, loadAssignments } from './assign.js';
 import { join as joinLabelled, scoreboard, scoreboardLine } from './count.js';
+import { buildProfile, looksLikeProfile } from './write.js';
+import { injectProfile, humanMdPath } from './sink.js';
 import { startRun } from './stopwatch.js';
 import { dailyCheck } from './notify.js';
 import { refreshArmed } from './init.js';
-import { readState, writeState, SYNTH_EVERY } from './state.js';
+import { readState, writeState, writeRender, SYNTH_EVERY } from './state.js';
 import { readUsage, diffUsage, fmtTokens } from './usage.js';
 import { killActiveSession } from './stream.js';
 import { acquireLock, releaseLock, lockFilePath } from './worker.js';
@@ -190,6 +192,24 @@ export async function runWorker(): Promise<number> {
         }
         // Remember this build's rate for next run's delta — best-effort; a lost write costs one delta.
         writeState({ ...readState(), scoreboard: { rate: board.rate, at: new Date().toISOString() } });
+
+        // STAGE 4: build and install HUMAN.md — the profile the person actually reads. Only when
+        // there is something new to reflect (or none exists yet), so the quote picker's one model
+        // call is skipped on a no-op day.
+        if (res.assigned > 0 || !existsSync(humanMdPath())) {
+          const writeStart = Date.now();
+          const profile = buildProfile();
+          sw.stage('write', Date.now() - writeStart, profile ? 1 : 0);
+          if (profile && looksLikeProfile(profile.text)) {
+            injectProfile(profile.text); // writes ~/.claude/HUMAN.md AND points CLAUDE.md at it — the load
+            writeRender('profile', { builtAt: new Date().toISOString(), sessions: profile.meta.sessions, exchanges: profile.meta.moments });
+            summary.push(
+              `profile written and loaded · ${profile.meta.signals} distress signal${profile.meta.signals === 1 ? '' : 's'} + ${profile.meta.working} working-style trait${profile.meta.working === 1 ? '' : 's'}${profile.meta.shorthand ? ` + ${profile.meta.shorthand} shorthand handles` : ''}`,
+            );
+          } else {
+            summary.push('profile not rebuilt — not enough clear evidence yet');
+          }
+        }
       }
     }
     sw.record();
