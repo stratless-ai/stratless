@@ -11,9 +11,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, before, after } from 'node:test';
 
-import { assignMoments, loadAssignments } from './assign.js';
+import { assignMoments, assignAgainst, loadAssignments } from './assign.js';
 import { appendCategories } from './categories.js';
-import type { Moment } from './moments.js';
+import { loadMoments, type Moment } from './moments.js';
 
 // A fake `claude`: it reads the moments it was shown and — unless FAKE_MODE=thin — returns an
 // assignment for every one (drift for #1, an INVALID name for #2, empty for the rest). `thin`
@@ -102,4 +102,13 @@ test('assign: a batch that comes back too thin is refused, not frozen', async ()
   process.env.FAKE_MODE = 'thin'; // answers 1 of 3 — below the 50% coverage floor
   assert.equal((await assignMoments()).assigned, 0, 'the truncated batch is left for next run, not stamped matched-nothing');
   assert.equal(loadAssignments(a).length, 0);
+});
+
+test('assignAgainst: assigns a given set against given categories, firing onRecords per batch', async () => {
+  scene(3, CATS);
+  const persisted: unknown[] = [];
+  const res = await assignAgainst(process.env.STRATLESS_CLAUDE_BIN!, loadMoments(), CATS, { onRecords: (recs) => persisted.push(...recs) });
+  assert.equal(res.records.length, 3, 'one record per moment');
+  assert.equal(persisted.length, 3, 'onRecords fired for the batch (kill-safe append hook)');
+  assert.equal(res.stopped, false);
 });

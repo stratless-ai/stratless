@@ -21,8 +21,10 @@
  *      retired removes. Unknown event kinds are ignored, so a newer writer never breaks an older
  *      reader.
  *
- * STAGE 2 only ever WRITES `born` (the seed). `revised`/`retired` are recognised on read so the
- * format is settled now, but nothing emits them until discovery (stage 3) can.
+ * WRITERS only ever emit `born` today (the seed script, and discovery at cold start). `revised` and
+ * `retired` are recognised on read so the format is settled ahead of any writer — but nothing emits
+ * them yet: cold start ships only the survivors, so a pruned category is never written, never a
+ * tombstone. A writer arrives when steady-state revision does.
  *
  * NO MODEL CALLS. Everything here is code. Cost is zero.
  */
@@ -98,9 +100,9 @@ export function loadCategories(file: string = storePath()): Category[] {
 }
 
 /**
- * Append `born` events for a set of categories, all stamped with one birth date. Used only to SEED
- * the store from a category set found elsewhere (the prototype, and — until stage 3 — nothing else).
- * A single write, so a crash tears at most the boundary. Returns how many were written.
+ * Append `born` events for a set of categories, all stamped with one birth date. The primary writer
+ * is discover (stage 3), which mints categories from the person's own pile; the dev-only seed script
+ * uses it too. A single write, so a crash tears at most the boundary. Returns how many were written.
  */
 export function appendCategories(
   cats: { name: string; description: string; scope?: string }[],
@@ -122,3 +124,4 @@ export function appendCategories(
   appendFileSync(file, lines.join('\n') + '\n');
   return lines.length;
 }
+

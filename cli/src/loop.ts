@@ -29,8 +29,9 @@ import { findAssistant } from './claude.js';
 import { buildMoments, loadMoments } from './moments.js';
 import { loadCategories } from './categories.js';
 import { assignMoments, loadAssignments } from './assign.js';
-import { join as joinLabelled, scoreboard, scoreboardLine } from './count.js';
+import { join as joinLabelled, scoreboard, scoreboardLine, misfitRate } from './count.js';
 import { buildProfile, looksLikeProfile } from './write.js';
+import { discover, rediscover } from './discover.js';
 import { injectProfile, humanMdPath } from './sink.js';
 import { startRun } from './stopwatch.js';
 import { dailyCheck } from './notify.js';
@@ -88,6 +89,12 @@ export function installedVersion(): string {
  * rather than asking a model for it, which removes the *source* of both failures; that is a reason
  * to expect the lints to stay quiet, not a reason to ship without them.
  */
+
+/** Re-discovery: when the misfit rate over the last window stays above the trigger, mint the new
+ *  behaviours — but no more than once per cooldown, so it can never run away. */
+const REDISCOVER_WINDOW_MS = 14 * 24 * 3600 * 1000;
+const REDISCOVER_COOLDOWN_MS = 7 * 24 * 3600 * 1000;
+const REDISCOVER_MISFIT = 0.15;
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -153,62 +160,94 @@ export async function runWorker(): Promise<number> {
 
     // STAGES 1-2 of the discovery pipeline, in a harness (lock, progress frames, receipt, version
     // check) that predates them and stays put. Build the pile (free), assign the new moments against
-    // the live categories (the spend), add up the columns (free), print the scoreboard. Discovery
-    // (stage 3, which mints the categories) and the file (stage 4) are not wired yet — so with no
-    // categories on disk this reads the pile and says so, spending nothing.
+    // the live categories (the spend), add up the columns (free), write the profile. With no
+    // categories yet, discover mints them from the pile (cold start); at steady state a rising misfit
+    // rate re-discovers the behaviours we have no column for.
     const sw = startRun();
     const built = buildMoments();
 
     if (!built.total) {
       summary.push('no conversations found yet — talk to your assistant a few times, then run `stratless update`');
     } else {
-      const cats = loadCategories();
+      let cats = loadCategories();
+      let changed = false; // categories or assignments changed this run → force the profile rebuild
+
       if (!cats.length) {
-        summary.push(
-          `read ${built.total} moment${built.total === 1 ? '' : 's'} · no categories yet — discovery lands them in the next stage, so nothing was assigned`,
-        );
+        // COLD START (stage 3): discover mints the categories and writes the assignments store.
+        const discoverStart = Date.now();
+        const dr = await discover({
+          onProgress: (l) => writeProgress({ phase: 'starting', startedAt, summary: [l] }),
+          shouldStop: () => stopRequested,
+        });
+        sw.stage('discover', Date.now() - discoverStart, dr.assigned);
+        cats = loadCategories();
+        if (dr.categories) {
+          changed = true;
+          // Start the re-discovery cooldown clock here too — otherwise the first steady-state run
+          // after a cold start sees "never discovered" and could re-mint immediately on a high misfit.
+          writeState({ ...readState(), lastDiscoverAt: new Date().toISOString() });
+          summary.push(
+            `discovered ${dr.categories} categor${dr.categories === 1 ? 'y' : 'ies'} across ${dr.rounds} round${dr.rounds === 1 ? '' : 's'} · ${dr.assigned} moment${dr.assigned === 1 ? '' : 's'} scored`,
+          );
+        }
       } else {
+        // STEADY STATE: assign the new moments incrementally against the settled categories.
         const assignStart = Date.now();
         const res = await assignMoments({ shouldStop: () => stopRequested });
         sw.stage('assign', Date.now() - assignStart, res.assigned);
-
-        if (res.stopped) {
-          // A stop landed between batches: everything assigned is banked, the rest resumes next run.
-          sw.record();
-          const spent = receipt();
-          const line = 'stopped by you — everything already assigned is banked; the next run resumes from there';
-          writeProgress({ phase: 'stopped', ok: false, startedAt, summary: spent ? [line, spent] : [line], ...(spent ? { spend: spent } : {}) });
-          return 0; // the finally releases the lock
-        }
-
-        // The scoreboard: recomputed over the whole pile every run (arithmetic is free), delta drawn
-        // from the last build's stashed rate.
-        const board = scoreboard(joinLabelled(loadMoments(), loadAssignments()), cats);
-        summary.push(scoreboardLine(board, readState().scoreboard?.rate));
         if (res.assigned) {
+          changed = true;
           summary.push(
             `assigned ${res.assigned} new moment${res.assigned === 1 ? '' : 's'} across ${res.batches} call${res.batches === 1 ? '' : 's'} against ${cats.length} categories`,
           );
         }
-        // Remember this build's rate for next run's delta — best-effort; a lost write costs one delta.
-        writeState({ ...readState(), scoreboard: { rate: board.rate, at: new Date().toISOString() } });
 
-        // STAGE 4: build and install HUMAN.md — the profile the person actually reads. Only when
-        // there is something new to reflect (or none exists yet), so the quote picker's one model
-        // call is skipped on a no-op day.
-        if (res.assigned > 0 || !existsSync(humanMdPath())) {
-          const writeStart = Date.now();
-          const profile = buildProfile();
-          sw.stage('write', Date.now() - writeStart, profile ? 1 : 0);
-          if (profile && looksLikeProfile(profile.text)) {
-            injectProfile(profile.text); // writes ~/.claude/HUMAN.md AND points CLAUDE.md at it — the load
-            writeRender('profile', { builtAt: new Date().toISOString(), sessions: profile.meta.sessions, exchanges: profile.meta.moments });
-            summary.push(
-              `profile written and loaded · ${profile.meta.signals} distress signal${profile.meta.signals === 1 ? '' : 's'} + ${profile.meta.working} working-style trait${profile.meta.working === 1 ? '' : 's'}${profile.meta.shorthand ? ` + ${profile.meta.shorthand} shorthand handles` : ''}`,
-            );
-          } else {
-            summary.push('profile not rebuilt — not enough clear evidence yet');
+        // RE-DISCOVERY: when the recent misfit rate stays high, mint the behaviours we have no
+        // column for — once per cooldown, so it never runs away.
+        if (!stopRequested) {
+          const labelledNow = joinLabelled(loadMoments(), loadAssignments());
+          const since = new Date(Date.now() - REDISCOVER_WINDOW_MS);
+          const st = readState();
+          const dueRedisc = !st.lastDiscoverAt || Date.now() - Date.parse(st.lastDiscoverAt) > REDISCOVER_COOLDOWN_MS;
+          if (dueRedisc && misfitRate(labelledNow, { since }) > REDISCOVER_MISFIT) {
+            const recent = labelledNow.filter((l) => !l.kinds.length && Date.parse(l.moment.ts) >= since.getTime()).map((l) => l.moment);
+            const added = rediscover(recent);
+            if (added.length) {
+              changed = true;
+              summary.push(`re-discovered ${added.length} new categor${added.length === 1 ? 'y' : 'ies'} — recent misfit rose`);
+              writeState({ ...readState(), lastDiscoverAt: new Date().toISOString() });
+            }
           }
+        }
+      }
+
+      // A stop from either path: everything scored so far is banked, the next run resumes.
+      if (stopRequested) {
+        sw.record();
+        const spent = receipt();
+        const line = 'stopped by you — everything already scored is banked; the next run resumes from there';
+        writeProgress({ phase: 'stopped', ok: false, startedAt, summary: spent ? [line, spent] : [line], ...(spent ? { spend: spent } : {}) });
+        return 0; // the finally releases the lock
+      }
+
+      // SHARED: the scoreboard (arithmetic, free), then the profile file (stage 4). Rebuild when the
+      // category set or the pile changed, or when no profile exists yet.
+      const board = scoreboard(joinLabelled(loadMoments(), loadAssignments()), cats);
+      summary.push(scoreboardLine(board, readState().scoreboard?.rate));
+      writeState({ ...readState(), scoreboard: { rate: board.rate, at: new Date().toISOString() } });
+
+      if (changed || !existsSync(humanMdPath())) {
+        const writeStart = Date.now();
+        const profile = buildProfile();
+        sw.stage('write', Date.now() - writeStart, profile ? 1 : 0);
+        if (profile && looksLikeProfile(profile.text)) {
+          injectProfile(profile.text); // writes ~/.claude/HUMAN.md AND points CLAUDE.md at it — the load
+          writeRender('profile', { builtAt: new Date().toISOString(), sessions: profile.meta.sessions, exchanges: profile.meta.moments });
+          summary.push(
+            `profile written and loaded · ${profile.meta.signals} distress signal${profile.meta.signals === 1 ? '' : 's'} + ${profile.meta.working} working-style trait${profile.meta.working === 1 ? '' : 's'}${profile.meta.shorthand ? ` + ${profile.meta.shorthand} shorthand handles` : ''}`,
+          );
+        } else {
+          summary.push('profile not rebuilt — not enough clear evidence yet');
         }
       }
     }

@@ -23,7 +23,7 @@
  * --safe-mode rides on every call via runClaude, so the profile is never in context while the
  * profile is being built ([[borrowed-calls-load-human-md]]).
  */
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { findAssistant, runClaude } from './claude.js';
@@ -187,6 +187,13 @@ function appendAssignments(records: Assignment[], file: string): void {
   appendFileSync(file, records.map((r) => JSON.stringify(r)).join('\n') + '\n');
 }
 
+/** Replace the whole assignments store — the cold-start build accumulates every moment's kinds in
+ *  memory across the discovery rounds and persists them here, once, when the build finishes. */
+export function writeAssignments(records: Assignment[], file: string = storePath()): void {
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, records.length ? records.map((r) => JSON.stringify(r)).join('\n') + '\n' : '');
+}
+
 export interface AssignResult {
   /** moments newly assigned this run */
   assigned: number;
@@ -196,6 +203,50 @@ export interface AssignResult {
   categories: number;
   /** true if a stop was requested and the loop bailed between batches (the rest is banked) */
   stopped: boolean;
+}
+
+/** The result of assigning a set of moments against a set of categories. */
+export interface PileResult {
+  /** one record per moment shown (empty kinds included); a too-thin batch is dropped and re-tried */
+  records: Assignment[];
+  batches: number;
+  stopped: boolean;
+}
+
+/**
+ * THE REUSABLE CORE — assign a given set of moments against a given set of categories, batched, no
+ * store I/O of its own. The steady-state path passes `onRecords` to append each batch as it lands
+ * (kill-safety: a SIGKILL loses at most the in-flight batch); discover's cold-start rounds omit it
+ * and accumulate the returned records in memory, to persist once when the whole build finishes.
+ */
+export async function assignAgainst(
+  bin: string,
+  moments: Moment[],
+  categories: { name: string; description: string }[],
+  opts: { onBatch?: (done: number, total: number) => void; shouldStop?: () => boolean; onRecords?: (records: Assignment[]) => void } = {},
+): Promise<PileResult> {
+  const valid = new Set(categories.map((c) => c.name));
+  const catList = categories.map((c) => `- ${c.name}: ${c.description}`).join('\n');
+  const size = batchSize();
+  const all: Assignment[] = [];
+  let batches = 0;
+  let stopped = false;
+  for (let i = 0; i < moments.length; i += size) {
+    const recs = assignBatch(bin, moments.slice(i, i + size), catList, valid);
+    if (recs.length) {
+      opts.onRecords?.(recs);
+      all.push(...recs);
+    }
+    batches++;
+    opts.onBatch?.(Math.min(i + size, moments.length), moments.length);
+    // Breathe: hand the event loop a turn so a pending stop signal's handler can run, then honour it.
+    await new Promise((resolve) => setImmediate(resolve));
+    if (opts.shouldStop?.()) {
+      stopped = true;
+      break;
+    }
+  }
+  return { records: all, batches, stopped };
 }
 
 /**
@@ -225,28 +276,11 @@ export async function assignMoments(
   const bin = findAssistant();
   if (!bin) return { assigned: 0, batches: 0, categories: cats.length, stopped: false }; // no assistant — caller reports
 
-  const valid = new Set(cats.map((c) => c.name));
-  const catList = cats.map((c) => `- ${c.name}: ${c.description}`).join('\n');
-  const size = batchSize();
-
-  let assigned = 0;
-  let batches = 0;
-  let stopped = false;
-  for (let i = 0; i < work.length; i += size) {
-    const records = assignBatch(bin, work.slice(i, i + size), catList, valid);
-    if (records.length) {
-      appendAssignments(records, file);
-      assigned += records.length;
-    }
-    batches++;
-    opts.onBatch?.(Math.min(i + size, work.length), work.length);
-    // Breathe: hand the event loop a turn so a pending stop signal's handler can run, then honour
-    // it. Everything up to here is banked; the remainder resumes next run via the seen-set.
-    await new Promise((resolve) => setImmediate(resolve));
-    if (opts.shouldStop?.()) {
-      stopped = true;
-      break;
-    }
-  }
-  return { assigned, batches, categories: cats.length, stopped };
+  // Append each batch as it lands (kill-safety); the seen-set resumes the remainder next run.
+  const { records, batches, stopped } = await assignAgainst(bin, work, cats, {
+    onBatch: opts.onBatch,
+    shouldStop: opts.shouldStop,
+    onRecords: (recs) => appendAssignments(recs, file),
+  });
+  return { assigned: records.length, batches, categories: cats.length, stopped };
 }
