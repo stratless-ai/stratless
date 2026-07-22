@@ -28,7 +28,7 @@ import { atomicWriteFileSync, CorruptStoreError } from './atomic.js';
 import { findAssistant } from './claude.js';
 import { buildMoments, loadMoments } from './moments.js';
 import { loadCategories } from './categories.js';
-import { assignMoments, loadAssignments } from './assign.js';
+import { assignMoments, loadAssignments, pendingMoments } from './assign.js';
 import { join as joinLabelled, scoreboard, scoreboardLine, misfitRate } from './count.js';
 import { buildProfile, looksLikeProfile } from './write.js';
 import { discover, rediscover } from './discover.js';
@@ -36,7 +36,7 @@ import { injectProfile, humanMdPath } from './sink.js';
 import { startRun } from './stopwatch.js';
 import { dailyCheck } from './notify.js';
 import { refreshArmed } from './init.js';
-import { readState, writeState, writeRender, SYNTH_EVERY } from './state.js';
+import { readState, writeState, writeRender, SYNTH_EVERY, flushDue, FLUSH_MAX_AGE_MS } from './state.js';
 import { readUsage, diffUsage, fmtTokens } from './usage.js';
 import { killActiveSession } from './stream.js';
 import { acquireLock, releaseLock, lockFilePath } from './worker.js';
@@ -96,6 +96,12 @@ const REDISCOVER_WINDOW_MS = 14 * 24 * 3600 * 1000;
 const REDISCOVER_COOLDOWN_MS = 7 * 24 * 3600 * 1000;
 const REDISCOVER_MISFIT = 0.15;
 
+/** The flush ceiling, env-overridable (STRATLESS_FLUSH_MAX_AGE_MS) like the other knobs. */
+const flushMaxAgeMs = (): number => {
+  const n = Number(process.env.STRATLESS_FLUSH_MAX_AGE_MS);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : FLUSH_MAX_AGE_MS;
+};
+
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 /**
@@ -106,6 +112,9 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 export async function runWorker(): Promise<number> {
   if (!acquireLock(lockFilePath(), 'worker')) return 0; // a live worker exists — the doorbell already did its job
   const startedAt = new Date().toISOString();
+  // A hand-run `stratless update` (a real terminal) sets this via the doorbell: it flushes now, over
+  // every automatic gate. A background hook run does not, and respects the gates.
+  const manual = process.env.STRATLESS_FLUSH === '1';
 
   // THE RECEIPT (0.3.5): the meter at birth, diffed at every ending — announced, spent, accounted.
   // Sound because the lock admits one spender at a time: nothing else can move the meter mid-run.
@@ -171,6 +180,7 @@ export async function runWorker(): Promise<number> {
     } else {
       let cats = loadCategories();
       let changed = false; // categories or assignments changed this run → force the profile rebuild
+      let flush = true; // cold start always flushes; steady state decides (flushDue) — the per-turn-rebuild fix
 
       if (!cats.length) {
         // COLD START (stage 3): discover mints the categories and writes the assignments store.
@@ -191,31 +201,46 @@ export async function runWorker(): Promise<number> {
           );
         }
       } else {
-        // STEADY STATE: assign the new moments incrementally against the settled categories.
-        const assignStart = Date.now();
-        const res = await assignMoments({ shouldStop: () => stopRequested });
-        sw.stage('assign', Date.now() - assignStart, res.assigned);
-        if (res.assigned) {
-          changed = true;
-          summary.push(
-            `assigned ${res.assigned} new moment${res.assigned === 1 ? '' : 's'} across ${res.batches} call${res.batches === 1 ? '' : 's'} against ${cats.length} categories`,
-          );
-        }
+        // STEADY STATE: collect always (free, above); only tag + rebuild — phone the assistant — when
+        // a flush is due: a previous session left leftovers, the ceiling passed, or you ran `update`
+        // by hand. A plain mid-session nudge just leaves the new moments collected and spends nothing.
+        const waiting = pendingMoments();
+        flush = flushDue(waiting, readState().lastFlushAt, Date.now(), manual, { maxAgeMs: flushMaxAgeMs() }).flush;
 
-        // RE-DISCOVERY: when the recent misfit rate stays high, mint the behaviours we have no
-        // column for — once per cooldown, so it never runs away.
-        if (!stopRequested) {
-          const labelledNow = joinLabelled(loadMoments(), loadAssignments());
-          const since = new Date(Date.now() - REDISCOVER_WINDOW_MS);
-          const st = readState();
-          const dueRedisc = !st.lastDiscoverAt || Date.now() - Date.parse(st.lastDiscoverAt) > REDISCOVER_COOLDOWN_MS;
-          if (dueRedisc && misfitRate(labelledNow, { since }) > REDISCOVER_MISFIT) {
-            const recent = labelledNow.filter((l) => !l.kinds.length && Date.parse(l.moment.ts) >= since.getTime()).map((l) => l.moment);
-            const added = rediscover(recent);
-            if (added.length) {
-              changed = true;
-              summary.push(`re-discovered ${added.length} new categor${added.length === 1 ? 'y' : 'ies'} — recent misfit rose`);
-              writeState({ ...readState(), lastDiscoverAt: new Date().toISOString() });
+        if (!flush) {
+          summary.push(
+            waiting.length
+              ? `collected ${waiting.length} new moment${waiting.length === 1 ? '' : 's'} — nothing to flush yet`
+              : 'nothing new since the last flush',
+          );
+        } else {
+          const assignStart = Date.now();
+          const res = await assignMoments({ shouldStop: () => stopRequested });
+          sw.stage('assign', Date.now() - assignStart, res.assigned);
+          if (res.assigned) {
+            changed = true;
+            summary.push(
+              `assigned ${res.assigned} new moment${res.assigned === 1 ? '' : 's'} across ${res.batches} call${res.batches === 1 ? '' : 's'} against ${cats.length} categories`,
+            );
+          } else if (manual) {
+            summary.push('already current — nothing new to score');
+          }
+
+          // RE-DISCOVERY: when the recent misfit rate stays high, mint the behaviours we have no
+          // column for — once per cooldown, so it never runs away.
+          if (!stopRequested) {
+            const labelledNow = joinLabelled(loadMoments(), loadAssignments());
+            const since = new Date(Date.now() - REDISCOVER_WINDOW_MS);
+            const st = readState();
+            const dueRedisc = !st.lastDiscoverAt || Date.now() - Date.parse(st.lastDiscoverAt) > REDISCOVER_COOLDOWN_MS;
+            if (dueRedisc && misfitRate(labelledNow, { since }) > REDISCOVER_MISFIT) {
+              const recent = labelledNow.filter((l) => !l.kinds.length && Date.parse(l.moment.ts) >= since.getTime()).map((l) => l.moment);
+              const added = rediscover(recent);
+              if (added.length) {
+                changed = true;
+                summary.push(`re-discovered ${added.length} new categor${added.length === 1 ? 'y' : 'ies'} — recent misfit rose`);
+                writeState({ ...readState(), lastDiscoverAt: new Date().toISOString() });
+              }
             }
           }
         }
@@ -230,24 +255,28 @@ export async function runWorker(): Promise<number> {
         return 0; // the finally releases the lock
       }
 
-      // SHARED: the scoreboard (arithmetic, free), then the profile file (stage 4). Rebuild when the
-      // category set or the pile changed, or when no profile exists yet.
-      const board = scoreboard(joinLabelled(loadMoments(), loadAssignments()), cats);
-      summary.push(scoreboardLine(board, readState().scoreboard?.rate));
-      writeState({ ...readState(), scoreboard: { rate: board.rate, at: new Date().toISOString() } });
+      // SHARED (flush only): the scoreboard (arithmetic, free), then the profile file (stage 4). A
+      // non-flush nudge skips all of this — the number moves on a flush, which we accepted. Rebuild
+      // the file when the category set or the pile changed, or when no profile exists yet. Stamp the
+      // flush time so the ceiling measures from here.
+      if (flush) {
+        const board = scoreboard(joinLabelled(loadMoments(), loadAssignments()), cats);
+        summary.push(scoreboardLine(board, readState().scoreboard?.rate));
+        writeState({ ...readState(), scoreboard: { rate: board.rate, at: new Date().toISOString() }, lastFlushAt: new Date().toISOString() });
 
-      if (changed || !existsSync(humanMdPath())) {
-        const writeStart = Date.now();
-        const profile = buildProfile();
-        sw.stage('write', Date.now() - writeStart, profile ? 1 : 0);
-        if (profile && looksLikeProfile(profile.text)) {
-          injectProfile(profile.text); // writes ~/.claude/HUMAN.md AND points CLAUDE.md at it — the load
-          writeRender('profile', { builtAt: new Date().toISOString(), sessions: profile.meta.sessions, exchanges: profile.meta.moments });
-          summary.push(
-            `profile written and loaded · ${profile.meta.signals} distress signal${profile.meta.signals === 1 ? '' : 's'} + ${profile.meta.working} working-style trait${profile.meta.working === 1 ? '' : 's'}${profile.meta.shorthand ? ` + ${profile.meta.shorthand} shorthand handles` : ''}`,
-          );
-        } else {
-          summary.push('profile not rebuilt — not enough clear evidence yet');
+        if (changed || !existsSync(humanMdPath())) {
+          const writeStart = Date.now();
+          const profile = buildProfile();
+          sw.stage('write', Date.now() - writeStart, profile ? 1 : 0);
+          if (profile && looksLikeProfile(profile.text)) {
+            injectProfile(profile.text); // writes ~/.claude/HUMAN.md AND points CLAUDE.md at it — the load
+            writeRender('profile', { builtAt: new Date().toISOString(), sessions: profile.meta.sessions, exchanges: profile.meta.moments });
+            summary.push(
+              `profile written and loaded · ${profile.meta.signals} distress signal${profile.meta.signals === 1 ? '' : 's'} + ${profile.meta.working} working-style trait${profile.meta.working === 1 ? '' : 's'}${profile.meta.shorthand ? ` + ${profile.meta.shorthand} shorthand handles` : ''}`,
+            );
+          } else {
+            summary.push('profile not rebuilt — not enough clear evidence yet');
+          }
         }
       }
     }
