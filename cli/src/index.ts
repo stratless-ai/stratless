@@ -522,12 +522,12 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Muscle memory outlives a command. `report` folded into `profile --read`, and `--read` has now
-  // folded into `profile` itself — so both redirect rather than erroring at someone who typed what
-  // used to work. `patterns` and `receipt` return over the new evidence in stage 4.
+  // Muscle memory outlives a command. `report` folded into `profile`; `patterns` and `receipt` are
+  // not part of the current surface (the discovery pipeline carries the evidence in the profile
+  // itself). Redirect rather than error at someone who typed what used to work.
   if (cmd === 'report' || cmd === 'patterns' || cmd === 'receipt') {
-    console.log(`\n  ${C.it(`${cmd} is not here right now.`)}`);
-    console.log(`  ${C.dim(`the profile pipeline is being rebuilt — see the model of you with ${C.b(hint('stratless profile'))}`)}\n`);
+    console.log(`\n  ${C.it(`${cmd} isn't part of stratless right now.`)}`);
+    console.log(`  ${C.dim(`see the model of you with ${C.b(hint('stratless profile'))}`)}\n`);
     return;
   }
 
