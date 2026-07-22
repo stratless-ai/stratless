@@ -21,8 +21,19 @@ import { DEFAULT_ROOTS, PASTE_BOUND, dayKey, readSessions, turnsOfFile, type Tur
 export interface Exchange {
   /** what the person asked that opened this turn — their words */
   prompt: string;
-  /** what the assistant said back, its own words (text only; tool calls stripped) */
+  /** what the assistant said back, its own words (text only; tool calls stripped). Keeps the TAIL —
+   *  the reaction answers the END of the turn — so for a turn over the cap this is its ending. */
   said: string;
+  /**
+   * The OPENING of that same turn — the head, a FACT outside the hash.
+   *
+   * `said` keeps the tail because the reaction answers the end; `saidHead` keeps the start because
+   * the start is often the TRIGGER. "why are you coding suddenly?" reacts to the assistant
+   * ANNOUNCING it would code, which lives in the opening move and nowhere else. For a long turn the
+   * head cannot be recovered from `said` (that is the tail window), so it is captured separately.
+   * Absent when the assistant said nothing — an opener, or a tool-only turn.
+   */
+  saidHead?: string;
   /** how the person reacted — the next thing they said. THIS carries the signal. */
   reaction: string;
   /** ISO timestamp of the reaction (falls back to the AI turn's) */
@@ -115,6 +126,23 @@ export interface Exchange {
  *  assistant's turn (measured 2026-07-16). */
 const CAP = 8000;
 
+/** How much of the assistant's OPENING to keep as a fact. Small: the opening MOVE (jump to action,
+ *  hedge, restate) is legible in the first few hundred characters; a moment stores less again. */
+const SAID_HEAD = 800;
+
+/**
+ * The identity of one exchange — CONTENT ONLY, and it stays that way.
+ *
+ * Session was briefly added here, on the theory that an opener (no prompt, no assistant turn) has
+ * two empty fields and so hashes on the person's words alone, letting two sessions that both begin
+ * "ok lets continue" collapse into one. Measured on 4,896 real exchanges: **zero collisions**, with
+ * or without session in the key. It bought nothing observable and it broke a stated invariant —
+ * "same words = same hash, whatever we learned about the surroundings" — which is what lets a fact
+ * be added later without orphaning anything. So it was reverted.
+ *
+ * If it ever does bite, the reaction record carries its own uuid in the transcript and `moments.ts`
+ * can key on that. It has not bitten, so nothing was added for it.
+ */
 function hashOf(prompt: string, said: string, reaction: string): string {
   return createHash('sha256').update(`${prompt}\0${said}\0${reaction}`).digest('hex').slice(0, 16);
 }
@@ -182,7 +210,18 @@ export function exchangesOfTurns(turns: Turn[], session: string): Exchange[] {
     // `said` keeps its TAIL: the reaction answers the end of the turn, not its preamble.
     const saidRaw = said.join('\n').trim();
     const saidText = saidRaw.slice(-CAP);
-    if (prompt && saidText) {
+    // EMIT ON THE REACTION ALONE.
+    //
+    // This used to require `prompt && saidText`, on the reasoning that "a turn where it only ran
+    // tools has no understanding to transfer, so there is nothing to judge". That was correct for
+    // the judge's question and is wrong for discovery, which reads what the PERSON did — and a
+    // reply to work-in-progress is often the most informative moment in the archive.
+    //
+    // Measured on the reference archive: the old condition dropped 180 moments. 172 of them had no
+    // assistant text at all, 72 were session openers. Overall that is 3.7% — but the loss is
+    // CORRELATED with the thing being detected: an interrupt is most likely to land while the
+    // assistant is mid-tool and has not spoken yet, so it took **25 of 151 anchor moments, 16.6%**.
+    if (t.text) {
       const p = prompt.slice(0, CAP);
       const r = t.text.slice(0, CAP);
       out.push({
@@ -192,6 +231,9 @@ export function exchangesOfTurns(turns: Turn[], session: string): Exchange[] {
         ts: t.ts || saidTs,
         session,
         hash: hashOf(p, saidText, r),
+        // The head is a fact, outside the hash — the same slice discipline as `said`, from the other
+        // end. Absent when the assistant said nothing at all.
+        ...(saidRaw ? { saidHead: saidRaw.slice(0, SAID_HEAD) } : {}),
         ...(interrupted ? { interrupted } : {}),
         ...(declined ? { declined } : {}),
         // Facts — outside the hash by construction: hashOf() is called above with the three text

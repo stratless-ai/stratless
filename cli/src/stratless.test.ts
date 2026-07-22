@@ -21,42 +21,11 @@ import { parseExchanges, loadRecentExchanges, findExchange, markFirstOfDay, proj
 import { atOf, didOf, ranOf, ranLine, contextLine, humanGap } from './facts.js';
 import { injectProfile, removeProfile, ensureLoaded } from './sink.js';
 import { readState, writeState, synthesisDue, readRenders, writeRender, readBuildCorpus, writeBuildCorpus } from './state.js';
-import { pendingCount, PIPELINE_V as PV } from './judge.js';
-import {
-  aggregate,
-  computeTrend,
-  computeStability,
-  loadPatterns,
-  savePatterns,
-  parseMineOutput,
-  parseAuditOutput,
-  parseGradeOutput,
-  classifyGrade,
-  shouldFlag,
-  timeTag,
-  displayOrder,
-  matchReceiptPrefix,
-  type GradeRecord,
-  type PatternStore,
-} from './miner.js';
 import { readUsage, recordUsage } from './usage.js';
 import { CorruptStoreError } from './atomic.js';
 import { parseJsonResult } from './claude.js';
-import { inventedNumbers, renderPatternSheet, renderSurprises, stripPreamble } from './synthesize.js';
-import {
-  cachedCount,
-  cacheHealth,
-  judgeInput,
-  judgeTurnBody,
-  parseJudgeOutput,
-  currentJudgment,
-  fitAperture,
-  previousInSession,
-  PIPELINE_V,
-} from './judge.js';
 import { installStopHook, readSettings } from './init.js';
-import { shuffleDeterministic, distractorsFor, buildTruthSet, renderSheet, renderSheetJson, scoreSheet } from './truth.js';
-import type { Judgment } from './judge.js';
+import { shuffleDeterministic, distractorsFor, buildTruthSet, renderSheet, renderSheetJson, scoreSheet, type Judgment } from './truth.js';
 
 let dir: string;
 
@@ -159,28 +128,33 @@ const interruptRec = (kind: 'plain' | 'tool-use' = 'plain') =>
 const denyRec = () =>
   JSON.stringify({ type: 'user', timestamp: '2026-07-01T10:00:03Z', toolDenialKind: 'user-rejected', message: { content: '' } });
 
+// NOTE ON INDICES, and it applies to every fixture below. Since exchanges emit on the reaction
+// alone, the FIRST human message of a transcript is itself an exchange — a session opener, with an
+// empty prompt and an empty `said`. So `ex[0]` is the opener and the first CLOSED turn is `ex[1]`.
+// Nothing about these tests changed except that arithmetic.
+
 test('THE HASH IGNORES CONTROL ACTIONS — adding them must not orphan a cached judgment', () => {
   const plain = parseExchanges(writeTranscript('plain.jsonl', [u('why a queue?'), a('bursts outrun the worker'), u('ok that lands')].join('\n')));
   const withInt = parseExchanges(
     writeTranscript('withint.jsonl', [u('why a queue?'), a('bursts outrun the worker'), interruptRec(), u('ok that lands')].join('\n')),
   );
-  assert.equal(plain.length, 1);
-  assert.equal(withInt.length, 1);
-  assert.equal(withInt[0].hash, plain[0].hash, 'same words = same hash, whatever the person did with their hands');
-  assert.equal(plain[0].interrupted, undefined);
-  assert.equal(withInt[0].interrupted, 'plain', 'but the fact is carried');
+  assert.equal(plain.length, 2, 'the opener, then the closed turn');
+  assert.equal(withInt.length, 2);
+  assert.equal(withInt[1].hash, plain[1].hash, 'same words = same hash, whatever the person did with their hands');
+  assert.equal(plain[1].interrupted, undefined);
+  assert.equal(withInt[1].interrupted, 'plain', 'but the fact is carried');
 });
 
 test('the two interrupt kinds are distinguished, not merged', () => {
   const ex = parseExchanges(
     writeTranscript('kinds.jsonl', [u('run the deploy'), a('starting'), interruptRec('tool-use'), u('no, stop')].join('\n')),
   );
-  assert.equal(ex[0].interrupted, 'tool-use', 'the permission-flow variant is not a spontaneous course correction');
+  assert.equal(ex[1].interrupted, 'tool-use', 'the permission-flow variant is not a spontaneous course correction');
 });
 
 test('a declined tool is recorded on the exchange it happened in', () => {
   const ex = parseExchanges(writeTranscript('deny.jsonl', [u('push it'), a('running git push'), denyRec(), u('not yet')].join('\n')));
-  assert.equal(ex[0].declined, true);
+  assert.equal(ex[1].declined, true);
 });
 
 test('control actions do not leak into the NEXT exchange', () => {
@@ -190,9 +164,9 @@ test('control actions do not leak into the NEXT exchange', () => {
       [u('first ask'), a('first answer'), interruptRec(), u('second ask'), a('second answer'), u('third')].join('\n'),
     ),
   );
-  assert.equal(ex.length, 2);
-  assert.equal(ex[0].interrupted, 'plain', 'the interrupt belongs to the turn it happened in');
-  assert.equal(ex[1].interrupted, undefined, 'and is cleared before the next one');
+  assert.equal(ex.length, 3, 'the opener plus two closed turns');
+  assert.equal(ex[1].interrupted, 'plain', 'the interrupt belongs to the turn it happened in');
+  assert.equal(ex[2].interrupted, undefined, 'and is cleared before the next one');
 });
 
 // ── THE FACTS: what the code knows for certain, carried as data (judge v2, 2026-07-20) ──────────
@@ -249,15 +223,16 @@ test('position and rhythm are computed once the session is whole', () => {
       ].join('\n'),
     ),
   );
-  assert.equal(ex.length, 2);
+  assert.equal(ex.length, 3, 'the opener plus two closed turns');
   assert.deepEqual(
     ex.map((e) => e.index),
-    [0, 1],
+    [0, 1, 2],
     'the judge could not tell the 1st exchange from the 259th; now it can',
   );
-  assert.equal(ex[0].ofSession, 2);
+  assert.equal(ex[0].ofSession, 3);
   assert.equal(ex[0].gapSec, undefined, 'the first exchange has nothing to measure from — absent, never a fabricated 0');
-  assert.equal(ex[1].gapSec, 120, 'two minutes between one reaction and the next');
+  assert.equal(ex[1].gapSec, 60, 'a minute from the opener to the next reaction');
+  assert.equal(ex[2].gapSec, 120, 'two minutes between one reaction and the next');
 });
 
 test('markFirstOfDay marks exactly one exchange per working day', () => {
@@ -270,16 +245,11 @@ test('markFirstOfDay marks exactly one exchange per working day', () => {
   assert.deepEqual(list.map((e) => e.firstOfDay), [true, undefined, true]);
 });
 
-test('THE UPGRADE IS FREE — a judgment with no facts is still current, so nothing re-judges', () => {
-  const old = { hash: 'h', ts: '2026-07-01T10:00:00Z', session: 's', v: PIPELINE_V, topic: 't', behavior: 'b', line: 'l' };
-  assert.equal(currentJudgment(old), true, 'the 644 already in the cache stay valid — this is why PIPELINE_V stays 2');
-});
-
 test('the fact the judge dropped 19 times in 20 now travels as data, not prose', () => {
   const ex = parseExchanges(
     writeTranscript('fact.jsonl', [u('run the deploy'), a('starting'), interruptRec(), u('no, stop')].join('\n')),
   );
-  assert.equal(didOf(ex[0])?.interrupted, 'plain', 'a field the model cannot decline to mention');
+  assert.equal(didOf(ex[1])?.interrupted, 'plain', 'a field the model cannot decline to mention');
 });
 
 // ── SHOWING the facts to the judge (Block 2 piece 1) ────────────────────────────────────────────
@@ -312,41 +282,6 @@ test('gaps are rounded to rhythm, not reported as false precision', () => {
   assert.equal(humanGap(7200), '2 h later');
 });
 
-test('AN EXCHANGE THAT KNOWS NOTHING RENDERS EXACTLY AS BEFORE — no regression on old material', () => {
-  const bare = { prompt: 'why a queue?', said: 'bursts outrun the worker', reaction: 'ok that lands' } as Exchange;
-  const body = judgeTurnBody(bare);
-  assert.ok(body.startsWith('PERSON ASKED:'), 'no facts means no CONTEXT line and no leading blank');
-  assert.ok(!body.includes('CONTEXT'));
-  assert.ok(!body.includes('EARLIER'));
-});
-
-test('the earlier ask is shown, and it is the one genuinely new line', () => {
-  const prev = { prompt: 'what does the miner do', reaction: 'and how much does it cost' } as Exchange;
-  const ex = { prompt: 'and how much does it cost', said: 'about $24', reaction: 'too much', index: 4, ofSession: 9 } as Exchange;
-  const body = judgeTurnBody(ex, undefined, prev);
-  assert.ok(body.includes('EARLIER THEY ASKED: what does the miner do'));
-  assert.ok(body.includes('PERSON ASKED: and how much does it cost'));
-  assert.equal(
-    prev.reaction,
-    ex.prompt,
-    'each message is the reaction to one turn AND the prompt for the next — which is why only the earlier ASK is new',
-  );
-});
-
-test('the previous exchange is never taken from another session', () => {
-  const win = [
-    { hash: 'a1', session: 's1', index: 0 },
-    { hash: 'b1', session: 's2', index: 0 },
-    { hash: 'a2', session: 's1', index: 1 },
-    { hash: 'b9', session: 's2', index: 7 },
-  ] as Exchange[];
-  const prevOf = previousInSession(win);
-  assert.equal(prevOf.get('a2')?.hash, 'a1', 'adjacency is by index within a session, not by position in the window');
-  assert.equal(prevOf.get('a1'), undefined, 'the first of a session has no predecessor');
-  assert.equal(prevOf.get('b1'), undefined, 'and the interleaved session is never borrowed from');
-  assert.equal(prevOf.get('b9'), undefined, 'a gap in indices means the predecessor is outside the window — none, not wrong');
-});
-
 // ── THE ASSISTANT'S HANDS — the largest fact the judge was never given (57% of exchanges) ───────
 
 const toolAsst = (text: string, tools: string[], ts = '2026-07-01T10:00:05Z') =>
@@ -362,25 +297,16 @@ test('tools the assistant ran are carried, and do not change the hash', () => {
   const withTools = parseExchanges(
     writeTranscript('tools.jsonl', [u(words[0]), toolAsst(words[1], ['Edit', 'Bash', 'Edit']), u(words[2])].join('\n')),
   );
-  assert.equal(withTools[0].hash, bare[0].hash, 'the facts never touch the cache key');
-  assert.deepEqual(withTools[0].tools, ['Edit', 'Bash', 'Edit'], 'duplicates kept — they are the SIZE of the work');
-  assert.equal(bare[0].tools, undefined);
-  assert.deepEqual(ranOf(withTools[0]), { tools: ['Edit', 'Bash'], calls: 3 }, 'names deduped, calls counted');
-  assert.equal(ranOf(bare[0]), undefined, 'a turn that only talked has no `ran` at all');
+  assert.equal(withTools[1].hash, bare[1].hash, 'the facts never touch the cache key');
+  assert.deepEqual(withTools[1].tools, ['Edit', 'Bash', 'Edit'], 'duplicates kept — they are the SIZE of the work');
+  assert.equal(bare[1].tools, undefined);
+  assert.deepEqual(ranOf(withTools[1]), { tools: ['Edit', 'Bash'], calls: 3 }, 'names deduped, calls counted');
+  assert.equal(ranOf(bare[1]), undefined, 'a turn that only talked has no `ran` at all');
 });
 
 test('the assistant work line is neutral, and states size only when it adds something', () => {
   assert.equal(ranLine({ tools: ['Edit', 'Bash'], calls: 3 }), 'Edit · Bash (3 calls)');
   assert.equal(ranLine({ tools: ['Read'], calls: 1 }), 'Read', 'one call, one name — a count would be noise');
-});
-
-test('"ok good" after work reads differently from "ok good" after prose', () => {
-  const ex = parseExchanges(
-    writeTranscript('work.jsonl', [u('fix the parser'), toolAsst('done', ['Edit', 'Bash']), u('ok good')].join('\n')),
-  );
-  const body = judgeTurnBody(ex[0]);
-  assert.ok(body.includes('ASSISTANT ALSO RAN: Edit · Bash'), 'the judge is told work happened');
-  assert.ok(body.indexOf('ASSISTANT ALSO RAN') > body.indexOf('ASSISTANT SAID'), 'it annotates the turn it belongs to');
 });
 
 test('tools do not leak into the next exchange', () => {
@@ -390,9 +316,9 @@ test('tools do not leak into the next exchange', () => {
       [u('first'), toolAsst('a1', ['Edit']), u('second'), a('a2'), u('third')].join('\n'),
     ),
   );
-  assert.equal(ex.length, 2);
-  assert.deepEqual(ex[0].tools, ['Edit']);
-  assert.equal(ex[1].tools, undefined, 'reset with `said`, like every other per-turn fact');
+  assert.equal(ex.length, 3, 'the opener plus two closed turns');
+  assert.deepEqual(ex[1].tools, ['Edit']);
+  assert.equal(ex[2].tools, undefined, 'reset with `said`, like every other per-turn fact');
 });
 
 test('empty facts are absent, never empty objects', () => {
@@ -413,14 +339,20 @@ test('each real human message is the reaction to one turn AND the prompt for the
     ].join('\n'),
   );
   const ex = parseExchanges(p);
-  assert.equal(ex.length, 2, 'two closed turns — the dangling last human message is not a third');
-  assert.equal(ex[0].prompt, 'how do i deploy');
-  assert.equal(ex[0].said, 'Push to main and it builds.');
-  assert.equal(ex[0].reaction, 'wait what does that mean for us', 'the reaction carries the signal');
-  assert.equal(ex[1].prompt, 'wait what does that mean for us', 'that same message opens the next turn');
+  // Three, not two: the SESSION OPENER now counts. It has no prompt and no assistant turn before
+  // it, which used to disqualify it — but "how do i deploy" is a thing the person did, and setting
+  // the agenda is one of the more informative things they do. The dangling last message is still
+  // not an exchange: nothing closes it.
+  assert.equal(ex.length, 3, 'two closed turns plus the opener; the dangling last message is not a fourth');
+  assert.equal(ex[0].reaction, 'how do i deploy', 'the opener is a moment in its own right');
+  assert.equal(ex[0].prompt, '', 'and it honestly has no prompt, rather than being dropped');
+  assert.equal(ex[1].prompt, 'how do i deploy');
+  assert.equal(ex[1].said, 'Push to main and it builds.');
+  assert.equal(ex[1].reaction, 'wait what does that mean for us', 'the reaction carries the signal');
+  assert.equal(ex[2].prompt, 'wait what does that mean for us', 'that same message opens the next turn');
 });
 
-test('a turn where the assistant only ran tools is NOT an exchange — there is no understanding to judge', () => {
+test('a turn where the assistant only ran tools IS a moment — the person still did something', () => {
   const p = writeTranscript(
     'toolonly.jsonl',
     [
@@ -433,7 +365,19 @@ test('a turn where the assistant only ran tools is NOT an exchange — there is 
       u('did it work?'),
     ].join('\n'),
   );
-  assert.equal(parseExchanges(p).length, 0, 'no assistant words = nothing transferred = judge nothing');
+  // This test used to assert 0, on the judge's reasoning: no assistant words meant nothing
+  // transferred, so there was nothing to judge. Discovery asks a different question — what did the
+  // PERSON do — and a reply to work-in-progress is often the most informative moment there is.
+  //
+  // The loss was not evenly spread. Measured on the reference archive, the old condition dropped
+  // 180 moments (3.7%) but 25 of 151 ANCHOR moments (16.6%): an interrupt is most likely to land
+  // exactly while the assistant is mid-tool and has not spoken yet, so the filter was correlated
+  // with the thing it was hiding.
+  const ex = parseExchanges(p);
+  assert.equal(ex.length, 2, 'the opener, and the reply to a turn that only ran tools');
+  assert.equal(ex[1].reaction, 'did it work?');
+  assert.equal(ex[1].said, '', 'said is honestly empty — the assistant had not spoken yet');
+  assert.deepEqual(ex[1].tools, ['Edit'], 'and what it was DOING is carried instead');
 });
 
 test('a tool_result is not the human reacting, and assistant text accumulates across it', () => {
@@ -448,9 +392,9 @@ test('a tool_result is not the human reacting, and assistant text accumulates ac
     ].join('\n'),
   );
   const ex = parseExchanges(p);
-  assert.equal(ex.length, 1, 'the tool_result must not split the turn into two');
-  assert.equal(ex[0].reaction, 'nice');
-  assert.ok(ex[0].said.includes('Looking now') && ex[0].said.includes('off-by-one'), 'both assistant texts survive');
+  assert.equal(ex.length, 2, 'the opener, then one closed turn — the tool_result must not split it into two');
+  assert.equal(ex[1].reaction, 'nice');
+  assert.ok(ex[1].said.includes('Looking now') && ex[1].said.includes('off-by-one'), 'both assistant texts survive');
 });
 
 test('subagent turns are not the human conversation', () => {
@@ -467,7 +411,15 @@ test('subagent turns are not the human conversation', () => {
       u('done?'),
     ].join('\n'),
   );
-  assert.equal(parseExchanges(p).length, 0, 'a sidechain turn is not the person talking');
+  // This asserted `length === 0` and passed for the WRONG REASON: the count was zero because no
+  // assistant text survived the sidechain filter, so the old `prompt && saidText` condition
+  // suppressed everything. It never actually checked that subagent chatter stays out.
+  //
+  // Both human messages ARE moments — the person really typed them. What must not happen is the
+  // subagent's words appearing as something the assistant said to them.
+  const ex = parseExchanges(p);
+  assert.equal(ex.length, 2, 'the person spoke twice, and both are moments');
+  for (const e of ex) assert.ok(!e.said.includes('subagent chatter'), 'a sidechain turn is not the person talking');
 });
 
 // The tail rule (0.2.4): the person reacts to the END of the assistant's turn, but a long turn used
@@ -480,57 +432,10 @@ test('a long assistant turn keeps its TAIL — the reaction pairs with the end o
     [u('explain the whole design'), a(`THE-OPENING ${'y'.repeat(8300)} THE-CONCLUSION`), u('got it')].join('\n'),
   );
   const ex = parseExchanges(p);
-  assert.equal(ex.length, 1);
-  assert.ok(ex[0].said.includes('THE-CONCLUSION'), 'the end survives the cap');
-  assert.ok(!ex[0].said.includes('THE-OPENING'), 'the head is what gets cut');
-  assert.ok(ex[0].said.length <= 8000, 'the 0.3.0 identity cap holds (8k, raised inside the v2 bump)');
-});
-
-test('the judge reads HEAD and TAIL of a long turn — the plan and the conclusion — with the cut marked', () => {
-  const ex = {
-    prompt: 'why a queue?',
-    said: `THE-PLAN ${'x'.repeat(4000)} THE-CONCLUSION`,
-    reaction: 'ok makes sense',
-    ts: '2026-07-01T10:00:00Z',
-    session: 's',
-    hash: 'h',
-  };
-  const input = judgeInput(ex);
-  assert.ok(input.includes('THE-CONCLUSION'), 'the conclusion the person reacted to survives (tail 80%)');
-  assert.ok(input.includes('THE-PLAN'), 'what it set out to do survives too (head 20%)');
-  assert.ok(input.includes('…'), 'the middle cut is marked so the model knows it reads elided text');
-  assert.ok(!input.includes('x'.repeat(3000)), 'the middle is what gets cut');
-  assert.ok(input.includes('why a queue?'), 'a short prompt passes through whole');
-});
-
-test('fitAperture sizes the view from the user\'s own window — p90 × 1.2, clamped', () => {
-  assert.deepEqual(fitAperture([]), { prompt: 800, said: 1500, reaction: 800 }, 'no window = the 0.2.4 floors');
-
-  const ex = (prompt: string, said: string, reaction: string) => ({ prompt, said, reaction, ts: '', session: 's', hash: 'h' });
-  const terse = Array.from({ length: 20 }, () => ex('short ask', 'a'.repeat(2000), 'ok'));
-  const t = fitAperture(terse);
-  assert.equal(t.prompt, 800, 'floors hold for terse fields — never smaller than the 0.2.4 views');
-  assert.equal(t.said, 2400, 'p90(2000) × 1.2 = 2400 — the view grows to fit the user');
-  assert.equal(t.reaction, 800, 'reaction floor holds');
-
-  const paster = Array.from({ length: 20 }, () => ex('p'.repeat(7000), 's'.repeat(7000), 'ok'));
-  const pf = fitAperture(paster);
-  assert.equal(pf.prompt, 2400, 'the ceiling clamps a log-paster — worst case stays publishable');
-  assert.equal(pf.said, 3500, 'said ceiling holds too');
-});
-
-test('stripPreamble: task meta-chatter never reaches the artifact (caught live, 2026-07-17)', () => {
-  assert.equal(
-    stripPreamble("Good, exactly 350. Here's the profile:\n\nWHAT THEY KNOW\nbackend"),
-    'WHAT THEY KNOW\nbackend',
-    'the literal leak from the dogfood is stripped',
-  );
-  assert.equal(stripPreamble('WHAT THEY KNOW\nbackend'), 'WHAT THEY KNOW\nbackend', 'clean output untouched');
-  assert.equal(
-    stripPreamble('Here is what matters most about them: they verify claims.\nMore prose.'),
-    'Here is what matters most about them: they verify claims.\nMore prose.',
-    'a real first sentence ending mid-line is never stripped — narrow on purpose',
-  );
+  assert.equal(ex.length, 2, 'the opener, then the closed turn');
+  assert.ok(ex[1].said.includes('THE-CONCLUSION'), 'the end survives the cap');
+  assert.ok(!ex[1].said.includes('THE-OPENING'), 'the head is what gets cut');
+  assert.ok(ex[1].said.length <= 8000, 'the 0.3.0 identity cap holds (8k, raised inside the v2 bump)');
 });
 
 // ── the notifier: nothing ambient without consent — and the boundary is PROVABLE ───────────────
@@ -589,40 +494,13 @@ test('findExchange dereferences a receipt session-targeted; a reaped transcript 
   const root = mkdtempSync(join(tmpdir(), 'stratless-receipt-'));
   const p = join(root, 'sess-abc123.jsonl');
   writeFileSync(p, `${[u('why a queue?'), a('because bursts arrive faster than the worker drains'), u('ok that lands')].join('\n')}\n`);
-  const [ex] = parseExchanges(p);
+  const ex = parseExchanges(p)[1]; // [0] is the session opener
   assert.ok(ex, 'fixture parsed');
   const found = findExchange('sess-abc123', ex.hash, [root]);
   assert.equal(found?.reaction, 'ok that lands', 'the raw exchange comes back readable');
   assert.equal(findExchange('sess-abc123', 'not-a-real-hash', [root]), undefined, 'wrong hash = nothing invented');
   assert.equal(findExchange('reaped-session', ex.hash, [root]), undefined, 'missing transcript = the honest-failure path');
   rmSync(root, { recursive: true, force: true });
-});
-
-test('displayOrder + matchReceiptPrefix: one numbering shared by patterns and receipt, git-style prefixes', () => {
-  const pat = (id: string, kind: string, receipts: string[]) => ({
-    id,
-    statement: `claim ${id}`,
-    kind: kind as never,
-    count: receipts.length,
-    window: { from: '2026-07-01', to: '2026-07-17' },
-    trend: 'steady' as const,
-    stability: 'slow' as const,
-    receipts,
-    confidence: 'moderate' as const,
-  });
-  const store: PatternStore = {
-    v: 1,
-    patterns: [pat('t1', 'think', ['aaa111', 'bbb222']), pat('k1', 'know', ['aaa999'])],
-    candidates: [],
-    assignments: {},
-    audited: {},
-    graded: {},
-  };
-  const order = displayOrder(store);
-  assert.deepEqual(order.map((p) => p.id), ['k1', 't1'], 'kind order rules the numbering: know before think');
-  assert.deepEqual(matchReceiptPrefix(store, 'bbb'), [{ hash: 'bbb222', claims: [2] }], 'a unique prefix resolves with its claim number');
-  assert.equal(matchReceiptPrefix(store, 'aaa').length, 2, 'an ambiguous prefix lists every match');
-  assert.equal(matchReceiptPrefix(store, 'zzz').length, 0, 'no match = no invention');
 });
 
 // ── looking is free: the render sidecar and the pre-spend count (the polish release) ───────────
@@ -658,20 +536,6 @@ test('build corpus: the frozen corpus round-trips; the build stamp is the stalen
   assert.equal(readBuildCorpus(f), undefined, 'a corpus missing its counts or its hashes reads as none, never a half-truth');
 });
 
-test('pendingCount: the pre-spend disclosure counts the cache diff, bounded by the budget', () => {
-  const f = join(dir, 'pending-cache.json');
-  process.env.STRATLESS_CACHE = f;
-  try {
-    const ex = (h: string) => ({ prompt: 'p', said: 's', reaction: 'r', ts: '2026-07-01T10:00:00Z', session: 'x', hash: h });
-    writeFileSync(f, JSON.stringify({ h1: { ...j2('none'), hash: 'h1', v: PV } }));
-    assert.equal(pendingCount([ex('h1'), ex('h2'), ex('h3')], 50), 2, 'cached h1 is free; h2+h3 would spend');
-    assert.equal(pendingCount([ex('h1'), ex('h2'), ex('h3')], 1), 1, 'the budget bounds the disclosure');
-    assert.equal(pendingCount([ex('h1')], 50), 0, 'nothing fresh = no pre-spend line at all');
-  } finally {
-    delete process.env.STRATLESS_CACHE;
-  }
-});
-
 // ── the palette: escapes only when a human eye is watching (clig + the NO_COLOR spec) ──────────
 
 test('palette: per-stream TTY, NO_COLOR set-and-non-empty, TERM=dumb — bold/dim stripped too', () => {
@@ -696,14 +560,6 @@ test('the exhaust sentinel: streamed prompts are invisible to the exchange parse
   assert.equal(isRealPrompt(`${SENTINEL_PREFIX}judge>\nPERSON ASKED: x`), false, 'a streamed judge turn is not the human');
   assert.equal(isRealPrompt(`${SENTINEL_PREFIX}audit>\nSTATEMENT: y`), false, 'a streamed audit turn is not the human');
   assert.equal(isRealPrompt('why do we need a queue?'), true, 'real prompts still pass');
-});
-
-test('judgeTurnBody carries no rules — the rules ride the system prompt, once per session', () => {
-  const ex = { prompt: 'why?', said: 'because', reaction: 'ok', ts: '', session: 's', hash: 'h' };
-  const body = judgeTurnBody(ex);
-  assert.ok(body.includes('PERSON ASKED'), 'the exchange rendering is there');
-  assert.ok(!body.includes('THE SUBJECT OF THAT SENTENCE'), 'no instructions inside the turn body');
-  assert.ok(judgeInput(ex).includes('THE SUBJECT OF THAT SENTENCE'), 'the one-shot fallback still carries the rules');
 });
 
 /** A fake `claude` that speaks the stream-json protocol — executable, shebang'd, argv-ignoring. */
@@ -794,124 +650,7 @@ test('runStreamBatch: a dying session hands the remainder to the fallback ladder
 // model never touches a number it could hallucinate. Receipts are Law 2 made a field: evidence
 // that doesn't resolve to a real judgment is dropped where receipts are born.
 
-test('computeTrend: rising, fading, steady, and gone-quiet — all from dates, in code', () => {
-  const now = new Date('2026-07-16T12:00:00Z');
-  const d = (daysAgo: number) => new Date(now.getTime() - daysAgo * 86_400_000).toISOString();
-  assert.equal(computeTrend([d(1), d(3), d(5), d(40)], now), 'rising', '3 recent vs 1 prior = rising');
-  assert.equal(computeTrend([d(40), d(45), d(50)], now), 'fading', 'all prior, none recent = fading');
-  assert.equal(computeTrend([d(2), d(35)], now), 'steady', '1 vs 1 = steady, not noise');
-  assert.equal(computeTrend([d(100), d(120)], now), 'fading', 'nothing in 56 days = fading by definition');
-  assert.equal(computeTrend([], now), 'steady', 'no dates = degenerate steady');
-});
-
-test('computeStability: which clock a pattern lives on', () => {
-  assert.equal(computeStability({ from: '2026-07-10', to: '2026-07-15' }, 'steady'), 'volatile', 'two weeks = volatile');
-  assert.equal(computeStability({ from: '2026-05-01', to: '2026-07-15' }, 'steady'), 'bedrock', 'two months + not fading = lean on it');
-  assert.equal(computeStability({ from: '2026-05-01', to: '2026-07-15' }, 'fading'), 'slow', 'a fading pattern is never bedrock');
-  assert.equal(computeStability({ from: '2026-06-20', to: '2026-07-15' }, 'steady'), 'slow', 'in between = slow');
-});
-
-test('aggregate: the code computes every number; admission splits patterns from candidates', () => {
-  const now = new Date('2026-07-16T12:00:00Z');
-  const pile = new Map<string, ReturnType<typeof j2>>();
-  const day = (n: number) => new Date(now.getTime() - n * 86_400_000).toISOString();
-  for (let i = 0; i < 8; i++) pile.set(`h${i}`, { ...j2('partial'), hash: `h${i}`, ts: day(i * 5) });
-
-  const { patterns, candidates } = aggregate(
-    [
-      {
-        statement: 'accepts the reasoning verbally then pivots to implementation',
-        kind: 'think',
-        receipts: ['h0', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'h7', 'PHANTOM'],
-      },
-      { statement: 'a two-receipt anecdote', kind: 'work', receipts: ['h0', 'h1'] },
-      { statement: 'fits no kind at all', kind: 'quantum-vibes', receipts: ['h0', 'h1', 'h2', 'h3', 'h4'] },
-    ],
-    pile,
-    now,
-  );
-
-  assert.equal(patterns.length, 2, 'admitted: the 8-receipt pattern and the 5-receipt unsorted one');
-  const main = patterns.find((p) => p.kind === 'think');
-  assert.ok(main, 'the think pattern was admitted');
-  assert.equal(main.count, 8, 'count = resolving receipts — the PHANTOM was dropped at the source');
-  assert.ok(!main.receipts.includes('PHANTOM'), 'phantom evidence never survives (receipts-lint at birth)');
-  assert.equal(main.window.from, day(35).slice(0, 10), 'window from the earliest receipt, in code');
-  assert.equal(main.confidence, 'moderate', '8 receipts = moderate');
-  assert.equal(patterns.find((p) => p.statement === 'fits no kind at all')?.kind, 'unsorted', 'unknown kind is never forced — unsorted');
-  assert.equal(candidates.length, 1, 'the anecdote is a candidate, not a pattern');
-  assert.equal(candidates[0].count, 2, 'below MIN_RECEIPTS — never reaches the writer');
-});
-
-test('parseMineOutput: the model cannot mint evidence — hashes outside the offered batch are dropped', () => {
-  const offered = new Set(['h1', 'h2', 'h3']);
-  const out = parseMineOutput(
-    `Sure! Here is the analysis:
-{"patterns":[
-  {"id":"accepts-then-pivots","kind":"think","new_receipts":["h1","h2","PHANTOM","h2"]},
-  {"id":"NEW brand new thing","statement":"redirects to cost whenever infra comes up","kind":"triggers","new_receipts":["h3"]},
-  {"id":"","kind":"work","new_receipts":["h1"]},
-  "garbage entry"
-]}`,
-    offered,
-  );
-  assert.ok(out, 'prose around nested JSON still parses (greedy match)');
-  assert.equal(out.length, 2, 'the empty-id and garbage entries are dropped');
-  assert.deepEqual(out[0].newReceipts, ['h1', 'h2'], 'phantom dropped, duplicate deduped');
-  assert.equal(out[1].id, 'new-brand-new-thing', 'proposed ids are slugified in code');
-  assert.equal(out[1].statement, 'redirects to cost whenever infra comes up');
-  assert.equal(parseMineOutput('no json here at all', offered), undefined, 'unparseable = refuse the whole pass');
-});
-
-test('parseAuditOutput: the auditor may only remove what it explicitly rejected', () => {
-  const offered = new Set(['h1', 'h2', 'h3']);
-  const v = parseAuditOutput('{"keep":["h1"],"evict":["h2","OUTSIDER"]}', offered);
-  assert.ok(v, 'well-formed audit parses');
-  assert.ok(v.evict.has('h2'), 'an explicit eviction lands');
-  assert.ok(!v.evict.has('OUTSIDER'), 'a hash outside the offered set is ignored');
-  assert.ok(!v.evict.has('h3'), 'a hash the model forgot to mention is KEPT — sloppiness never destroys evidence');
-  assert.equal(parseAuditOutput('no json', offered), undefined, 'unparseable = refuse; receipts stay unaudited');
-  const both = parseAuditOutput('{"keep":["h1"],"evict":["h1"]}', offered);
-  assert.ok(both?.evict.has('h1'), 'listed in both = evicted — uncertain means evict');
-});
-
 // ── the grader (0.3.2): every pattern is a dated prediction; misses are the best signal ────────
-
-test('parseGradeOutput: the grader cannot mint contradictions', () => {
-  const offered = new Set(['h1', 'h2']);
-  const cited = parseGradeOutput('{"contradicts":["h1","PHANTOM"]}', offered);
-  assert.ok(cited?.has('h1'), 'a real contradiction lands');
-  assert.ok(!cited?.has('PHANTOM'), 'a hash outside the offered evidence is dropped');
-  assert.equal(parseGradeOutput('{"contradicts":[]}', offered)?.size, 0, 'an empty list is honest work');
-  assert.equal(parseGradeOutput('no json', offered), undefined, 'unparseable = refuse; re-grades next gate');
-});
-
-test('classifyGrade: surprised beats confirmed; silence is never a miss; own receipts never contradict', () => {
-  const batch = ['h1', 'h2', 'h3'];
-  assert.equal(classifyGrade(new Set(['h3']), batch, ['h1']).verdict, 'surprised', 'a contradiction outranks everything');
-  assert.equal(classifyGrade(new Set(), batch, ['h1']).verdict, 'confirmed', 'new receipts landed = reality agreed');
-  assert.equal(classifyGrade(new Set(), batch, ['h9']).verdict, 'silent', 'topic never came up = costs nothing');
-  assert.equal(classifyGrade(new Set(['h1']), batch, ['h1']).verdict, 'confirmed', "citing the pattern's OWN receipt is the auditor's domain, not a surprise");
-  assert.deepEqual(classifyGrade(new Set(['h3']), batch, ['h1']).evidence, ['h3'], 'the mistake carries receipts too');
-});
-
-test('shouldFlag: balanced demotion — two surprises inside 14 days, one anomaly never', () => {
-  const now = new Date('2026-07-17T12:00:00Z');
-  const rec = (ats: string[]): GradeRecord => ({
-    confirmed: 0,
-    silent: 0,
-    surprised: ats.length,
-    surprises: ats.map((at) => ({ at, evidence: ['x'] })),
-  });
-  assert.equal(shouldFlag(rec(['2026-07-16T12:00:00Z']), now), false, 'one weird Tuesday costs confidence, not standing');
-  assert.equal(shouldFlag(rec(['2026-07-10T12:00:00Z', '2026-07-16T12:00:00Z']), now), true, 'a repeat inside the window = the model of the person is wrong there');
-  assert.equal(shouldFlag(rec(['2026-06-01T12:00:00Z', '2026-07-16T12:00:00Z']), now), false, 'an old surprise aged out — only the window counts');
-});
-
-test('timeTag: code hands the model structured local time, never a raw timestamp', () => {
-  assert.equal(timeTag('2026-07-17T09:14:00'), '[Fri 09:14] ', 'weekday + wall clock, computed in code');
-  assert.equal(timeTag('garbage'), '', 'an unparseable ts yields no tag, never a crash');
-});
 
 test('HUMAN.md carries the person-layer schema marker (0.3.1: the sectioned protocol)', () => {
   const humanMd = join(dir, 'HUMAN-schema.md');
@@ -920,69 +659,7 @@ test('HUMAN.md carries the person-layer schema marker (0.3.1: the sectioned prot
   assert.ok(readFileSync(humanMd, 'utf8').includes('<!-- humanmd/v1 -->'), 'the protocol version is declared in the artifact');
 });
 
-test('loadPatterns: missing or version-mismatched reads as empty; a DAMAGED store refuses loudly (C2)', () => {
-  const f = join(dir, 'patterns.json');
-  assert.deepEqual(loadPatterns(f).patterns, [], 'missing = empty');
-  writeFileSync(f, 'garbage {');
-  // 0.3.4 (C2): corrupt no longer reads as empty — that was a silent re-mine of the whole pile.
-  assert.throws(() => loadPatterns(f), CorruptStoreError, 'corrupt = refusal, never a silent re-bill');
-  writeFileSync(f, JSON.stringify({ v: 999, patterns: [{ id: 'x' }] }));
-  assert.deepEqual(loadPatterns(f).patterns, [], 'a foreign MINER_V = re-mine; the judgment pile is the permanent layer');
-  savePatterns({ v: 1, patterns: [], candidates: [], assignments: { abc: ['p1'] }, audited: {}, graded: {} }, f);
-  assert.deepEqual(loadPatterns(f).assignments, { abc: ['p1'] }, 'a current store round-trips');
-});
-
 // ── the promise layer: a wrong frequency is a lie wearing precision ───────────────────────────
-
-test('inventedNumbers: every numeral in the output must already exist in the input', () => {
-  const input = 'CORPUS: 8 sessions · 190 judged\n[think · 24x · 2026-06-09 → 2026-07-16 · fading] pivots';
-  assert.deepEqual(inventedNumbers('seen 24 times since June, across 8 sessions', input), [], 'sheet numbers pass');
-  assert.deepEqual(inventedNumbers('roughly 40 times', input), ['40'], 'a rounded/invented count is caught');
-  assert.deepEqual(inventedNumbers('by 2026 standards, 16 of them', input), [], 'date components count as shown');
-  assert.deepEqual(inventedNumbers('no numbers at all here', input), [], 'prose without numerals always passes');
-});
-
-test('renderPatternSheet shows the model exactly the numbers the lint will allow', () => {
-  const sheet = renderPatternSheet([
-    {
-      id: 'accepts-then-pivots',
-      statement: 'accepts the reasoning verbally then pivots to implementation',
-      kind: 'think',
-      count: 24,
-      window: { from: '2026-06-09', to: '2026-07-16' },
-      trend: 'fading',
-      stability: 'slow',
-      receipts: [],
-      confidence: 'strong',
-      audit: { kept: 22, evicted: 2, at: '2026-07-16T12:00:00Z' },
-    },
-  ]);
-  assert.ok(sheet.includes('24x'), 'the count is shown');
-  assert.ok(sheet.includes('audited 22/24'), 'the audit tally is shown as kept/total');
-  assert.ok(sheet.includes('fading'), 'the trend rides along');
-  assert.deepEqual(inventedNumbers('24 times, 22 of 24 audited, since 2026-06-09', sheet), [], 'sheet and lint agree by construction');
-});
-
-test('renderSurprises: the diary is for the report; recency-windowed; flags shown as revisions', () => {
-  const now = new Date('2026-07-17T12:00:00Z');
-  const p = (statement: string, ats: string[], flagged?: boolean) => ({
-    id: 'x',
-    statement,
-    kind: 'work' as const,
-    count: 6,
-    window: { from: '2026-07-01', to: '2026-07-16' },
-    trend: 'steady' as const,
-    stability: 'slow' as const,
-    receipts: [],
-    confidence: 'moderate' as const,
-    record: { confirmed: 1, silent: 2, surprised: ats.length, surprises: ats.map((at) => ({ at, evidence: ['h'] })) },
-    flagged,
-  });
-  const out = renderSurprises([p('always says go', ['2026-07-16T09:00:00Z'], true)], now);
-  assert.ok(out.includes('always says go'), 'the wrong claim is named');
-  assert.ok(out.includes('now under revision'), 'a flagged claim says so');
-  assert.equal(renderSurprises([p('old miss', ['2026-06-01T09:00:00Z'])], now), '', 'old surprises age out of the diary');
-});
 
 // ── sink: the load step ─────────────────────────────────────────────────────────────────────
 //
@@ -1066,33 +743,6 @@ test('removeProfile is a safe no-op with no block (or no file)', () => {
 // what keeps the after-session hook cheap: due on K new judgments, on the staleness backstop, on a
 // cache reset, or on first build. Missing/corrupt state fails OPEN — one extra synthesis, never a
 // stuck-stale profile.
-
-test('synthesisDue: first build, K accumulation, the backstop, and cache reset', () => {
-  const now = new Date('2026-07-16T12:00:00Z');
-  assert.equal(synthesisDue({}, 40, now).due, true, 'never synthesized = first build = due');
-
-  const fresh = { lastSynthesisAt: '2026-07-15T12:00:00Z', judgmentsAtLastSynthesis: 100 };
-  assert.equal(synthesisDue(fresh, 110, now).due, false, '10 of 25 accumulated — not yet');
-  assert.equal(synthesisDue(fresh, 110, now).newSince, 10, 'progress is reported honestly');
-  assert.equal(synthesisDue(fresh, 125, now).due, true, 'K reached = due');
-
-  const stale = { lastSynthesisAt: '2026-07-01T12:00:00Z', judgmentsAtLastSynthesis: 100 };
-  assert.equal(synthesisDue(stale, 101, now).due, true, 'past the backstop + anything new = due');
-  assert.equal(synthesisDue(stale, 100, now).due, false, 'stale but NOTHING new = same pile, same profile, skip');
-
-  assert.equal(synthesisDue(fresh, 50, now).due, true, 'count went backwards = cache was reset = rebuild');
-});
-
-test('state: missing or corrupt reads as never-synthesized (fails open), and round-trips', () => {
-  const f = join(dir, 'state.json');
-  assert.deepEqual(readState(f), {}, 'missing = never synthesized');
-  writeFileSync(f, 'garbage {');
-  assert.deepEqual(readState(f), {}, 'corrupt = never synthesized, never a throw');
-  writeState({ lastSynthesisAt: '2026-07-16T12:00:00Z', judgmentsAtLastSynthesis: 190 }, f);
-  const s = readState(f);
-  assert.equal(s.lastSynthesisAt, '2026-07-16T12:00:00Z');
-  assert.equal(s.judgmentsAtLastSynthesis, 190);
-});
 
 test('ensureLoaded re-points CLAUDE.md at an existing HUMAN.md without rewriting it', () => {
   const humanMd = join(dir, 'HUMAN-ens.md');
@@ -1226,115 +876,8 @@ test('recordUsage tolerates missing fields — a JSON payload without usage stil
   assert.equal(t.costUsd, 0);
 });
 
-const j2 = (topic = 'a topic', behavior = 'what they did') => ({
-  hash: 'x',
-  ts: '2026-07-01T10:00:00Z',
-  session: 's',
-  v: PIPELINE_V,
-  topic,
-  behavior,
-  line: `${topic} — ${behavior}`,
-});
-
-test('EVERY judgment reaches the writer — the `none` gate is gone with the verdict', () => {
-  // The gate dropped 11% of evidence, including "gave explicit go-ahead to merge" and "executed the
-  // manual steps and reported completion" — exactly what HOW THEY WORK is built from.
-  assert.ok(currentJudgment(j2()), 'a judgment with no verdict field is valid');
-  assert.equal(currentJudgment({ ...j2(), v: 1 }), false, 'a v1 entry is still stale');
-  assert.equal(currentJudgment({ ...j2(), behavior: undefined } as never), false, 'behavior is required');
-});
 
 // ── judgment v2: strict FORM guaranteed in code, free VOCABULARY in the fields ─────────────────
-
-test('parseJudgeOutput: valid JSON parses into validated fields', () => {
-  const p = parseJudgeOutput('{"behavior":"accepted but pivoted to cost"}');
-  assert.ok(p, 'well-formed output parses');
-  assert.equal(p.behavior, 'accepted but pivoted to cost');
-});
-
-test('TOPIC IS DEAD — a stale topic is ignored, and its absence is not a failure', () => {
-  const withStale = parseJudgeOutput('{"topic":"the deploy step","behavior":"pivoted to cost"}');
-  assert.equal(withStale?.behavior, 'pivoted to cost', 'an old-shaped reply still parses');
-  assert.equal((withStale as Record<string, unknown>).topic, undefined, 'and the dead field is dropped');
-  assert.equal(parseJudgeOutput('{"topic":"only a topic"}'), undefined, 'behavior is the only required field now');
-});
-
-test('a judgment cached with a topic is still current — no re-judging to delete a field', () => {
-  const old = { hash: 'h', ts: '2026-07-01T10:00:00Z', session: 's', v: PIPELINE_V, topic: 'the deploy step', behavior: 'b', line: 'l' };
-  assert.equal(currentJudgment(old), true, 'the old shape is a superset — same play that retired `verdict`');
-});
-
-test('parseJudgeOutput: tolerates prose and stale fields, refuses a missing one', () => {
-  assert.ok(
-    parseJudgeOutput('Here is my judgment: {"topic":"JWT expiry","behavior":"re-asked"} hope that helps'),
-    'the first {...} block wins even when the model chats',
-  );
-  assert.ok(
-    parseJudgeOutput('{"verdict":"maybe","topic":"x","behavior":"y"}'),
-    'a leftover verdict field is ignored, never a reason to refuse — the old shape is a superset',
-  );
-  assert.equal(parseJudgeOutput('{"topic":"x"}'), undefined, 'missing behavior = refuse');
-  assert.ok(parseJudgeOutput('{"behavior":"y"}'), 'behavior ALONE is the contract now — topic died 2026-07-20');
-  assert.equal(parseJudgeOutput('transferred — an old v1 line — moved on'), undefined, 'no JSON = refuse, re-judge');
-});
-
-test('parseJudgeOutput: an over-long field is cut at a word boundary, never mid-word', () => {
-  // Measured 2026-07-19: 16% of behaviors hit the cap and were amputated mid-word ("…based on
-  // act"). Behavior text is what the miner mines, so half a word is damaged evidence.
-  const long = `${'alpha bravo charlie delta echo foxtrot golf hotel '.repeat(8)}terminus`;
-  const p = parseJudgeOutput(`{"verdict":"no","topic":"t","behavior":"${long}"}`);
-  assert.ok(p, 'an over-long behavior still parses');
-  assert.ok(p.behavior.length <= 240, 'still bounded by the backstop cap');
-  assert.ok(!/\s$/.test(p.behavior), 'no trailing whitespace at the cut');
-  assert.ok(
-    long.startsWith(p.behavior),
-    'the kept text is a genuine prefix of what the model said — never re-worded',
-  );
-  const lastWord = p.behavior.slice(p.behavior.lastIndexOf(' ') + 1);
-  assert.ok(
-    ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel'].includes(lastWord),
-    `cut landed on a whole word, got "${lastWord}"`,
-  );
-});
-
-test('parseJudgeOutput: a dangling quote is dropped, a matched pair is kept', () => {
-  // Observed 2026-07-19: behaviors arriving as `…moved on"` — one quote, no opener. But the model
-  // quotes the person legitimately and often, so the test is PARITY, not "strip quotes".
-  const dangling = parseJudgeOutput('{"verdict":"none","topic":"t","behavior":"confirmed and moved on\\""}');
-  assert.equal(dangling?.behavior, 'confirmed and moved on', 'an unmatched trailing quote is noise');
-
-  const paired = parseJudgeOutput('{"verdict":"no","topic":"t","behavior":"pushed back with \\"not like that\\""}');
-  assert.equal(paired?.behavior, 'pushed back with "not like that"', 'a matched pair is the person\'s own words — keep it');
-
-  const apostrophe = parseJudgeOutput('{"verdict":"none","topic":"t","behavior":"said it was the team\'s call"}');
-  assert.equal(apostrophe?.behavior, "said it was the team's call", 'a mid-string apostrophe is untouched');
-});
-
-test('parseJudgeOutput: a field that fits is left exactly alone', () => {
-  const p = parseJudgeOutput('{"verdict":"partial","topic":"the deploy step","behavior":"accepted, then pivoted to cost"}');
-  assert.equal(p?.behavior, 'accepted, then pivoted to cost', 'no cut, no reflow, byte-identical');
-});
-
-test('a v1 cache entry is stale — currentJudgment gates the pipeline version', () => {
-  assert.equal(currentJudgment({ hash: 'x', ts: 't', session: 's', line: 'transferred — a — b' }), false, 'v1 entry (no v, no fields) re-judges under the budget');
-  assert.equal(currentJudgment(undefined), false, 'missing entry is not current');
-  assert.equal(currentJudgment(j2('partial')), true, 'a current-version entry is served free');
-});
-
-test('cachedCount counts judgments; a DAMAGED cache refuses loudly, and cacheHealth labels it (C2)', () => {
-  const f = join(dir, 'judgments.json');
-  assert.equal(cachedCount(f), 0, 'no cache yet');
-  writeFileSync(f, JSON.stringify({ a: {}, b: {}, c: {} }));
-  assert.equal(cachedCount(f), 3, 'one per cached exchange');
-  assert.deepEqual(cacheHealth(f), { ok: true, count: 3, file: f }, 'healthy cache reports its count');
-  writeFileSync(f, 'broken {');
-  // 0.3.4 (C2): corrupt no longer reads as zero — the gate would mistake it for an empty pile
-  // and re-bill the whole history. Spending paths refuse; status labels via cacheHealth.
-  assert.throws(() => cachedCount(f), CorruptStoreError, 'corrupt = refusal, never a confident zero');
-  const health = cacheHealth(f);
-  assert.equal(health.ok, false, 'status sees "unreadable", not 0');
-  assert.equal(health.file, f, 'and knows which file to name');
-});
 
 // ── the recent-window loader: it must NOT read the whole history ──────────────────────────────
 //
@@ -1354,10 +897,12 @@ test('loadRecentExchanges returns the newest `want` exchanges, oldest-first, win
   session('s3.jsonl', 'three', '2026-07-03T10:00:00Z', 3000);
   session('s4.jsonl', 'four', '2026-07-04T10:00:00Z', 4000);
 
-  const got = loadRecentExchanges(2, [rdir]);
-  assert.equal(got.length, 2, 'windowed to `want`, not the whole archive');
-  assert.equal(got[0].reaction, 'react three', 'oldest of the window comes first');
-  assert.equal(got[1].reaction, 'react four', 'newest last');
+  // Each session now yields TWO exchanges — its opener (`ask N`) and its closed turn (`react N`) —
+  // so a window of 4 spans the two newest sessions rather than four.
+  const got = loadRecentExchanges(4, [rdir]);
+  assert.equal(got.length, 4, 'windowed to `want`, not the whole archive');
+  assert.equal(got[0].reaction, 'ask three', 'oldest of the window comes first');
+  assert.equal(got[3].reaction, 'react four', 'newest last');
   assert.ok(!got.some((e) => e.reaction === 'react one'), 'the older sessions are dropped');
   rmSync(rdir, { recursive: true, force: true });
 });
@@ -1425,7 +970,7 @@ test('readSettings: a valid settings.json comes back parsed, untouched', () => {
 // would each produce a number that looks like evidence and is not.
 
 const jm = (o: Partial<Judgment> & { hash: string }): Judgment =>
-  ({ ts: '2026-07-01T10:00:00Z', session: 's1', v: PIPELINE_V, behavior: `did thing ${o.hash}`, line: 'l', ...o }) as Judgment;
+  ({ ts: '2026-07-01T10:00:00Z', session: 's1', behavior: `did thing ${o.hash}`, ...o }) as Judgment;
 
 test('the shuffle is reproducible, and differs between items', () => {
   const items = ['a', 'b', 'c', 'd', 'e'];
@@ -1528,10 +1073,10 @@ test('scoring: accuracy is against ANSWERED items, and "none of these" is counte
 test('shape records TRUE lengths, taken before the 8k cap', () => {
   const big = 'x'.repeat(9000);
   const ex = parseExchanges(writeTranscript('shape.jsonl', [u('short ask'), a(big), u('go')].join('\n')));
-  assert.equal(ex[0].shape?.ask, 9, 'the ask');
-  assert.equal(ex[0].shape?.said, 9000, 'the real size of the answer, not the capped 8000');
-  assert.equal(ex[0].shape?.reply, 2, 'and the reply');
-  assert.equal(ex[0].said.length, 8000, 'while the TEXT is still capped for the hash and the view');
+  assert.equal(ex[1].shape?.ask, 9, 'the ask');
+  assert.equal(ex[1].shape?.said, 9000, 'the real size of the answer, not the capped 8000');
+  assert.equal(ex[1].shape?.reply, 2, 'and the reply');
+  assert.equal(ex[1].said.length, 8000, 'while the TEXT is still capped for the hash and the view');
 });
 
 test('the generic-ask-after-a-long-answer shape is visible in the data', () => {
@@ -1544,8 +1089,8 @@ test('the generic-ask-after-a-long-answer shape is visible in the data', () => {
       u('double check the token expiry in auth.ts, i think it is wrong'),
     ].join('\n')),
   );
-  assert.equal(ex.length, 2);
-  const [lost, doubting] = ex;
+  assert.equal(ex.length, 3, 'the opener plus the two closed turns');
+  const [, lost, doubting] = ex;
   assert.ok(lost.shape!.said / lost.shape!.reply > 100, 'a long answer met with a short generic ask');
   assert.ok(doubting.shape!.reply > lost.shape!.reply, 'versus a longer, specific one');
 });
@@ -1554,10 +1099,11 @@ test('lastOfSession marks the closing act, and only it', () => {
   const ex = parseExchanges(
     writeTranscript('close.jsonl', [u('first'), a('a1'), u('second'), a('a2'), u('third')].join('\n')),
   );
-  assert.equal(ex.length, 2);
+  assert.equal(ex.length, 3, 'the opener plus two closed turns');
   assert.equal(ex[0].lastOfSession, undefined);
-  assert.equal(ex[1].lastOfSession, true, '"ended it here" was invisible before this');
-  assert.equal(atOf(ex[1])?.lastOfSession, true, 'and it reaches the judgment');
+  assert.equal(ex[1].lastOfSession, undefined);
+  assert.equal(ex[2].lastOfSession, true, '"ended it here" was invisible before this');
+  assert.equal(atOf(ex[2])?.lastOfSession, true, 'and it reaches the judgment');
 });
 
 test('shape and lastOfSession do not change the hash', () => {

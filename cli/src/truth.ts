@@ -26,7 +26,30 @@
  *
  * Zero model calls. The only cost is the person's attention, which is the scarcest thing here.
  */
-import type { Judgment } from './judge.js';
+import type { At } from './facts.js';
+
+/**
+ * WAITING FOR ITS NEW INPUT (stage 0 of the discovery pipeline).
+ *
+ * This used to take `Judgment` from the judge, which is gone: the judge's free-text sentence had no
+ * consumer once the miner was deleted, and discovery reads raw replies instead. Everything BELOW
+ * this line — the quote masking, the deterministic shuffle, the distractor picking, the scoring —
+ * is untouched and is the part worth keeping. It is also the only instrument in the product that
+ * ever tested whether a claim is TRUE of the person rather than merely well-evidenced, which is the
+ * oldest open hole here.
+ *
+ * So it is kept compiling against a structural shape rather than deleted into git history. What it
+ * has to become: the same sheet built over a CATEGORY and the MOMENTS assigned to it — "which of
+ * these three exchanges does this claim describe?" — which is a better question than the one it
+ * asked before, because the evidence is the person's own words instead of a model's paraphrase.
+ */
+export interface Judgment {
+  hash: string;
+  ts: string;
+  session: string;
+  behavior: string;
+  at?: At;
+}
 
 /** How much of the person's own words to show. Enough to recognise the moment, not so much that
  *  reading the sheet becomes the expensive part. */

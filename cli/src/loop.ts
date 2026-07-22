@@ -1,21 +1,24 @@
 /**
- * THE WORKER (Phase 2 of the cold-start build) — one process, ever; disk is the queue.
+ * THE WORKER — one process, ever; disk is the queue.
  *
- * Spec §4: there is no daemon. Wake sources (the Stop hook, `update`, later `init` and
- * `backfill`) ring a doorbell — check the lock, spawn this loop detached if no worker lives,
- * return the terminal. The loop does the work the commands used to do inline:
+ * There is no daemon. Wake sources (the Stop hook, `update`) ring a doorbell — check the lock,
+ * spawn this loop detached if no worker lives, and return the terminal at once. The loop then does
+ * the work that would otherwise hang the terminal, or the after-session hook:
  *
- *   rung 1  FRESH   judge the window's unjudged exchanges (seconds, the living loop's cost)
- *   rung 3  GATES   due (or forced)? mine → audit → grade → render → reload
- *   re-scan once    exchanges that arrived while working get judged before exit
- *   release, exit   nothing runs when there is nothing to do
+ *   build   read what's new into the pile (moments.jsonl) — free, code only
+ *   assign  label the new moments against the live categories — the spend, ~one call per 200
+ *   count   add up the columns — lift, misfit, the scoreboard — free, arithmetic
+ *   release, exit   nothing runs when there is nothing new
  *
- * (Rung 2 — the backfill cursor — arrives in Phase 4 and slots between them.)
+ * Discovery (minting the categories) and the profile file are stages 3 and 4; until they land, a
+ * machine with no categories on disk builds the pile, says so, and spends nothing.
  *
- * It narrates to progress.json (the tail and `status` read it), records the stopwatch wherever
- * money moves, and dies well: SIGTERM kills the in-flight borrowed session, labels the run
- * "stopped by you", releases the lock, and exits — everything already judged is banked (C3), so
- * stopping never wastes what was spent.
+ * It narrates to progress.json (the tail and `status` read it) and records the stopwatch wherever
+ * money moves. RESUMABILITY IS THE STORE'S JOB, NOT THE LOOP'S: each batch of checkmarks is
+ * appended the instant it lands, so an interrupted run re-spends at most the one in-flight batch —
+ * next run's seen-set skips everything already banked. On stop it labels the run "stopped by you",
+ * releases the lock, and exits — a graceful signal is processed between batches, since an in-flight
+ * assign call is currently synchronous (the stop-latency caveat, flagged for the worker pass).
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -23,29 +26,21 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { atomicWriteFileSync, CorruptStoreError } from './atomic.js';
 import { findAssistant } from './claude.js';
-import { loadRecentExchanges, sessionCount } from './exchange.js';
-import { judgeAll, cachedCount, allJudgments, fitAperture } from './judge.js';
-import { mine, auditPatterns, gradePatterns, loadPatterns } from './miner.js';
+import { buildMoments, loadMoments } from './moments.js';
+import { loadCategories } from './categories.js';
+import { assignMoments, loadAssignments } from './assign.js';
+import { join as joinLabelled, scoreboard, scoreboardLine, misfitRate } from './count.js';
+import { buildProfile, looksLikeProfile } from './write.js';
+import { discover, rediscover } from './discover.js';
+import { injectProfile, humanMdPath } from './sink.js';
+import { startRun } from './stopwatch.js';
 import { dailyCheck } from './notify.js';
 import { refreshArmed } from './init.js';
-import { injectProfile, ensureLoaded, humanMdPath } from './sink.js';
-import { readState, writeState, synthesisDue, writeRender, writeBuildCorpus, SYNTH_EVERY } from './state.js';
-import { startRun } from './stopwatch.js';
+import { readState, writeState, writeRender, SYNTH_EVERY } from './state.js';
 import { readUsage, diffUsage, fmtTokens } from './usage.js';
 import { killActiveSession } from './stream.js';
-import {
-  synthesizeProfile,
-  synthesizeReport,
-  synthesizeProfileFromPatterns,
-  synthesizeReportFromPatterns,
-  artifactShapeProblem,
-  mostRecent,
-  topProjects,
-  type Corpus,
-} from './synthesize.js';
 import { acquireLock, releaseLock, lockFilePath } from './worker.js';
 import { writeProgress } from './progress.js';
-import type { Judgment } from './judge.js';
 
 const STRATLESS_DIR = join(homedir(), '.stratless');
 
@@ -83,48 +78,32 @@ export function installedVersion(): string {
   }
 }
 
-export interface Rendered {
-  text?: string;
-  /** the numbers-lint refused: these numerals were invented */
-  invented?: string[];
-  /** the shape lint refused: what the output looked like instead of an artifact */
-  malformed?: string;
-}
-
 /**
- * Build either rendering — from the mined patterns when they exist, else the flat pile read.
- * Pure of terminal concerns: both refusal lints (invented numbers, artifact shape) come back as
- * data; the CLI and the worker each say no in their own voice. No refusal ever loads.
+ * `Rendered` and `buildRendered` lived here: they chose between the flat-pile synthesis and the
+ * pattern-era one, then ran the two refusal lints. Both synthesis paths are gone with the miner.
+ *
+ * THE LINTS MUST COME BACK in stage 4, and they are the part worth remembering rather than the
+ * plumbing. The numbers-lint refuses a rendering containing a numeral that is not in the evidence.
+ * The shape lint exists because a chatter reply was once LOADED as HUMAN.md in production
+ * (2026-07-18) — the artifact has to look like an artifact. `write.ts` assembles the file in code
+ * rather than asking a model for it, which removes the *source* of both failures; that is a reason
+ * to expect the lints to stay quiet, not a reason to ship without them.
  */
-export function buildRendered(kind: 'profile' | 'report', signal: Judgment[], corpus: Corpus, bin: string): Rendered {
-  const store = loadPatterns();
-  let out: Rendered;
-  let patternEra = false;
-  if (!store.patterns.length) {
-    const text = kind === 'profile' ? synthesizeProfile(signal, corpus, bin) : synthesizeReport(signal, corpus, bin);
-    out = text ? { text } : {};
-  } else {
-    patternEra = true;
-    const synth = kind === 'profile' ? synthesizeProfileFromPatterns : synthesizeReportFromPatterns;
-    out = synth(store.patterns, mostRecent(signal, 25), corpus, bin);
-  }
-  if (out.text) {
-    // THE SHAPE LINT (C9's second half, pulled forward after B1 struck production 2026-07-18:
-    // a chatter reply was LOADED as HUMAN.md). The artifact must look like an artifact.
-    const problem = artifactShapeProblem(out.text, { kind, patternEra });
-    if (problem) return { malformed: problem };
-  }
-  return out;
-}
+
+/** Re-discovery: when the misfit rate over the last window stays above the trigger, mint the new
+ *  behaviours — but no more than once per cooldown, so it can never run away. */
+const REDISCOVER_WINDOW_MS = 14 * 24 * 3600 * 1000;
+const REDISCOVER_COOLDOWN_MS = 7 * 24 * 3600 * 1000;
+const REDISCOVER_MISFIT = 0.15;
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 /**
  * The worker's whole life. Returns the process exit code. Assumes it IS the worker process —
  * takes the lock (losing it means another worker lives: this wake was a no-op, exit clean),
- * works the rungs, re-scans once, narrates, releases, ends.
+ * builds the pile, assigns the new moments, counts, narrates, releases, ends.
  */
-export async function runWorker(opts: { force?: boolean } = {}): Promise<number> {
+export async function runWorker(): Promise<number> {
   if (!acquireLock(lockFilePath(), 'worker')) return 0; // a live worker exists — the doorbell already did its job
   const startedAt = new Date().toISOString();
 
@@ -147,26 +126,18 @@ export async function runWorker(opts: { force?: boolean } = {}): Promise<number>
     }
   };
 
-  // Die well (C7): kill the in-flight borrowed session, label honestly, release, exit. The
-  // hash-keyed cache means at most one chunk of work re-asks next wake — stopping is cheap.
-  const onKill = (): void => {
-    killActiveSession();
-    const spent = receipt();
-    writeProgress({
-      phase: 'stopped',
-      ok: false,
-      startedAt,
-      summary: [
-        'stopped by you — everything already judged is banked; the next run re-reads at most one chunk',
-        ...(spent ? [spent] : []),
-      ],
-      ...(spent ? { spend: spent } : {}),
-    });
-    releaseLock();
-    process.exit(0);
+  // Stop is cooperative (C7): a signal flips this flag; the assign loop checks it between batches
+  // (each already banked) and unwinds gracefully — the caller labels the run and the `finally`
+  // releases the lock. stopWorker signals the whole process GROUP, so the in-flight borrowed call
+  // is terminated too and the loop reaches its next checkpoint at once; the SIGKILL after the grace
+  // window is the backstop. No immediate exit here — that is what let the old design skip the label.
+  let stopRequested = false;
+  const onStop = (): void => {
+    stopRequested = true;
+    killActiveSession(); // no-op for the synchronous assign call; meaningful for any active stream
   };
-  process.once('SIGTERM', onKill);
-  process.once('SIGINT', onKill);
+  process.once('SIGTERM', onStop);
+  process.once('SIGINT', onStop);
 
   const fail = (lines: string[]): number => {
     const spent = receipt(); // a refused build still spent — the receipt survives the refusal
@@ -185,133 +156,102 @@ export async function runWorker(opts: { force?: boolean } = {}): Promise<number>
     const bin = findAssistant();
     if (!bin) return fail(['stratless needs your assistant to read your history — is `claude` installed?']);
 
-    const force = !!opts.force;
     const summary: string[] = [];
-    const knownHashes = new Set<string>();
 
-    const window = loadRecentExchanges(JUDGE_WINDOW);
-    if (!window.length) {
+    // STAGES 1-2 of the discovery pipeline, in a harness (lock, progress frames, receipt, version
+    // check) that predates them and stays put. Build the pile (free), assign the new moments against
+    // the live categories (the spend), add up the columns (free), write the profile. With no
+    // categories yet, discover mints them from the pile (cold start); at steady state a rising misfit
+    // rate re-discovers the behaviours we have no column for.
+    const sw = startRun();
+    const built = buildMoments();
+
+    if (!built.total) {
       summary.push('no conversations found yet — talk to your assistant a few times, then run `stratless update`');
     } else {
-      for (const e of window) knownHashes.add(e.hash);
-      const sw = startRun();
-      const sessions = sessionCount(window);
-      const aperture = fitAperture(window);
-      const tJudge = Date.now();
-      const run = await judgeAll([...window].reverse(), bin, {
-        limit: judgeLimit(),
-        aperture,
-        onProgress: (done, total) => writeProgress({ phase: 'judging', startedAt, done, total }),
-      });
-      sw.stage('judge', Date.now() - tJudge, run.fresh, run.turnsMs);
-      if (!run.judgments.length) {
-        sw.record();
-        return fail(['could not read a single exchange — is `claude -p` working?']);
-      }
+      let cats = loadCategories();
+      let changed = false; // categories or assignments changed this run → force the profile rebuild
 
-      const state = readState();
-      const gate = synthesisDue(state, cachedCount(), new Date(), { every: synthEvery() });
-      const noProfile = !existsSync(humanMdPath());
-
-      if (!force && !noProfile && !gate.due) {
-        writeState({ ...state, aperture: { ...aperture, computedAt: new Date().toISOString() } });
-        if (run.fresh) sw.record();
-        ensureLoaded();
-        const judged = run.fresh ? `judged ${run.fresh} new` : 'nothing new to judge';
-        summary.push(`profile is fresh enough (${judged} · ${gate.newSince}/${synthEvery()} toward the next build)`);
+      if (!cats.length) {
+        // COLD START (stage 3): discover mints the categories and writes the assignments store.
+        const discoverStart = Date.now();
+        const dr = await discover({
+          onProgress: (l) => writeProgress({ phase: 'starting', startedAt, summary: [l] }),
+          shouldStop: () => stopRequested,
+        });
+        sw.stage('discover', Date.now() - discoverStart, dr.assigned);
+        cats = loadCategories();
+        if (dr.categories) {
+          changed = true;
+          // Start the re-discovery cooldown clock here too — otherwise the first steady-state run
+          // after a cold start sees "never discovered" and could re-mint immediately on a high misfit.
+          writeState({ ...readState(), lastDiscoverAt: new Date().toISOString() });
+          summary.push(
+            `discovered ${dr.categories} categor${dr.categories === 1 ? 'y' : 'ies'} across ${dr.rounds} round${dr.rounds === 1 ? '' : 's'} · ${dr.assigned} moment${dr.assigned === 1 ? '' : 's'} scored`,
+          );
+        }
       } else {
-        // The expensive rungs — mine, audit, grade, write, load — behind the one gate.
-        const signal = run.judgments;
-        const corpus: Corpus = {
-          sessions,
-          exchanges: signal.length,
-          projects: topProjects(signal),
-          from: window[0].ts.slice(0, 10),
-          to: window[window.length - 1].ts.slice(0, 10),
-        };
-        const pile = allJudgments();
-        writeProgress({ phase: 'mining', startedAt });
-        const tMine = Date.now();
-        const mined = mine(pile, bin);
-        sw.stage('mine', Date.now() - tMine, mined.assigned);
-        writeProgress({ phase: 'auditing', startedAt });
-        const tAudit = Date.now();
-        const audited = await auditPatterns(pile, bin);
-        sw.stage('audit', Date.now() - tAudit, audited.calls);
-        writeProgress({ phase: 'grading', startedAt });
-        const tGrade = Date.now();
-        const graded = await gradePatterns(pile, bin);
-        sw.stage('grade', Date.now() - tGrade, graded.graded);
-
-        writeProgress({ phase: 'writing', startedAt });
-        const tSynth = Date.now();
-        const built = buildRendered('profile', signal, corpus, bin);
-        sw.stage('synthesis', Date.now() - tSynth, built.text ? 1 : 0);
-        sw.record();
-        if (built.invented?.length) {
-          return fail([
-            `refused: the writer invented numbers (${built.invented.join(', ')}) — nothing was written or loaded`,
-            'this build is discarded; try again with `stratless update --now`',
-          ]);
-        }
-        if (built.malformed) {
-          return fail([
-            `refused: the writer returned ${built.malformed} instead of a profile — nothing was written or loaded`,
-            'this build is discarded; try again with `stratless update --now`',
-          ]);
-        }
-        if (!built.text) {
-          return fail(['could not build the profile — the assistant returned nothing; silence beats a guess']);
+        // STEADY STATE: assign the new moments incrementally against the settled categories.
+        const assignStart = Date.now();
+        const res = await assignMoments({ shouldStop: () => stopRequested });
+        sw.stage('assign', Date.now() - assignStart, res.assigned);
+        if (res.assigned) {
+          changed = true;
+          summary.push(
+            `assigned ${res.assigned} new moment${res.assigned === 1 ? '' : 's'} across ${res.batches} call${res.batches === 1 ? '' : 's'} against ${cats.length} categories`,
+          );
         }
 
-        const builtAt = new Date().toISOString();
-        atomicWriteFileSync(join(STRATLESS_DIR, 'profile.txt'), `${built.text}\n`);
-        writeRender('profile', { builtAt, sessions, exchanges: signal.length });
-        // Freeze this build's corpus so `profile --read` can render the human-facing note over
-        // EXACTLY this evidence later (lazy, no re-read) — never a divergent window.
-        writeBuildCorpus({ builtAt, corpus, signalHashes: signal.map((j) => j.hash) });
-        const { humanMd, claudeMd } = injectProfile(built.text);
-        writeState({
-          ...readState(),
-          lastSynthesisAt: builtAt,
-          judgmentsAtLastSynthesis: cachedCount(),
-          aperture: { ...aperture, computedAt: builtAt },
-        });
-
-        const why = force ? 'forced with --now' : noProfile ? 'first load' : gate.reason;
-        const spend = run.fresh ? `${run.fresh} new, ${run.cached} from cache` : `all ${run.cached} from cache`;
-        const more = run.deferred ? ` · ${run.deferred} left for next run` : '';
-        const gradeNote = graded.graded
-          ? ` · graded ${graded.graded}${graded.surprised ? ` (${graded.surprised} surprised${graded.flagged ? `, ${graded.flagged} flagged` : ''})` : ''}`
-          : '';
-        const mineNote = mined.mined
-          ? ` · mined ${mined.assigned} → ${audited.store.patterns.length} patterns${audited.evicted ? `, ${audited.evicted} receipts evicted` : ''}${gradeNote}`
-          : gradeNote;
-        summary.push(`profile refreshed and loaded (${why} · ${spend}${more}${mineNote})`);
-        summary.push(`wrote ${humanMd}`);
-        summary.push(`pointed ${claudeMd} at it (via @import)`);
+        // RE-DISCOVERY: when the recent misfit rate stays high, mint the behaviours we have no
+        // column for — once per cooldown, so it never runs away.
+        if (!stopRequested) {
+          const labelledNow = joinLabelled(loadMoments(), loadAssignments());
+          const since = new Date(Date.now() - REDISCOVER_WINDOW_MS);
+          const st = readState();
+          const dueRedisc = !st.lastDiscoverAt || Date.now() - Date.parse(st.lastDiscoverAt) > REDISCOVER_COOLDOWN_MS;
+          if (dueRedisc && misfitRate(labelledNow, { since }) > REDISCOVER_MISFIT) {
+            const recent = labelledNow.filter((l) => !l.kinds.length && Date.parse(l.moment.ts) >= since.getTime()).map((l) => l.moment);
+            const added = rediscover(recent);
+            if (added.length) {
+              changed = true;
+              summary.push(`re-discovered ${added.length} new categor${added.length === 1 ? 'y' : 'ies'} — recent misfit rose`);
+              writeState({ ...readState(), lastDiscoverAt: new Date().toISOString() });
+            }
+          }
+        }
       }
 
-      // THE RE-SCAN — one look back for exchanges that arrived WHILE working. Arrivals only
-      // (never the deferred backlog: the announced bill is a promise, and the window drains over
-      // runs by design), rung 1 only (gates wait for the next wake — no silent second mine).
-      const window2 = loadRecentExchanges(JUDGE_WINDOW);
-      const arrivals = window2.filter((e) => !knownHashes.has(e.hash));
-      if (arrivals.length) {
-        const sw2 = startRun();
-        const t2 = Date.now();
-        const run2 = await judgeAll([...arrivals].reverse(), bin, {
-          limit: judgeLimit(),
-          aperture: fitAperture(window2),
-          onProgress: (done, total) => writeProgress({ phase: 'judging', startedAt, done, total }),
-        });
-        sw2.stage('judge', Date.now() - t2, run2.fresh, run2.turnsMs);
-        if (run2.fresh) {
-          sw2.record();
-          summary.push(`also judged ${run2.fresh} new that arrived during the build`);
+      // A stop from either path: everything scored so far is banked, the next run resumes.
+      if (stopRequested) {
+        sw.record();
+        const spent = receipt();
+        const line = 'stopped by you — everything already scored is banked; the next run resumes from there';
+        writeProgress({ phase: 'stopped', ok: false, startedAt, summary: spent ? [line, spent] : [line], ...(spent ? { spend: spent } : {}) });
+        return 0; // the finally releases the lock
+      }
+
+      // SHARED: the scoreboard (arithmetic, free), then the profile file (stage 4). Rebuild when the
+      // category set or the pile changed, or when no profile exists yet.
+      const board = scoreboard(joinLabelled(loadMoments(), loadAssignments()), cats);
+      summary.push(scoreboardLine(board, readState().scoreboard?.rate));
+      writeState({ ...readState(), scoreboard: { rate: board.rate, at: new Date().toISOString() } });
+
+      if (changed || !existsSync(humanMdPath())) {
+        const writeStart = Date.now();
+        const profile = buildProfile();
+        sw.stage('write', Date.now() - writeStart, profile ? 1 : 0);
+        if (profile && looksLikeProfile(profile.text)) {
+          injectProfile(profile.text); // writes ~/.claude/HUMAN.md AND points CLAUDE.md at it — the load
+          writeRender('profile', { builtAt: new Date().toISOString(), sessions: profile.meta.sessions, exchanges: profile.meta.moments });
+          summary.push(
+            `profile written and loaded · ${profile.meta.signals} distress signal${profile.meta.signals === 1 ? '' : 's'} + ${profile.meta.working} working-style trait${profile.meta.working === 1 ? '' : 's'}${profile.meta.shorthand ? ` + ${profile.meta.shorthand} shorthand handles` : ''}`,
+          );
+        } else {
+          summary.push('profile not rebuilt — not enough clear evidence yet');
         }
       }
     }
+    sw.record();
 
     // The daily version line rides ONLY on --auto consent (the installed hook is the consent
     // artifact) — same rule as before, now spoken through the summary.
