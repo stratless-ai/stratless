@@ -67,6 +67,8 @@ export interface SynthState {
   scoreboard?: { rate: number; at: string };
   /** when discover last ran — the re-discovery cooldown reads it so a high misfit can't re-mint every run */
   lastDiscoverAt?: string;
+  /** when the worker last flushed (tagged + rebuilt) — the flush ceiling ([[flushDue]]) measures from here */
+  lastFlushAt?: string;
 }
 
 /** Read the state. Missing or corrupt reads as never-synthesized and never throws. */
@@ -96,6 +98,7 @@ export function readState(file: string = statePath()): SynthState {
       out.scoreboard = { rate: Number(sb.rate), at: sb.at };
     }
     if (typeof raw.lastDiscoverAt === 'string') out.lastDiscoverAt = raw.lastDiscoverAt;
+    if (typeof raw.lastFlushAt === 'string') out.lastFlushAt = raw.lastFlushAt;
     return out;
   } catch {
     return {}; // fails open — one extra synthesis, never a crash
@@ -270,4 +273,58 @@ export function synthesisDue(
   }
 
   return { due: false, reason: '', newSince };
+}
+
+// ── the flush gate (the per-turn-rebuild fix) ───────────────────────────────────────────────────
+
+/**
+ * The flush ceiling — the "left-open safety net". Leftover moments below a session boundary still
+ * flush once they have waited this long, so a session held open all day does not sit stale. Checked
+ * at nudge time, never on a clock: there is no daemon to wake. Override with STRATLESS_FLUSH_MAX_AGE_MS.
+ */
+export const FLUSH_MAX_AGE_MS = 24 * 3600 * 1000;
+
+export interface FlushDecision {
+  flush: boolean;
+  /** the honest one-phrase why, for the progress frame ('' when not flushing) */
+  reason: string;
+}
+
+/**
+ * Should the worker flush now — tag the waiting moments, count, rebuild the profile — or just leave
+ * them collected for later? Pure, so the whole gate is unit-testable. Collecting is free and happens
+ * every nudge regardless; this decides only whether to PHONE THE ASSISTANT this run.
+ *
+ * Flush when: the run is MANUAL (`stratless update` typed by hand — it beats every automatic gate) ·
+ * a waiting moment belongs to a session that is NOT the current one (a previous session ended, catch
+ * up on its leftovers) · or anything has waited past the ceiling (a session left open all day).
+ * Otherwise collect and wait, and a mid-session nudge costs nothing.
+ *
+ * `waiting` is the un-tagged moments; the newest by `ts` names the active session. Empty and not
+ * manual is never a flush (nothing to do). Never-flushed-before with anything waiting flushes once,
+ * to set the baseline the ceiling measures from — and an unreadable stamp fails OPEN (flush), the
+ * same posture as the rest of state.
+ */
+export function flushDue(
+  waiting: { session: string; ts: string }[],
+  lastFlushAt: string | undefined,
+  now: number,
+  manual: boolean,
+  opts: { maxAgeMs?: number } = {},
+): FlushDecision {
+  if (manual) return { flush: true, reason: 'you asked' };
+  if (!waiting.length) return { flush: false, reason: '' };
+
+  const maxAgeMs = opts.maxAgeMs ?? FLUSH_MAX_AGE_MS;
+
+  // The active session is the most recent waiting moment's; a waiting moment from any other session
+  // is a finished session's leftover.
+  let active = waiting[0];
+  for (const w of waiting) if (Date.parse(w.ts) > Date.parse(active.ts)) active = w;
+  if (waiting.some((w) => w.session !== active.session)) return { flush: true, reason: 'a session ended' };
+
+  const ageMs = lastFlushAt ? now - Date.parse(lastFlushAt) : Infinity;
+  if (!(ageMs <= maxAgeMs)) return { flush: true, reason: lastFlushAt ? 'over the flush ceiling' : 'first flush' };
+
+  return { flush: false, reason: '' };
 }

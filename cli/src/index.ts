@@ -294,6 +294,8 @@ async function update(_rest: string[]): Promise<void> {
     const env: Record<string, string> = {};
     const abs = resolveBinPath(bin) ?? (bin.includes('/') ? bin : undefined);
     if (abs) env.STRATLESS_CLAUDE_BIN = abs; // C5: the claude path, captured while the PATH is real
+    // A hand-run update (a real terminal) forces a flush; the background hook (no TTY) respects the gates.
+    if (process.stderr.isTTY) env.STRATLESS_FLUSH = '1';
     spawnedAtMs = Date.now();
     const entry = fileURLToPath(import.meta.url);
     const pid = spawnDetached(process.execPath, [entry, '__worker'], env);

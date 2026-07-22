@@ -76,6 +76,13 @@ export function assignedKeys(file: string = storePath()): Set<string> {
   return new Set(loadAssignments(file).map((a) => a.key));
 }
 
+/** The moments collected but not yet assigned — the "waiting" set the flush gate inspects, and
+ *  exactly the work `assignMoments` would consume next run. */
+export function pendingMoments(file: string = storePath()): Moment[] {
+  const seen = assignedKeys(file);
+  return loadMoments().filter((m) => !seen.has(m.key));
+}
+
 /** Show the assistant's OPENING only for negative moments — the head is the trigger a reaction like
  *  "why are you coding suddenly?" answers, and it lives nowhere but the opening move. On by default;
  *  STRATLESS_ASSIGN_HEAD=0 suppresses it (the rule is A/B-able — we have not proven it helps). */
