@@ -6,6 +6,21 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-07-23 — auto-rebuild, once a day (your call)
+
+0.4.0 rebuilt your profile every time a session ended, so a busy multi-session day meant a rebuild
+every few minutes — near-identical work for a few cents each. Now it rebuilds at most once a day, and
+you decide the cadence.
+
+### Changed
+- **Auto-rebuild is a once-a-day cooldown now**, not a per-session trigger. Your turns are still
+  collected for free every session; the profile just gets rewritten on the daily tick instead of on
+  every session boundary. `stratless update` still rebuilds instantly whenever you want it fresh.
+
+### Added
+- **Pick your cadence:** `stratless update --daily` or `stratless update --weekly` sets how often the
+  profile may auto-rebuild on its own (default daily). `stratless status` shows the current setting.
+
 ## [0.4.0] — 2026-07-23 — the discovery pipeline, and a profile you can read
 
 The miner is gone. In its place is a pipeline that reads your own words and shows its work: it gathers
