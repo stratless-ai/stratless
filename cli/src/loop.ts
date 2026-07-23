@@ -29,7 +29,7 @@ import { findAssistant } from './claude.js';
 import { buildMoments, loadMoments } from './moments.js';
 import { loadCategories } from './categories.js';
 import { assignMoments, loadAssignments, pendingMoments } from './assign.js';
-import { join as joinLabelled, scoreboard, scoreboardLine, misfitRate } from './count.js';
+import { join as joinLabelled, scoreboard, misfitRate } from './count.js';
 import { buildProfile, looksLikeProfile } from './write.js';
 import { discover, rediscover } from './discover.js';
 import { estimateBuild, estimateLine } from './estimate.js';
@@ -278,8 +278,12 @@ export async function runWorker(): Promise<number> {
       // the file when the category set or the pile changed, or when no profile exists yet. Stamp the
       // flush time so the ceiling measures from here.
       if (flush) {
+        // The scoreboard (the WIDER distress rate — moments the categories flag as correcting, ~13/100)
+        // is RECORDED here but NEVER shown to the user. The one user-facing friction number is the
+        // mirror's course-corrections rate (`stats` + the door, ~2.5/100 — literal Escape presses).
+        // Showing both would put two near-identical "corrections per 100" figures on screen, 5x apart —
+        // the exact confusion the mirror's KPI was split out to avoid. Kept in state for the record.
         const board = scoreboard(joinLabelled(loadMoments(), loadAssignments()), cats);
-        summary.push(scoreboardLine(board, readState().scoreboard?.rate));
         writeState({ ...readState(), scoreboard: { rate: board.rate, at: new Date().toISOString() }, lastFlushAt: new Date().toISOString() });
 
         if (changed || !existsSync(humanMdPath())) {
@@ -287,8 +291,9 @@ export async function runWorker(): Promise<number> {
           const profile = buildProfile();
           sw.stage('write', Date.now() - writeStart, profile ? 1 : 0);
           if (profile && looksLikeProfile(profile.text)) {
-            injectProfile(profile.text); // writes ~/.claude/HUMAN.md AND points CLAUDE.md at it — the load
-            writeRender('profile', { builtAt: new Date().toISOString(), sessions: profile.meta.sessions, exchanges: profile.meta.moments });
+            const builtAt = new Date().toISOString(); // one stamp for BOTH the HUMAN.md header and the sidecar — they must agree
+            injectProfile(profile.text, undefined, undefined, builtAt); // writes ~/.claude/HUMAN.md AND points CLAUDE.md at it — the load
+            writeRender('profile', { builtAt, sessions: profile.meta.sessions, exchanges: profile.meta.moments, categories: loadCategories().length });
             summary.push(
               `profile written and loaded · ${profile.meta.signals} distress signal${profile.meta.signals === 1 ? '' : 's'} + ${profile.meta.working} working-style trait${profile.meta.working === 1 ? '' : 's'}${profile.meta.shorthand ? ` + ${profile.meta.shorthand} shorthand handles` : ''}`,
             );

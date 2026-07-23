@@ -10,7 +10,7 @@ import { test } from 'node:test';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { mirrorOf, mirrorOfArchive, repoRoots, personTopics, type Mirror } from './mirror.js';
+import { mirrorOf, mirrorOfArchive, mirrorOfArchiveAsync, repoRoots, personTopics, type Mirror } from './mirror.js';
 import type { Turn } from './reader.js';
 
 let n = 0;
@@ -211,5 +211,20 @@ test('end to end: an archive with machine traffic yields only the person', () =>
   assert.equal(m.friction.courseCorrections, 1);
   assert.equal(m.work.toolCalls, 1);
   assert.equal(m.context.repos[0].root, '/r/p');
+  rmSync(dir, { recursive: true });
+});
+
+test('mirrorOfArchiveAsync is a faithful twin: same mirror as the sync read, only it yields for the spinner', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mirror-async-'));
+  const rows = (o: object[]) => o.map((r) => JSON.stringify(r)).join('\n');
+  writeFileSync(
+    join(dir, 's.jsonl'),
+    rows([
+      { type: 'user', uuid: 'a', sessionId: 's', entrypoint: 'cli', timestamp: '2026-07-01T10:00:00', cwd: '/r/p', message: { content: [{ type: 'text', text: 'hello there friend' }] } },
+      { type: 'assistant', uuid: 'b', sessionId: 's', entrypoint: 'cli', timestamp: '2026-07-01T10:01:00', message: { content: [{ type: 'tool_use', name: 'Bash' }] } },
+      { type: 'user', uuid: 'c', sessionId: 's', entrypoint: 'cli', timestamp: '2026-07-01T10:02:00', message: { content: [{ type: 'text', text: 'is this right?' }] } },
+    ]),
+  );
+  assert.deepEqual(await mirrorOfArchiveAsync(dir), mirrorOfArchive(dir), 'yielding for the spinner must not change a single number');
   rmSync(dir, { recursive: true });
 });

@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import type { Moment, Pile } from './moments.js';
 import type { Category } from './categories.js';
 import type { Assignment } from './assign.js';
-import { join, tally, computeLift, direction, misfitRate, scoreboard, scoreboardLine, type Labelled } from './count.js';
+import { join, tally, computeLift, direction, misfitRate, scoreboard, type Labelled } from './count.js';
 
 let seq = 0;
 const lab = (pile: Pile, session: string, kinds: string[], ts = '2026-07-01T10:00:00Z'): Labelled => ({
@@ -102,10 +102,4 @@ test('tally: burst flags a category concentrated in one week', () => {
   const stats = tally(labelled, [cat('spread'), cat('bursty')]);
   assert.equal(stats.find((s) => s.name === 'spread')!.burst, false, 'spread across weeks is not bursty');
   assert.equal(stats.find((s) => s.name === 'bursty')!.burst, true, 'concentrated in one week is bursty');
-});
-
-test('scoreboardLine: bare, then with the last-build delta', () => {
-  const board = { rate: 5.2, signalMoments: 3, total: 58, signalCategories: ['drift'] };
-  assert.equal(scoreboardLine(board), 'corrections: 5.2 per 100 messages');
-  assert.equal(scoreboardLine(board, 6.1), 'corrections: 5.2 per 100 messages  (was 6.1 last build)');
 });

@@ -323,3 +323,19 @@ export function mirrorOf(turns: Iterable<Turn>, titles: { aiTitle: string; sessi
 export function mirrorOfArchive(dir: string): Mirror {
   return mirrorOf(readTurns([dir]), readTitles(dir));
 }
+
+/**
+ * Async twin of {@link mirrorOfArchive}. Same result, but it drains the transcript walk in chunks and
+ * yields to the event loop between them — so a caller can animate a spinner during the read. The sync
+ * twin blocks the loop end to end (a spinner would freeze on one frame); this one lets it breathe. The
+ * heavy cost is the I/O + parse the generator does as it advances, so yielding every N turns is enough.
+ */
+export async function mirrorOfArchiveAsync(dir: string): Promise<Mirror> {
+  const turns: Turn[] = [];
+  let i = 0;
+  for (const t of readTurns([dir])) {
+    turns.push(t);
+    if ((++i & 63) === 0) await new Promise((r) => setImmediate(r)); // yield so the spinner can tick
+  }
+  return mirrorOf(turns, readTitles(dir));
+}

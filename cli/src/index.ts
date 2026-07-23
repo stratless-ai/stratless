@@ -11,11 +11,11 @@
  *
  * Runs on your machine. Reads your own history. Nothing leaves.
  */
-import { loadEdits, claudeProjectDir, type Edit } from './transcript.js';
+import { loadAssignments } from './assign.js';
+import { join as joinLabelled, misfitRate } from './count.js';
 import { findAssistant, onPath } from './claude.js';
 import { init as doInit, ARCHIVE, stopRefresh, refreshArmed, type InitResult } from './init.js';
 import { dailyCheck, fetchLatest, newerThan } from './notify.js';
-import { health } from './canary.js';
 import { loadRecentExchanges, sessionCount, findExchange } from './exchange.js';
 import { removeProfile, humanMdPath, claudeMdPath } from './sink.js';
 import { readRenders, requestColdBuild, coldBuildRequested, type RenderMeta } from './state.js';
@@ -26,7 +26,7 @@ import { startRun, type Stopwatch } from './stopwatch.js';
 import { runWorker, installedVersion, JUDGE_WINDOW } from './loop.js';
 import { readProgress, type Progress } from './progress.js';
 import { makePalette } from './palette.js';
-import { mirrorOfArchive } from './mirror.js';
+import { mirrorOfArchive, mirrorOfArchiveAsync } from './mirror.js';
 import { renderMirror } from './mirrorview.js';
 import { estimateBuild, estimateFromMessages, estimateLine } from './estimate.js';
 import { loadMoments } from './moments.js';
@@ -50,49 +50,81 @@ const viaNpx = (): boolean => (process.argv[1] ?? '').includes('_npx') || proces
 /** A command hint that actually runs in the shell the person has. */
 const hint = (cmd: string): string => (viaNpx() ? `npx ${cmd}` : cmd);
 
+/** The one braille cursor, shared by the tail and the discrete-wait spinner so the CLI moves alike. */
+const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
 /**
- * If we can't read the log, SAY SO. Never fall through to a confident lie.
- *
- * stratless reads a format it does not own, and Claude Code will change it. `health()` catches
- * exactly that — write-tool calls visible in the log whose input we can no longer read — and refuses
- * instead of guessing. A tool that refuses is trustworthy; one that quietly starts lying is finished.
+ * A zero-dependency spinner for a discrete wait. Runs on its own 100ms interval, so the work it wraps
+ * must yield to the event loop for the cursor to move (that is what `mirrorOfArchiveAsync` is for). TTY
+ * only — a pipe (a hook, CI) gets one static line, never a stream of cursor frames. Returns a stop().
  */
-function guard(cwd: string, edits: Edit[]): boolean {
-  const h = health(cwd, edits);
-  if (h.ok) return true;
-  console.error(`\n  ${C.bad("stratless cannot read your assistant's history.")}\n`);
-  console.error(`  ${h.reason?.split('\n').join('\n  ')}\n`);
-  return false;
+function startSpinner(label: string, stream: NodeJS.WriteStream = process.stderr): () => void {
+  const pal = stream === process.stdout ? C : CE;
+  if (!stream.isTTY) {
+    stream.write(`  ${pal.dim(label)}\n`);
+    return () => {};
+  }
+  let i = 0;
+  stream.write('\x1B[?25l'); // hide the real cursor while ours spins in its place
+  const draw = (): void => {
+    i = (i + 1) % SPINNER_FRAMES.length;
+    stream.write(`\r  ${pal.ok(SPINNER_FRAMES[i])} ${pal.dim(label)}`);
+  };
+  draw();
+  const id = setInterval(draw, 100);
+  return () => {
+    clearInterval(id);
+    stream.write(`\r${' '.repeat(label.length + 6)}\r\x1B[?25h`); // clear the row, restore the cursor
+  };
 }
 
-function stats(cwd: string): void {
-  const edits = loadEdits(cwd);
-  if (!guard(cwd, edits)) return;
-  if (!edits.length) {
-    console.log(`\n  No history found for this project.\n  ${C.dim(`Looked in: ${claudeProjectDir(cwd)}`)}\n`);
+/**
+ * STATS — the measured portrait of the PERSON, global across every conversation. NOT the assistant's
+ * code output in one project (that was the retired provenance era, the wrong lens for the person
+ * layer). Free: the mirror is arithmetic on the archive, no model call. The `full` view adds the span
+ * and the writing fingerprint the door keeps tucked away, plus a completeness line — how much of you
+ * the profile's categories actually cover. One friction number here (the mirror's, per-100); the
+ * build's wider scoreboard is deliberately kept internal so two "correction" numbers never clash.
+ */
+async function stats(): Promise<void> {
+  // The person portrait reads the global archive, which `init` creates. Before that, guide there
+  // rather than show an empty frame.
+  if (!existsSync(ARCHIVE)) {
+    console.log(`\n  ${C.it('No history archived yet.')}  ${C.dim(`Keep your history first with \`${hint('stratless init')}\`.`)}\n`);
     return;
   }
-  const lines = edits.reduce((n, e) => n + e.body.split('\n').length, 0);
-  const files = new Set(edits.map((e) => e.file)).size;
-  const days = new Set(edits.map((e) => e.date));
-  const sessions = new Set(edits.map((e) => e.session)).size;
-  const first = edits[0].date;
+  // The archive walk is the ~10s wait; the async twin lets the spinner rotate through it.
+  const stopReading = startSpinner('reading your history…', process.stdout);
+  let mirror: ReturnType<typeof mirrorOfArchive> | undefined;
+  try {
+    mirror = await mirrorOfArchiveAsync(ARCHIVE);
+  } catch {
+    mirror = undefined;
+  } finally {
+    stopReading();
+  }
+  const rows = mirror ? renderMirror(mirror, { full: true }) : [];
+  if (!rows.length) {
+    console.log(`\n  ${C.dim('No conversations to read yet — talk to Claude Code a few times, then run')} ${C.b(hint('stratless update'))}${C.dim('.')}\n`);
+    return;
+  }
 
-  console.log(`\n  ${C.b('Your assistant, in this project')}\n`);
-  console.log(`    lines it wrote            ${C.b(lines.toLocaleString())}`);
-  console.log(`    edits it made             ${C.b(edits.length.toLocaleString())}`);
-  console.log(`    files it touched          ${C.b(String(files))}`);
-  console.log(`    sessions                  ${C.b(String(sessions))}`);
-  console.log(`    days                      ${C.b(String(days.size))}`);
-  // `first` is the oldest transcript STILL in the live ~/.claude/projects for this project. Once init
-  // has run, stratless has stopped the reaper and copied everything to the archive, so the honest line
-  // depends on whether that protection is in place — and doubles as the nudge to turn it on.
-  const preserved = existsSync(ARCHIVE);
-  console.log(
-    preserved
-      ? `\n    ${C.dim(`live transcripts here go back to ${first} · your full history is kept in ${ARCHIVE}`)}\n`
-      : `\n    ${C.dim(`live transcripts here go back to ${first} · Claude Code deletes them after 30 days — keep them with \`${hint('stratless init')}\``)}\n`,
-  );
+  // Completeness: the share of your moments the profile's categories cover (1 - the misfit rate),
+  // shown in the positive frame. Free arithmetic on the build's own assignments; absent before the
+  // first build, where it is skipped rather than shown as a scary 0%.
+  let completeness: string | undefined;
+  try {
+    const labelled = joinLabelled(loadMoments(), loadAssignments());
+    if (labelled.length) completeness = `${Math.round(100 * (1 - misfitRate(labelled)))}% of your moments`;
+  } catch {
+    /* no build yet — no completeness line */
+  }
+
+  console.log(`\n  ${C.b('You and your AI, measured')}\n`);
+  const w = Math.max(...rows.map((r) => r.label.length), completeness ? 'profile captures'.length : 0);
+  for (const row of rows) console.log(`    ${C.dim(row.label.padEnd(w))}   ${C.b(row.value)}`);
+  if (completeness) console.log(`    ${C.dim('profile captures'.padEnd(w))}   ${C.b(completeness)}`);
+  console.log('');
 }
 
 /**
@@ -163,6 +195,12 @@ function preSpend(pending: number): void {
  * whose whole promise is "free" could quietly start spending. With the build moving to `update` that
  * path is gone: nothing built yet now says so and points at the command that does spend.
  */
+/** A build's ISO timestamp as a readable, globalized version stamp: `2026-07-23 12:28 UTC`. UTC so it
+ *  reads the same anywhere; minute precision because a person checks "am I on the latest?", not ms. */
+function builtStamp(iso: string): string {
+  return `${iso.slice(0, 16).replace('T', ' ')} UTC`;
+}
+
 async function profiler(_rest: string[] = []): Promise<void> {
   // The profile BODY is HUMAN.md (the discovery pipeline's output) — NOT the old ~/.stratless/profile.txt,
   // which nothing writes any more. Gate on the body existing; the render sidecar only carries the header
@@ -182,7 +220,7 @@ async function profiler(_rest: string[] = []): Promise<void> {
 
   const meta = readRenders().profile;
   const header = meta
-    ? `(stratless · built ${meta.builtAt.slice(0, 10)} · ${meta.sessions} sessions · ${meta.exchanges.toLocaleString()} moments)`
+    ? `(stratless · built ${builtStamp(meta.builtAt)} · ${meta.sessions} sessions · ${meta.exchanges.toLocaleString()} moments)`
     : '(stratless · your profile)';
   console.log(`\n  ${C.b("WHO YOU'RE WORKING WITH")}   ${C.dim(header)}\n`);
   console.log(body.split('\n').map((l) => `  ${l}`).join('\n'));
@@ -230,6 +268,10 @@ async function tailWorker(spawnedAtMs: number, prevStamp: string): Promise<numbe
   const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
   let sawAlive = false;
   let deadSince = 0;
+  // A braille spinner so a long borrowed call — which freezes the worker's narration for minutes while
+  // it waits on `claude -p` — still reads as ALIVE, not hung. The tail is a separate process from the
+  // worker, so its loop keeps ticking through the freeze; the cursor rotates even when the line can't.
+  let frame = 0;
   for (;;) {
     const holder = readLock();
     const alive = !!(holder && !lockIsStale(holder));
@@ -242,9 +284,13 @@ async function tailWorker(spawnedAtMs: number, prevStamp: string): Promise<numbe
       // Prefer the worker's latest live line — the discovery pipeline narrates "scoring N/total · ~M
       // min left" here; fall back to the phase when there is no line yet.
       const latest = p.summary?.length ? p.summary[p.summary.length - 1] : undefined;
-      const line = latest ?? (p.phase === 'judging' && p.total ? `judging ${p.done ?? 0}/${p.total} new…` : `${p.phase}…`);
+      const line = latest ?? (p.phase === 'judging' && p.total ? `judging ${p.done ?? 0}/${p.total} new` : p.phase);
+      // The rotating cursor carries the "in progress" signal now, so the trailing "…" is gone. TTY only —
+      // a pipe (the hook worker, CI) gets the plain line, never a stream of cursor frames.
+      const spin = process.stderr.isTTY ? `${CE.ok(SPINNER_FRAMES[frame])} ` : '';
+      frame = (frame + 1) % SPINNER_FRAMES.length;
       // clear the row fully first — a shorter line must not leave stale characters behind
-      process.stderr.write(`\r${' '.repeat(72)}\r  ${CE.dim(line)}`);
+      process.stderr.write(`\r${' '.repeat(72)}\r  ${spin}${CE.dim(line)}`);
     }
     if (!alive) {
       // Trust a terminal frame only when it is strictly NEWER than the narration that existed
@@ -271,7 +317,7 @@ async function tailWorker(spawnedAtMs: number, prevStamp: string): Promise<numbe
       console.log(`\n  ${C.it('still running — detaching the display')} ${C.dim(`· watch: ${hint('stratless status')} · stop: ${hint('stratless stop')}`)}\n`);
       return 0;
     }
-    await sleep(200);
+    await sleep(100); // ~10 fps — smooth cursor rotation, and a snappier read of the worker's state
   }
 }
 
@@ -420,8 +466,9 @@ async function status(rest: string[] = []): Promise<void> {
   // `--check` is the everyone-door for version news: user-initiated, on-screen, announced.
   // Plain `status` stays fully offline — the trust posture is not tunable.
   if (rest.includes('--check')) {
-    console.log(`\n  ${C.dim('checking npm for a newer version…')}`);
+    const stopCheck = startSpinner('checking npm for a newer version…');
     const latest = await fetchLatest();
+    stopCheck();
     const installed = installedVersion();
     if (!latest) console.log(`  ${C.warn('could not reach the registry')} ${C.dim('(offline? try again later)')}\n`);
     else if (newerThan(latest, installed))
@@ -438,12 +485,17 @@ async function status(rest: string[] = []): Promise<void> {
   const humanExists = existsSync(human);
   const loaded = profileLoaded();
 
-  // 3. When was it last refreshed? HUMAN.md's mtime is the honest answer.
-  let last = 'never';
+  // 3. The recent-builds trajectory — newest first, from the sidecar's history. Each stamp is the
+  //    SAME one HUMAN.md carries in its `# built` header, so status and the file can never disagree.
+  //    Fall back to the single latest render (a sidecar written before history), then to the file's
+  //    mtime, so an old install still shows something honest.
+  const renders = readRenders();
+  const builds = renders.history?.length ? renders.history : renders.profile ? [renders.profile] : [];
+  let mtimeStamp = '';
   try {
-    if (humanExists) last = statSync(human).mtime.toISOString().slice(0, 10);
+    if (!builds.length && humanExists) mtimeStamp = statSync(human).mtime.toISOString().slice(0, 10);
   } catch {
-    /* leave as "never" */
+    /* leave blank */
   }
 
   const u = readUsage();
@@ -453,14 +505,18 @@ async function status(rest: string[] = []): Promise<void> {
   const tokens = u.inputTokens + u.outputTokens + u.cacheCreationTokens + u.cacheReadTokens;
   const fmtTok = (t: number): string =>
     t >= 1e6 ? `${(t / 1e6).toFixed(1)}M` : t >= 1000 ? `${Math.round(t / 1000)}k` : String(t);
-  const spend = `${fmtTok(tokens)} tokens across ${u.calls.toLocaleString()} read${u.calls === 1 ? '' : 's'}`;
-  const api = `≈ $${u.costUsd.toFixed(2)} at API rates, on your own claude`;
-  // The live discovery-pipeline stages. Miner-era keys (judge/mining/audit/grade) are gone; any that
-  // linger in an old ledger fall through to their raw name (honest historical spend), never a fresh user.
-  const FEATURE_LABEL: Record<string, string> = { discover: 'discovering', assign: 'scoring', write: 'writing' };
-  const byFeature = Object.entries(u.byFeature)
-    .map(([f, t]) => `${FEATURE_LABEL[f] ?? f} $${t.costUsd.toFixed(2)} (${t.calls.toLocaleString()})`)
-    .join(' · ');
+  // Split lifetime spend into the LIVE discovery-pipeline stages and the RETIRED miner era. The dead
+  // keys (judge/synthesis/miner/audit/grade) roll into ONE honest line instead of five dead labels;
+  // the total still counts them, so the sum never lies — only the clutter is gone. A fresh user, who
+  // never ran the miner, has no retired spend and never sees that line.
+  const RETIRED = new Set(['judge', 'synthesis', 'miner', 'audit', 'grade']);
+  const STAGE_LABEL: Record<string, string> = { discover: 'discovering', assign: 'scoring', write: 'writing' };
+  let retiredUsd = 0;
+  const stageParts: string[] = [];
+  for (const [f, t] of Object.entries(u.byFeature)) {
+    if (RETIRED.has(f)) retiredUsd += t.costUsd;
+    else stageParts.push(`${STAGE_LABEL[f] ?? f} $${t.costUsd.toFixed(2)}`);
+  }
 
   console.log(`\n  ${C.b('stratless status')}\n`);
   console.log(`    after-session refresh   ${refresh ? C.ok('on') : C.dim('off')}`);
@@ -491,22 +547,36 @@ async function status(rest: string[] = []): Promise<void> {
       } else if (wp && wp.phase === 'failed') {
         console.log(`    last run                ${C.warn('failed')}  ${C.dim(wp.summary?.[0] ?? '')}`);
       }
-      // The receipt of the most recent run (0.3.5) — the hook's silent spends stay readable.
-      if (wp?.spend) console.log(`    last run spend          ${C.dim(wp.spend.replace('this run: ', ''))}`);
     }
   }
   console.log(`    profile loaded          ${loaded ? C.ok('yes') : C.dim('no')}${humanExists ? `  ${C.dim(human)}` : ''}`);
-  // The judgment and pattern counts lived here until the discovery pipeline replaced both stores.
-  // They come back as moments and categories once stage 2 lands; a line reporting a store that no
-  // longer exists is worse than an absent line.
-  console.log(`    last refresh            ${C.dim(last)}`);
-  console.log(`    spent so far            ${C.b(spend)}  ${C.dim(api)}`);
-  if (byFeature) console.log(`                            ${C.dim(byFeature)}`);
-  // C11: the meter's own blind spots, shown the moment they exist — silent accounting is the bug.
+
+  // RECENT BUILDS — when it last updated, and how the pile is growing. The trust surface: a person
+  // sees their profile is kept fresh, never silently frozen. Newest first, the latest one flagged.
+  if (builds.length) {
+    console.log(`\n    recent builds`);
+    for (const [i, b] of builds.slice(0, 5).entries()) {
+      const cats = b.categories != null ? ` · ${b.categories} categories` : '';
+      const tag = i === 0 ? `   ${C.dim('(latest)')}` : '';
+      console.log(`      ${builtStamp(b.builtAt)}   ${C.dim(`${b.sessions.toLocaleString()} conv · ${b.exchanges.toLocaleString()} moments${cats}`)}${tag}`);
+    }
+  } else {
+    console.log(`    last built              ${C.dim(mtimeStamp || 'never')}`);
+  }
+
+  // SPEND — lifetime total, the live stages, the retired miner era rolled into one line, the most
+  // recent run's receipt, and the meter's own blind spots (silent accounting would be the bug).
+  const lastRunSpend = readProgress()?.spend;
+  console.log(`\n    spend`);
+  console.log(`      total          ${C.b(`$${u.costUsd.toFixed(2)}`)}  ·  ${fmtTok(tokens)} tokens  ·  ${u.calls.toLocaleString()} calls  ${C.dim('on your own claude')}`);
+  if (stageParts.length) console.log(`      by stage       ${C.dim(stageParts.join(' · '))}`);
+  if (retiredUsd > 0.005) console.log(`      retired        ${C.dim(`$${retiredUsd.toFixed(2)}  (earlier miner stages)`)}`);
+  if (lastRunSpend) console.log(`      last run       ${C.dim(lastRunSpend.replace('this run: ', ''))}`);
   const gaps: string[] = [];
-  if (u.unmeteredCalls) gaps.push(`${u.unmeteredCalls} call${u.unmeteredCalls === 1 ? '' : 's'} unmetered (no receipt — true cost unknown)`);
-  if (u.pinEscapedCalls) gaps.push(`${u.pinEscapedCalls} ran on your default model (pin dropped)`);
-  if (gaps.length) console.log(`    fallback calls          ${C.warn(gaps.join(' · '))}`);
+  if (u.unmeteredCalls) gaps.push(`${u.unmeteredCalls} unmetered (true cost unknown)`);
+  if (u.pinEscapedCalls) gaps.push(`${u.pinEscapedCalls} pin-dropped`);
+  if (gaps.length) console.log(`      flags          ${C.warn(gaps.join(' · '))}`);
+
   if (!refresh) console.log(`\n  ${C.dim(`Run \`${hint('stratless init')}\` to turn the after-session refresh back on.`)}`);
   console.log('');
 }
@@ -556,7 +626,6 @@ function argProblem(cmd: string, rest: string[]): string | undefined {
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const cmd = args[0];
-  const cwd = process.cwd();
 
   if (cmd === '--version' || cmd === '-v' || cmd === 'version') {
     console.log(`stratless ${installedVersion()}`);
@@ -603,16 +672,16 @@ async function main(): Promise<void> {
     }
 
     // 2. the free read — computed from the archive we just froze. No model call, no spend. The
-    //    archive walk blocks for ~10s on a big history, so LABEL the wait instead of hanging silent.
-    const readingMsg = '  reading your history…';
-    if (process.stdout.isTTY) process.stdout.write(C.dim(readingMsg));
+    //    archive walk takes ~10s on a big history, so spin a cursor through it (the async twin yields).
+    const stopReading = startSpinner('reading your history…', process.stdout);
     let mirror: ReturnType<typeof mirrorOfArchive> | undefined;
     try {
-      mirror = mirrorOfArchive(ARCHIVE);
+      mirror = await mirrorOfArchiveAsync(ARCHIVE);
     } catch {
       mirror = undefined;
+    } finally {
+      stopReading();
     }
-    if (process.stdout.isTTY) process.stdout.write(`\r${' '.repeat(readingMsg.length + 4)}\r`);
     const rows = mirror ? renderMirror(mirror) : [];
     if (!rows.length) {
       console.log(`  ${C.dim('No conversations to read yet — talk to Claude Code a few times, then run')} ${C.b(hint('stratless update'))}${C.dim('.')}\n`);
@@ -688,7 +757,7 @@ async function main(): Promise<void> {
       process.exitCode = await runWorker();
       return;
     }
-    if (cmd === 'stats') return stats(cwd);
+    if (cmd === 'stats') return stats();
     if (cmd === 'status') return await status(args.slice(1));
     if (cmd === 'profile') return await profiler(args.slice(1));
     if (cmd === 'update') return await update(args.slice(1));

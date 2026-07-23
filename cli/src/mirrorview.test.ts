@@ -81,6 +81,17 @@ test('a non-empty toolMix with zero total calls skips the tool row (no divide-by
   assert.ok(!rows.some((r) => r.label === 'most-used tool'), 'guarded on toolCalls, not just toolMix length');
 });
 
+test('full: the dashboard adds span and the writing fingerprint; the tight teaser omits them', () => {
+  const tight = renderMirror(base());
+  assert.ok(!tight.some((r) => r.label === 'span'), 'the door stays tight — no span row');
+  assert.ok(!tight.some((r) => r.label === 'how you write'), 'the door stays tight — no writing row');
+
+  const full = renderMirror(base(), { full: true });
+  assert.equal(full.find((r) => r.label === 'span')!.value, '2026-06-09 → 2026-07-21 · longest streak 10 days', 'span reads first → last date and the streak');
+  assert.equal(full.find((r) => r.label === 'how you write')!.value, 'median 12 words · 30% four words or fewer · 20% questions', 'writing fingerprint from median/terse/question shares');
+  assert.equal(full.find((r) => r.label === 'course corrections')!.value, '2.68 / 100 messages', 'the friction read is unchanged by full');
+});
+
 test('a repo root with a trailing slash still yields a clean basename', () => {
   const m = base();
   m.context.repos = [{ root: '/Users/jx/stratless-mono/', messages: 10 }];

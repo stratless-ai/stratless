@@ -188,8 +188,3 @@ export function scoreboard(labelled: Labelled[], categories: Category[]): Scoreb
   };
 }
 
-/** The one line printed at the end of `update`. The delta prints only when there is a prior build. */
-export function scoreboardLine(board: Scoreboard, prevRate?: number): string {
-  const now = `corrections: ${board.rate} per 100 messages`;
-  return prevRate === undefined ? now : `${now}  (was ${round1(prevRate)} last build)`;
-}
