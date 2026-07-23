@@ -62,13 +62,19 @@ export interface SynthState {
   aperture?: { prompt: number; said: number; reaction: number; computedAt: string };
   /** the stopwatch (C8): the last runs' measured walls — every ETA and quote derives from these */
   stopwatch?: RunRecord[];
-  /** the last build's scoreboard rate (corrections per 100 messages), for the next build's delta —
-   *  "corrections: 5.2 per 100 messages (was 6.1 last build)". The one number the person watches. */
+  /** the last build's scoreboard rate — the WIDER distress read (~13/100). RECORDED, never shown: the
+   *  one user-facing friction number is the mirror's course-corrections rate (`stats` + the door), so
+   *  two near-identical "per 100" figures never collide on screen. Kept for the record / later use. */
   scoreboard?: { rate: number; at: string };
   /** when discover last ran — the re-discovery cooldown reads it so a high misfit can't re-mint every run */
   lastDiscoverAt?: string;
   /** when the worker last flushed (tagged + rebuilt) — the flush ceiling ([[flushDue]]) measures from here */
   lastFlushAt?: string;
+  /** a CONSENTED cold-start build is pending. Set only by a consented interactive invocation (the
+   *  door's yes, or a typed `update` on a fresh machine); consumed by whichever worker wins the lock.
+   *  Durable on purpose: consent must survive a lock race or a killed process, never live only in one
+   *  worker's env. Its presence always traces to an explicit yes, so it can never cause surprise spend. */
+  buildRequestedAt?: string;
 }
 
 /** Read the state. Missing or corrupt reads as never-synthesized and never throws. */
@@ -99,6 +105,7 @@ export function readState(file: string = statePath()): SynthState {
     }
     if (typeof raw.lastDiscoverAt === 'string') out.lastDiscoverAt = raw.lastDiscoverAt;
     if (typeof raw.lastFlushAt === 'string') out.lastFlushAt = raw.lastFlushAt;
+    if (typeof raw.buildRequestedAt === 'string') out.buildRequestedAt = raw.buildRequestedAt;
     return out;
   } catch {
     return {}; // fails open — one extra synthesis, never a crash
@@ -136,6 +143,28 @@ export function writeState(s: SynthState, file: string = statePath()): void {
   }
 }
 
+// ── the durable cold-start consent flag ────────────────────────────────────────────────────────
+// A consented cold-start build (the ~$16 one) records its consent HERE, not just in the spawned
+// worker's env — so a lock race or a killed process can never drop it. Whichever worker reaches the
+// cold-start branch honors it; a background hook never sets it, so it can never manufacture consent.
+
+/** Record that a consented cold-start build is pending. */
+export function requestColdBuild(file: string = statePath()): void {
+  writeState({ ...readState(file), buildRequestedAt: new Date().toISOString() }, file);
+}
+
+/** Is a consented cold-start build pending? */
+export function coldBuildRequested(file: string = statePath()): boolean {
+  return !!readState(file).buildRequestedAt;
+}
+
+/** Consume the pending-build consent (the build has been taken up). */
+export function clearColdBuildRequest(file: string = statePath()): void {
+  const s = readState(file);
+  delete s.buildRequestedAt;
+  writeState(s, file);
+}
+
 // ── the render sidecar (the polish release): looking is free, and the header stays honest ──────
 
 /** What one cached rendering knows about its own build — the header's numbers come from the
@@ -144,27 +173,50 @@ export interface RenderMeta {
   builtAt: string;
   sessions: number;
   exchanges: number;
+  /** how many categories the build minted — the trajectory shows it growing (added 0.4.0). */
+  categories?: number;
 }
 
 export interface Renders {
   profile?: RenderMeta;
   report?: RenderMeta;
+  /** The last few PROFILE builds, newest first — `status`'s "recent builds" trajectory, so a person
+   *  can see when it last updated and how it is growing. Capped; best-effort like the rest. */
+  history?: RenderMeta[];
 }
 
 /** Where the sidecar lives. Override with STRATLESS_RENDERS (tests). */
 const rendersPath = (): string => process.env.STRATLESS_RENDERS || join(homedir(), '.stratless', 'renders.json');
 
 /** Missing or corrupt reads as no-cached-renderings — the look falls back to a build. */
+/** Parse one render entry, or undefined if it is missing the load-bearing fields. `categories` is
+ *  optional (absent on a build written before 0.4.0) so an old sidecar still reads clean. */
+function readOneRender(m: Partial<RenderMeta> | undefined): RenderMeta | undefined {
+  if (!m || typeof m.builtAt !== 'string' || !Number.isFinite(Number(m.sessions)) || !Number.isFinite(Number(m.exchanges))) return undefined;
+  return {
+    builtAt: m.builtAt,
+    sessions: Number(m.sessions),
+    exchanges: Number(m.exchanges),
+    ...(Number.isFinite(Number(m.categories)) ? { categories: Number(m.categories) } : {}),
+  };
+}
+
 export function readRenders(file: string = rendersPath()): Renders {
   try {
     if (!existsSync(file)) return {};
-    const raw = JSON.parse(readFileSync(file, 'utf8')) as Partial<Record<'profile' | 'report', Partial<RenderMeta>>>;
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as {
+      profile?: Partial<RenderMeta>;
+      report?: Partial<RenderMeta>;
+      history?: Partial<RenderMeta>[];
+    };
     const out: Renders = {};
-    for (const k of ['profile', 'report'] as const) {
-      const m = raw[k];
-      if (m && typeof m.builtAt === 'string' && Number.isFinite(Number(m.sessions)) && Number.isFinite(Number(m.exchanges))) {
-        out[k] = { builtAt: m.builtAt, sessions: Number(m.sessions), exchanges: Number(m.exchanges) };
-      }
+    const p = readOneRender(raw.profile);
+    if (p) out.profile = p;
+    const r = readOneRender(raw.report);
+    if (r) out.report = r;
+    if (Array.isArray(raw.history)) {
+      const h = raw.history.map(readOneRender).filter((m): m is RenderMeta => Boolean(m));
+      if (h.length) out.history = h;
     }
     return out;
   } catch {
@@ -172,11 +224,20 @@ export function readRenders(file: string = rendersPath()): Renders {
   }
 }
 
-/** Record one rendering's build facts. Best-effort — a lost sidecar costs one rebuild, never a lie. */
+/** How many recent PROFILE builds the trajectory keeps. Five is enough to see a trend, small enough
+ *  the sidecar stays a glance. */
+const HISTORY_CAP = 5;
+
+/** Record one rendering's build facts. Best-effort — a lost sidecar costs one rebuild, never a lie.
+ *  A profile build also lands in `history` (newest first, deduped by stamp, capped) for the trajectory. */
 export function writeRender(kind: 'profile' | 'report', meta: RenderMeta, file: string = rendersPath()): void {
   try {
     const all = readRenders(file);
     all[kind] = meta;
+    if (kind === 'profile') {
+      const prior = (all.history ?? []).filter((b) => b.builtAt !== meta.builtAt);
+      all.history = [meta, ...prior].slice(0, HISTORY_CAP);
+    }
     atomicWriteFileSync(file, `${JSON.stringify(all)}\n`);
   } catch {
     /* best-effort by design */

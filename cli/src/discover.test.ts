@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, before, after } from 'node:test';
 
-import { uniquify, pruneCategories, discover, type Candidate } from './discover.js';
+import { uniquify, pruneCategories, discover, knownCategoriesBlock, confidentCategories, type Candidate } from './discover.js';
 import { loadCategories } from './categories.js';
 import { loadAssignments, type Assignment } from './assign.js';
 import type { Moment, Pile } from './moments.js';
@@ -18,6 +18,34 @@ const cand = (name: string, scope = 'person'): Candidate => ({ name, description
 let seq = 0;
 const mo = (session: string, pile: Pile = 'ordinary'): Moment => ({ key: `k${seq++}`, session, ts: '2026-07-01T10:00:00Z', pile, reply: 'x', replyLen: 1 });
 const asn = (key: string, kinds: string[]): Assignment => ({ key, at: '2026-07-02T00:00:00Z', kinds });
+
+test('knownCategoriesBlock: empty on round 0 (blind), forbids re-mints on later rounds', () => {
+  assert.equal(knownCategoriesBlock([]), '', 'round 0 stays blind — no already-found block');
+  const block = knownCategoriesBlock([cand('asks-for-recap'), cand('plan-first')]);
+  assert.match(block, /ALREADY FOUND/);
+  assert.match(block, /asks-for-recap/);
+  assert.match(block, /plan-first/);
+  assert.match(block, /genuinely NEW/);
+  assert.match(block, /synonym/, 'explicitly forbids near-duplicate categories');
+});
+
+test('confidentCategories: feeds forward only categories that would survive the prune (floor AND not circular)', () => {
+  seq = 0;
+  const [m1, m2, m3, m4, m5, m6, m7] = [mo('s1'), mo('s2'), mo('s3'), mo('s4'), mo('s5', 'interrupt'), mo('s6', 'interrupt'), mo('s7', 'interrupt')];
+  const moments = [m1, m2, m3, m4, m5, m6, m7];
+  const born = [cand('strong'), cand('fluke'), cand('circular')];
+  const kinds = new Map<string, Set<string>>([
+    [m1.key, new Set(['strong'])],
+    [m2.key, new Set(['strong'])],
+    [m3.key, new Set(['strong'])], // strong: 3 ordinary conversations → survives → fed forward
+    [m4.key, new Set(['fluke'])], // fluke: 1 conversation → below the floor → withheld
+    [m5.key, new Set(['circular'])],
+    [m6.key, new Set(['circular'])],
+    [m7.key, new Set(['circular'])], // circular: 3 conversations but all anchors → circular guard → withheld
+  ]);
+  assert.deepEqual(confidentCategories(born, kinds, moments).map((c) => c.name), ['strong']);
+  assert.deepEqual(confidentCategories([], kinds, moments), [], 'nothing minted yet → nothing to feed');
+});
 
 test('uniquify: skips a name already live; renames an in-round collision', () => {
   const names = uniquify([cand('plan'), cand('plan'), cand('verify')], new Set(['verify'])).map((c) => c.name);

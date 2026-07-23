@@ -57,11 +57,16 @@ export function injectProfile(
   text: string,
   humanTarget: string = humanMdPath(),
   claudeTarget: string = claudeMdPath(),
+  builtAt: string = new Date().toISOString(),
 ): Injected {
   // 1. The canonical artifact — written FIRST, so the redirect never points at a missing file.
+  // The `# built` line is the version stamp: a person opening HUMAN.md can tell at a glance whether
+  // they are reading the latest rebuild. UTC (globalized, unambiguous anywhere), minute precision.
+  const stamp = `${builtAt.slice(0, 16).replace('T', ' ')} UTC`; // 2026-07-23T12:28:56.777Z -> "2026-07-23 12:28 UTC"
   const human = [
     '# Who you are working with',
     '# (managed by stratless — do not edit by hand; refreshed by `stratless update`)',
+    `# built ${stamp}`,
     '<!-- humanmd/v1 -->', // the person-layer protocol's schema marker (0.3.1: sectioned form)
     '',
     text.trim(),

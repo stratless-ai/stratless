@@ -33,10 +33,12 @@ import { loadMoments, type Moment } from './moments.js';
 /** Where the checkmarks live. Override with STRATLESS_ASSIGNMENTS (tests). */
 const storePath = (): string => process.env.STRATLESS_ASSIGNMENTS || join(homedir(), '.stratless', 'assignments.jsonl');
 
-/** How many moments ride in one call. THE dominant cost lever — 85% of the bill is per-call harness
- *  overhead, so a big batch amortises it (the prototype's 45 was badly chosen). STRATLESS_ASSIGN_BATCH
- *  overrides; 200 measured best. */
-const DEFAULT_BATCH = 200;
+/** How many moments ride in one call. THE dominant cost lever — most of the bill is per-call harness
+ *  overhead (a fixed ~1h cache-write the borrowed CLI never reads back), so a bigger batch amortises it
+ *  across more moments. STRATLESS_ASSIGN_BATCH overrides. Raised 200 → 400 (2026-07-23 cost pass) to
+ *  ~halve the assign call count; the coverage guard below drops any batch that comes back too thin, so
+ *  going bigger stays safe. */
+const DEFAULT_BATCH = 400;
 /** A batch of moments legitimately takes minutes; the default 120s would time out silently. */
 const ASSIGN_TIMEOUT_MS = 400_000;
 /** A response that judged fewer than this share of its batch is treated as broken (truncated, etc.):

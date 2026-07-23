@@ -517,6 +517,20 @@ test('renders sidecar: round-trips build facts; missing/corrupt = build path, ne
   assert.equal(r.report?.builtAt, '2026-07-17T11:00:00Z', 'each rendering keeps its own build facts');
 });
 
+test('renders history: profile builds accumulate newest-first, dedupe by stamp, cap at 5; categories round-trip', () => {
+  const f = join(dir, 'history-renders.json');
+  for (let i = 1; i <= 6; i++)
+    writeRender('profile', { builtAt: `2026-07-2${i}T10:00:00Z`, sessions: 100 + i, exchanges: 5000 + i, categories: 20 + i }, f);
+  writeRender('profile', { builtAt: '2026-07-26T10:00:00Z', sessions: 200, exchanges: 9999, categories: 30 }, f); // same stamp as i=6 → replace, not stack
+  const h = readRenders(f).history ?? [];
+  assert.equal(h.length, 5, 'capped at the five most recent builds');
+  assert.equal(h[0].builtAt, '2026-07-26T10:00:00Z', 'newest first');
+  assert.equal(h[0].exchanges, 9999, 'a same-stamp rebuild replaces the entry, never a duplicate');
+  assert.equal(h[0].categories, 30, 'the category count rides along for the trajectory');
+  assert.equal(h.filter((b) => b.builtAt === '2026-07-26T10:00:00Z').length, 1, 'deduped by stamp');
+  assert.ok(!h.some((b) => b.builtAt === '2026-07-21T10:00:00Z'), 'the oldest build fell off the cap');
+});
+
 test('build corpus: the frozen corpus round-trips; the build stamp is the staleness key', () => {
   const f = join(dir, 'build.json');
   assert.equal(readBuildCorpus(f), undefined, 'missing = no frozen corpus (so `--read` guides to a build, never guesses)');
@@ -680,6 +694,15 @@ test("injectProfile writes HUMAN.md and points CLAUDE.md at it, leaving the pers
   assert.ok(doc.includes('stratless:start'), 'our managed block is added');
   assert.ok(/@\S*HUMAN\.md/.test(doc), 'CLAUDE.md points at HUMAN.md via @import');
   assert.ok(!doc.includes('first profile'), 'the profile is NOT inlined into CLAUDE.md — it is a redirect');
+});
+
+test('injectProfile stamps a readable UTC build time into HUMAN.md so a reader can tell the version', () => {
+  const humanMd = join(dir, 'HUMAN-stamp.md');
+  const claudeMd = join(dir, 'CLAUDE-stamp.md');
+  injectProfile('stamped profile', humanMd, claudeMd, '2026-07-23T12:28:56.777Z');
+  const human = readFileSync(humanMd, 'utf8');
+  assert.ok(human.includes('# built 2026-07-23 12:28 UTC'), 'the header carries a globalized UTC version stamp');
+  assert.ok(human.indexOf('# built') < human.indexOf('stamped profile'), 'the stamp sits in the header, above the body');
 });
 
 test('re-running injectProfile rewrites HUMAN.md and keeps exactly one CLAUDE.md block', () => {
@@ -928,7 +951,8 @@ test('loadRecentExchanges STOPS at the recent window — it never opens the arch
   rmSync(rdir, { recursive: true, force: true });
 });
 
-// ── the after-session hook is OPT-IN: `init` must not silently arm it (0.2.2 hung machines this way) ──
+// ── install = alive: `init` arms the after-session hook. It must add the hook exactly once (never a
+//    duplicate) in the form `status`/`stop` detect, and never clobber a hand-edited settings.json. ──
 
 test('installStopHook adds the refresh once, idempotently, in the form `status`/`stop` detect', () => {
   const settings: { hooks?: { Stop?: unknown[] } } = {};

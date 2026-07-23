@@ -29,14 +29,15 @@ import { findAssistant } from './claude.js';
 import { buildMoments, loadMoments } from './moments.js';
 import { loadCategories } from './categories.js';
 import { assignMoments, loadAssignments, pendingMoments } from './assign.js';
-import { join as joinLabelled, scoreboard, scoreboardLine, misfitRate } from './count.js';
+import { join as joinLabelled, scoreboard, misfitRate } from './count.js';
 import { buildProfile, looksLikeProfile } from './write.js';
 import { discover, rediscover } from './discover.js';
+import { estimateBuild, estimateLine } from './estimate.js';
 import { injectProfile, humanMdPath } from './sink.js';
 import { startRun } from './stopwatch.js';
 import { dailyCheck } from './notify.js';
 import { refreshArmed } from './init.js';
-import { readState, writeState, writeRender, SYNTH_EVERY, flushDue, FLUSH_MAX_AGE_MS } from './state.js';
+import { readState, writeState, writeRender, SYNTH_EVERY, flushDue, FLUSH_MAX_AGE_MS, coldBuildRequested, clearColdBuildRequest } from './state.js';
 import { readUsage, diffUsage, fmtTokens } from './usage.js';
 import { killActiveSession } from './stream.js';
 import { acquireLock, releaseLock, lockFilePath } from './worker.js';
@@ -183,22 +184,39 @@ export async function runWorker(): Promise<number> {
       let flush = true; // cold start always flushes; steady state decides (flushDue) — the per-turn-rebuild fix
 
       if (!cats.length) {
-        // COLD START (stage 3): discover mints the categories and writes the assignments store.
-        const discoverStart = Date.now();
-        const dr = await discover({
-          onProgress: (l) => writeProgress({ phase: 'starting', startedAt, summary: [l] }),
-          shouldStop: () => stopRequested,
-        });
-        sw.stage('discover', Date.now() - discoverStart, dr.assigned);
-        cats = loadCategories();
-        if (dr.categories) {
-          changed = true;
-          // Start the re-discovery cooldown clock here too — otherwise the first steady-state run
-          // after a cold start sees "never discovered" and could re-mint immediately on a high misfit.
-          writeState({ ...readState(), lastDiscoverAt: new Date().toISOString() });
+        // COLD START. discover mints the categories AND assigns the whole pile — this is the paid
+        // stage. It only ever runs on CONSENT: `manual` (STRATLESS_FLUSH, set by a hand-typed update or
+        // the door's yes for THIS worker) OR a DURABLE consent flag (coldBuildRequested), so a lock
+        // race that hands the build to a different worker still honors the yes. A background hook has
+        // neither, so it collects the pile (free, above) and stops HERE — no discover, no assign,
+        // nothing billed. Both signals are set only by an explicit yes: "no surprise spend" is structural.
+        const consented = manual || coldBuildRequested();
+        if (!consented) {
+          flush = false; // nothing scored, no profile yet — skip the scoreboard/rebuild block below
+          const est = estimateLine(estimateBuild(loadMoments().length));
           summary.push(
-            `discovered ${dr.categories} categor${dr.categories === 1 ? 'y' : 'ies'} across ${dr.rounds} round${dr.rounds === 1 ? '' : 's'} · ${dr.assigned} moment${dr.assigned === 1 ? '' : 's'} scored`,
+            `collected ${built.total} moment${built.total === 1 ? '' : 's'} · full build not run yet — run \`stratless update\` to build your profile (${est})`,
           );
+        } else {
+          // COLD START (stage 3): discover mints the categories and writes the assignments store. The
+          // consent is now being taken up — consume the durable flag so it is honored exactly once.
+          clearColdBuildRequest();
+          const discoverStart = Date.now();
+          const dr = await discover({
+            onProgress: (l) => writeProgress({ phase: 'starting', startedAt, summary: [l] }),
+            shouldStop: () => stopRequested,
+          });
+          sw.stage('discover', Date.now() - discoverStart, dr.assigned);
+          cats = loadCategories();
+          if (dr.categories) {
+            changed = true;
+            // Start the re-discovery cooldown clock here too — otherwise the first steady-state run
+            // after a cold start sees "never discovered" and could re-mint immediately on a high misfit.
+            writeState({ ...readState(), lastDiscoverAt: new Date().toISOString() });
+            summary.push(
+              `discovered ${dr.categories} categor${dr.categories === 1 ? 'y' : 'ies'} across ${dr.rounds} round${dr.rounds === 1 ? '' : 's'} · ${dr.assigned} moment${dr.assigned === 1 ? '' : 's'} scored`,
+            );
+          }
         }
       } else {
         // STEADY STATE: collect always (free, above); only tag + rebuild — phone the assistant — when
@@ -260,8 +278,12 @@ export async function runWorker(): Promise<number> {
       // the file when the category set or the pile changed, or when no profile exists yet. Stamp the
       // flush time so the ceiling measures from here.
       if (flush) {
+        // The scoreboard (the WIDER distress rate — moments the categories flag as correcting, ~13/100)
+        // is RECORDED here but NEVER shown to the user. The one user-facing friction number is the
+        // mirror's course-corrections rate (`stats` + the door, ~2.5/100 — literal Escape presses).
+        // Showing both would put two near-identical "corrections per 100" figures on screen, 5x apart —
+        // the exact confusion the mirror's KPI was split out to avoid. Kept in state for the record.
         const board = scoreboard(joinLabelled(loadMoments(), loadAssignments()), cats);
-        summary.push(scoreboardLine(board, readState().scoreboard?.rate));
         writeState({ ...readState(), scoreboard: { rate: board.rate, at: new Date().toISOString() }, lastFlushAt: new Date().toISOString() });
 
         if (changed || !existsSync(humanMdPath())) {
@@ -269,8 +291,9 @@ export async function runWorker(): Promise<number> {
           const profile = buildProfile();
           sw.stage('write', Date.now() - writeStart, profile ? 1 : 0);
           if (profile && looksLikeProfile(profile.text)) {
-            injectProfile(profile.text); // writes ~/.claude/HUMAN.md AND points CLAUDE.md at it — the load
-            writeRender('profile', { builtAt: new Date().toISOString(), sessions: profile.meta.sessions, exchanges: profile.meta.moments });
+            const builtAt = new Date().toISOString(); // one stamp for BOTH the HUMAN.md header and the sidecar — they must agree
+            injectProfile(profile.text, undefined, undefined, builtAt); // writes ~/.claude/HUMAN.md AND points CLAUDE.md at it — the load
+            writeRender('profile', { builtAt, sessions: profile.meta.sessions, exchanges: profile.meta.moments, categories: loadCategories().length });
             summary.push(
               `profile written and loaded · ${profile.meta.signals} distress signal${profile.meta.signals === 1 ? '' : 's'} + ${profile.meta.working} working-style trait${profile.meta.working === 1 ? '' : 's'}${profile.meta.shorthand ? ` + ${profile.meta.shorthand} shorthand handles` : ''}`,
             );
@@ -282,8 +305,8 @@ export async function runWorker(): Promise<number> {
     }
     sw.record();
 
-    // The daily version line rides ONLY on --auto consent (the installed hook is the consent
-    // artifact) — same rule as before, now spoken through the summary.
+    // The daily version line rides ONLY on the installed hook (the consent artifact) — same rule as
+    // before, now spoken through the summary.
     const newer = await dailyCheck(installedVersion(), refreshArmed());
     if (newer) summary.push(`stratless ${newer} available: npm i -g stratless`);
 

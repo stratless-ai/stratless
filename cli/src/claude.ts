@@ -56,7 +56,7 @@ export const TOOLLESS_ARGS = ['--tools', ''] as const;
  */
 export const CLEAN_ARGS = ['--safe-mode'] as const;
 
-/** Is a binary on PATH? (Also guards `init --auto`: a hook that runs `stratless` needs it findable.) */
+/** Is a binary on PATH? (Also guards the door: a hook that runs `stratless` needs it findable.) */
 export function onPath(bin: string): boolean {
   try {
     execFileSync('which', [bin], { stdio: ['ignore', 'pipe', 'ignore'] });
@@ -127,9 +127,11 @@ export function runClaude(
   ];
 
   // The child inherits our environment, save for the thinking cap when the caller sets one. Built
-  // once — both rungs spawn the same child.
-  const childEnv =
-    maxThinkingTokens === undefined ? process.env : { ...process.env, MAX_THINKING_TOKENS: String(maxThinkingTokens) };
+  // once — both rungs spawn the same child. STRATLESS_FLUSH is scrubbed: the borrowed claude must
+  // never carry our cold-start consent signal into a Stop hook it might fire.
+  const childEnv = { ...process.env };
+  delete childEnv.STRATLESS_FLUSH;
+  if (maxThinkingTokens !== undefined) childEnv.MAX_THINKING_TOKENS = String(maxThinkingTokens);
 
   for (const { args, json } of attempts) {
     try {

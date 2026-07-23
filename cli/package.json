@@ -1,6 +1,6 @@
 {
   "name": "stratless",
-  "version": "0.3.5",
+  "version": "0.4.0",
   "description": "Give your AI coding assistant a model of who you are — read from your own history — so it stops making you feel stupid. Local, private, no account.",
   "type": "module",
   "bin": {
@@ -25,7 +25,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && chmod +x dist/index.js",
     "dev": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --test dist/*.test.js",
