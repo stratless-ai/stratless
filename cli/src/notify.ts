@@ -4,10 +4,10 @@
  * The posture is not tunable: NOTHING AMBIENT WITHOUT EXPLICIT CONSENT. Two doors only:
  * 1. `status --check` — user-initiated, on-screen, works for everyone. Plain `status` stays
  *    fully offline.
- * 2. `--auto` users only: arming the after-session refresh is explicit consent to background
- *    activity, and a cached once-daily version check rides on that SAME consent, during the
- *    background update. Plain-`init` users never get ambient anything — the daily path checks
- *    the consent artifact (the installed hook) before any network code is reachable.
+ * 2. armed users only: arming the after-session refresh (install = alive, or re-armed by `init`) is
+ *    explicit consent to background activity, and a cached once-daily version check rides on that SAME
+ *    consent, during the background update. A stopped/unarmed machine never gets ambient anything —
+ *    the daily path checks the consent artifact (the installed hook) before any network code runs.
  *
  * Mechanics: node 18 global fetch, 1s timeout, best-effort — a failed check is silence, never a
  * blocked or failed command. Result + timestamp cached in ~/.stratless/notify.json. The fetcher
@@ -87,7 +87,7 @@ export async function fetchLatest(timeoutMs = 1000, fetcher: Fetcher = globalThi
 
 /**
  * The consent-gated daily check. Returns the newer version string when one exists; undefined
- * otherwise. When `armed` is false (no --auto hook installed), this returns IMMEDIATELY — the
+ * otherwise. When `armed` is false (the hook is not installed), this returns IMMEDIATELY — the
  * fetcher is unreachable, provably (see the test that passes a throwing fetcher).
  */
 export async function dailyCheck(

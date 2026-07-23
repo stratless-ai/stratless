@@ -928,7 +928,8 @@ test('loadRecentExchanges STOPS at the recent window — it never opens the arch
   rmSync(rdir, { recursive: true, force: true });
 });
 
-// ── the after-session hook is OPT-IN: `init` must not silently arm it (0.2.2 hung machines this way) ──
+// ── install = alive: `init` arms the after-session hook. It must add the hook exactly once (never a
+//    duplicate) in the form `status`/`stop` detect, and never clobber a hand-edited settings.json. ──
 
 test('installStopHook adds the refresh once, idempotently, in the form `status`/`stop` detect', () => {
   const settings: { hooks?: { Stop?: unknown[] } } = {};

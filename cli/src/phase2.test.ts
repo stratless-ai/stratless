@@ -18,9 +18,11 @@ import { iterateExchangesNewestFirst } from './exchange.js';
 import { stopWorker, readLock } from './worker.js';
 import { readProgress } from './progress.js';
 import { readUsage, diffUsage } from './usage.js';
-import { appendCategories } from './categories.js';
+import { appendCategories, loadCategories } from './categories.js';
 import { loadAssignments } from './assign.js';
 import { loadMoments } from './moments.js';
+import { requestColdBuild, coldBuildRequested } from './state.js';
+import { isYes } from './index.js';
 
 let dir: string;
 const distDir = dirname(fileURLToPath(import.meta.url));
@@ -360,15 +362,15 @@ test('review: update respects a foreground COMMAND lock — no tail, no spawn, h
   }
 });
 
-test('review: init goes through the strict-args gate too', () => {
+test('review: init goes through the strict-args gate too (init takes no flags now)', () => {
   try {
-    execFileSync(process.execPath, [cli, 'init', '--autoo'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000 });
+    execFileSync(process.execPath, [cli, 'init', '--nope'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000 });
     assert.fail('should have refused');
   } catch (err: any) {
     assert.equal(err.status, 1);
     const out = `${err.stdout ?? ''}${err.stderr ?? ''}`;
-    assert.ok(out.includes('unknown flag'), 'the typo refuses before init runs');
-    assert.ok(out.includes('--auto'), 'with the did-you-mean');
+    assert.ok(out.includes('unknown flag'), 'the unknown flag refuses before init runs');
+    assert.ok(out.includes('init'), 'and names the command it was rejected for');
   }
 });
 
@@ -423,4 +425,142 @@ test('receipt: a finished run carries its spend line; status can read it after t
   assert.ok(/this run: .*tokens/.test(p.spend!), `tokens first (${p.spend})`);
   assert.ok(/\$\d/.test(p.spend!), 'with the API-equivalent cost');
   assert.ok(p.summary!.some((l) => l === p.spend), 'and the tail prints it with the summary');
+});
+
+// ── THE COLD-START SPEND GATE (0.4.0) ────────────────────────────────────────────────────────────
+// A fresh machine has no categories. discover() (the paid stage) must fire ONLY on a consented,
+// interactive invocation — marked by STRATLESS_FLUSH, set only from a real terminal. A background
+// hook (no TTY, no STRATLESS_FLUSH) collects the pile for free and spends nothing.
+
+/** A fake `claude` that answers the discover + assign + write calls (so a consented build completes)
+ *  AND records every invocation to FAKE_COUNTER — so a test can assert it was NEVER called. */
+function writeDiscoverCounterBin(name: string): string {
+  const p = join(dir, name);
+  writeFileSync(
+    p,
+    `#!/usr/bin/env node
+const fs = require('fs');
+try { const n = Number(fs.readFileSync(process.env.FAKE_COUNTER, 'utf8')) || 0; fs.writeFileSync(process.env.FAKE_COUNTER, String(n + 1)); } catch { fs.writeFileSync(process.env.FAKE_COUNTER, '1'); }
+const args = process.argv.slice(2);
+if (args.includes('stream-json')) {
+  const chunks = [];
+  process.stdin.on('data', (d) => chunks.push(d));
+  process.stdin.on('end', () => {
+    process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'WHAT THEY KNOW\\nplaceholder profile.', usage: { input_tokens: 1, output_tokens: 1 }, total_cost_usd: 0.0001 }) + '\\n');
+    process.exit(0);
+  });
+} else {
+  const input = args.find((a) => a.includes('MOMENTS:')) || '';
+  let result;
+  if (input.includes('recurring KINDS')) {
+    result = JSON.stringify({ categories: [{ name: 'planning', description: 'wants a plan first', scope: 'person' }] });
+  } else {
+    const ids = [...input.matchAll(/(?:^|\\n)#(\\d+)/g)].map((m) => Number(m[1]));
+    result = JSON.stringify({ assignments: ids.map((id) => ({ id, kinds: ['planning'] })) });
+  }
+  process.stdout.write(JSON.stringify({ result, is_error: false, total_cost_usd: 0.001, usage: { input_tokens: 1, output_tokens: 1 } }));
+}
+`,
+  );
+  chmodSync(p, 0o755);
+  return p;
+}
+
+test('cold start is spend-gated: a background hook collects the pile but never builds', async () => {
+  const { home, env } = makeHome('coldgate-hook', [{ exchanges: 4 }, { exchanges: 4 }, { exchanges: 4 }, { exchanges: 4 }]);
+  const counter = join(home, 'calls');
+  const bin = writeDiscoverCounterBin('fake-cold-hook');
+  // No STRATLESS_FLUSH — this is exactly how the after-session hook runs (non-TTY).
+  const childEnv = { ...process.env, ...env, STRATLESS_CLAUDE_BIN: bin, FAKE_COUNTER: counter };
+  const w = spawn(process.execPath, [cli, '__worker'], { env: childEnv, stdio: 'ignore' });
+  await new Promise((r) => w.on('close', r));
+
+  assert.ok(!existsSync(counter), 'the assistant was NEVER called — nothing was spent');
+  assert.equal(loadCategories(env.STRATLESS_CATEGORIES).length, 0, 'no categories minted on a hook run');
+  assert.ok(loadMoments(env.STRATLESS_MOMENTS).length > 0, 'but the pile WAS collected, for free');
+  const p = readProgress(env.STRATLESS_PROGRESS);
+  assert.ok(p?.summary?.some((l) => l.includes('full build not run')), `and it says the build has not run (${JSON.stringify(p?.summary)})`);
+
+  // status surfaces the pending build from that same state (pile present, no categories).
+  const out = execFileSync(process.execPath, [cli, 'status'], { encoding: 'utf8', env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+  assert.match(out, /profile build/);
+  assert.match(out, /not run yet/);
+});
+
+test('cold start builds when consented: a TTY invocation (STRATLESS_FLUSH) mints categories', async () => {
+  const { home, env } = makeHome('coldgate-consent', [{ exchanges: 4 }, { exchanges: 4 }, { exchanges: 4 }, { exchanges: 4 }]);
+  const counter = join(home, 'calls');
+  const bin = writeDiscoverCounterBin('fake-cold-consent');
+  const childEnv = { ...process.env, ...env, STRATLESS_CLAUDE_BIN: bin, FAKE_COUNTER: counter, STRATLESS_FLUSH: '1' };
+  const w = spawn(process.execPath, [cli, '__worker'], { env: childEnv, stdio: 'ignore' });
+  await new Promise((r) => w.on('close', r));
+
+  assert.ok(existsSync(counter), 'the consented build DID call the assistant');
+  assert.ok(loadCategories(env.STRATLESS_CATEGORIES).length > 0, 'and minted at least one category');
+});
+
+test('a DURABLE consent flag makes even a non-TTY worker build — consent survives a lock race', async () => {
+  const { home, env } = makeHome('coldgate-durable', [{ exchanges: 4 }, { exchanges: 4 }, { exchanges: 4 }, { exchanges: 4 }]);
+  const counter = join(home, 'calls');
+  const bin = writeDiscoverCounterBin('fake-cold-durable');
+  // Consent recorded on disk (as the door / a typed `update` does), but NO STRATLESS_FLUSH in this
+  // worker's env — exactly the case where a background hook worker won the lock after the user's yes.
+  requestColdBuild(env.STRATLESS_STATE);
+  const childEnv = { ...process.env, ...env, STRATLESS_CLAUDE_BIN: bin, FAKE_COUNTER: counter }; // no STRATLESS_FLUSH
+  const w = spawn(process.execPath, [cli, '__worker'], { env: childEnv, stdio: 'ignore' });
+  await new Promise((r) => w.on('close', r));
+
+  assert.ok(existsSync(counter), 'the durable consent triggered the build with no env flag');
+  assert.ok(loadCategories(env.STRATLESS_CATEGORIES).length > 0, 'categories minted');
+  assert.equal(coldBuildRequested(env.STRATLESS_STATE), false, 'and the flag was consumed exactly once');
+});
+
+test('isYes: only an explicit y/yes builds; everything else defers (the default-NO spend gate)', () => {
+  for (const yes of ['y', 'Y', 'yes', 'YES', ' yes ', 'Yes']) assert.equal(isYes(yes), true, `"${yes}" builds`);
+  for (const no of ['', ' ', 'n', 'no', 'nope', 'yeah', 'ya', 'yep', 'sure', 'ok', '1', 'yy']) assert.equal(isYes(no), false, `"${no}" defers`);
+});
+
+test('profile: reads HUMAN.md (the pipeline output), not the dead profile.txt, header stripped', () => {
+  const human = join(dir, 'profile-HUMAN.md');
+  writeFileSync(
+    human,
+    '# Who you are working with\n# (managed by stratless — do not edit)\n<!-- humanmd/v1 -->\n\nDerived from 12 conversations.\n\n## How they work\n\n**States their reasoning** — 99 times\n',
+  );
+  const env = {
+    ...process.env,
+    STRATLESS_HUMAN_MD: human,
+    STRATLESS_RENDERS: join(dir, 'profile-renders.json'),
+    STRATLESS_CLAUDE_MD: join(dir, 'profile-CLAUDE.md'),
+  };
+  const out = execFileSync(process.execPath, [cli, 'profile'], { encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'pipe'] });
+  assert.match(out, /WHO YOU'RE WORKING WITH/);
+  assert.match(out, /Derived from 12 conversations/);
+  assert.doesNotMatch(out, /Nothing built yet/, 'a built profile is never called "nothing built"');
+  assert.doesNotMatch(out, /managed by stratless/, 'the managed-by header is stripped from the display');
+});
+
+test('profile: says "nothing built" only when HUMAN.md is absent', () => {
+  const env = {
+    ...process.env,
+    STRATLESS_HUMAN_MD: join(dir, 'profile-absent-HUMAN.md'),
+    STRATLESS_RENDERS: join(dir, 'profile-absent-renders.json'),
+    STRATLESS_CLAUDE_MD: join(dir, 'profile-absent-CLAUDE.md'),
+  };
+  const out = execFileSync(process.execPath, [cli, 'profile'], { encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'pipe'] });
+  assert.match(out, /Nothing built yet/);
+});
+
+test('the door (init): arms the hook by default, shows a free read, defers the build when not a TTY', () => {
+  const { home, env } = makeHome('door-nontty', [{ exchanges: 5 }, { exchanges: 5 }]);
+  // execFileSync gives the child a piped stdin/stdout — process.stdin.isTTY is falsy, the "later" path.
+  const out = execFileSync(process.execPath, [cli, 'init'], { encoding: 'utf8', env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
+
+  // install = alive: the after-session hook is armed WITHOUT any --auto flag.
+  const settings = JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8'));
+  assert.ok(JSON.stringify(settings.hooks?.Stop ?? []).includes('stratless update'), 'the after-session hook is armed by default');
+
+  assert.match(out, /What I can already see/, 'the free read is shown');
+  assert.match(out, /course corrections/, 'including the friction scoreboard');
+  assert.match(out, /Full profile:/, 'and the cost estimate');
+  assert.match(out, /Build the full profile any time|No rush/, 'non-TTY defers the build, never prompts');
 });

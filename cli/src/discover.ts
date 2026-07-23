@@ -182,12 +182,25 @@ export async function discover(opts: { onProgress?: (line: string) => void; shou
 
   for (let r = 0; r < MAX_ROUNDS; r++) {
     if (opts.shouldStop?.()) break;
+    // The category-minting call is a slow thinking pass with no sub-steps — name the wait so the tail
+    // is never a silent hang.
+    opts.onProgress?.(r === 0 ? 'discovering the kinds of thing you do…' : `discovering more categories · round ${r + 1}…`);
     const candidates = uniquify(discoverCall(bin, unmatched), new Set(born.map((c) => c.name)));
     if (!candidates.length) break;
     born.push(...candidates); // in memory only — nothing is written until the build finishes (all-or-nothing)
     rounds++;
 
-    const { records } = await assignAgainst(bin, unmatched, candidates, { shouldStop: opts.shouldStop });
+    // Live progress for the ~15-min build: a per-batch "scoring N/total · ~M min left" line (round 0
+    // covers the whole pile, the bulk of the wait), so the tail always shows real movement + an ETA.
+    const roundStart = Date.now();
+    const { records } = await assignAgainst(bin, unmatched, candidates, {
+      shouldStop: opts.shouldStop,
+      onBatch: (done, tot) => {
+        const el = Date.now() - roundStart;
+        const etaMin = done > 0 ? Math.round(((el / done) * (tot - done)) / 60000) : 0;
+        opts.onProgress?.(`scoring your history · ${done.toLocaleString()} / ${tot.toLocaleString()} moments${etaMin > 0 ? ` · ~${etaMin} min left` : ''}`);
+      },
+    });
     const kindsByKey = new Map(records.map((rec) => [rec.key, rec.kinds]));
     let absorbed = 0;
     const stillUnmatched: Moment[] = [];
@@ -207,17 +220,20 @@ export async function discover(opts: { onProgress?: (line: string) => void; shou
   }
 
   // ONE build → ONE timestamp → ONE write. Every moment gets a record (empty = "seen, matched
-  // nothing"); prune the flukes; then persist the survivors and their checkmarks TOGETHER, both
-  // stamped with the same build time, so the two stores can never disagree. A category that failed
-  // the prune was never written, so there is nothing to tombstone — we simply don't ship it.
+  // nothing"); prune the flukes; then persist the survivors and their checkmarks, both stamped with
+  // the same build time. ASSIGNMENTS FIRST, categories second: the two writes are not atomic as a
+  // pair, and if the process is killed between them the safe leftover is assignments-WITHOUT-categories
+  // — that reads as `!cats.length` → cold start → still consent-gated, no surprise spend. The reverse
+  // (categories without assignments) would read as steady state and re-bill the whole pile on the next
+  // background flush. A category that failed the prune was never written, so nothing to tombstone.
   const builtAt = new Date().toISOString();
   const raw: Assignment[] = allMoments.map((m) => ({ key: m.key, at: builtAt, kinds: [...(kinds.get(m.key) ?? [])] }));
   const survivors = pruneCategories(born, raw, allMoments);
+  writeAssignments(raw.map((rec) => ({ ...rec, kinds: rec.kinds.filter((k) => survivors.has(k)) })));
   appendCategories(
     born.filter((c) => survivors.has(c.name)).map((c) => ({ name: c.name, description: c.description, scope: c.scope })),
     { at: builtAt },
   );
-  writeAssignments(raw.map((rec) => ({ ...rec, kinds: rec.kinds.filter((k) => survivors.has(k)) })));
 
   return { categories: survivors.size, rounds, assigned: allMoments.length };
 }

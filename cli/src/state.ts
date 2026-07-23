@@ -69,6 +69,11 @@ export interface SynthState {
   lastDiscoverAt?: string;
   /** when the worker last flushed (tagged + rebuilt) — the flush ceiling ([[flushDue]]) measures from here */
   lastFlushAt?: string;
+  /** a CONSENTED cold-start build is pending. Set only by a consented interactive invocation (the
+   *  door's yes, or a typed `update` on a fresh machine); consumed by whichever worker wins the lock.
+   *  Durable on purpose: consent must survive a lock race or a killed process, never live only in one
+   *  worker's env. Its presence always traces to an explicit yes, so it can never cause surprise spend. */
+  buildRequestedAt?: string;
 }
 
 /** Read the state. Missing or corrupt reads as never-synthesized and never throws. */
@@ -99,6 +104,7 @@ export function readState(file: string = statePath()): SynthState {
     }
     if (typeof raw.lastDiscoverAt === 'string') out.lastDiscoverAt = raw.lastDiscoverAt;
     if (typeof raw.lastFlushAt === 'string') out.lastFlushAt = raw.lastFlushAt;
+    if (typeof raw.buildRequestedAt === 'string') out.buildRequestedAt = raw.buildRequestedAt;
     return out;
   } catch {
     return {}; // fails open — one extra synthesis, never a crash
@@ -134,6 +140,28 @@ export function writeState(s: SynthState, file: string = statePath()): void {
   } catch {
     /* best-effort by design */
   }
+}
+
+// ── the durable cold-start consent flag ────────────────────────────────────────────────────────
+// A consented cold-start build (the ~$16 one) records its consent HERE, not just in the spawned
+// worker's env — so a lock race or a killed process can never drop it. Whichever worker reaches the
+// cold-start branch honors it; a background hook never sets it, so it can never manufacture consent.
+
+/** Record that a consented cold-start build is pending. */
+export function requestColdBuild(file: string = statePath()): void {
+  writeState({ ...readState(file), buildRequestedAt: new Date().toISOString() }, file);
+}
+
+/** Is a consented cold-start build pending? */
+export function coldBuildRequested(file: string = statePath()): boolean {
+  return !!readState(file).buildRequestedAt;
+}
+
+/** Consume the pending-build consent (the build has been taken up). */
+export function clearColdBuildRequest(file: string = statePath()): void {
+  const s = readState(file);
+  delete s.buildRequestedAt;
+  writeState(s, file);
 }
 
 // ── the render sidecar (the polish release): looking is free, and the header stays honest ──────

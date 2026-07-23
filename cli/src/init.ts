@@ -102,7 +102,7 @@ function allTranscripts(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-export function init(opts: { auto?: boolean } = {}): InitResult {
+export function init(): InitResult {
   // 1. stop the reaper
   const read = readSettings(SETTINGS);
   if (!read.ok) {
@@ -115,9 +115,12 @@ export function init(opts: { auto?: boolean } = {}): InitResult {
   const settings = read.settings;
   const before: number | 'default (30)' = settings.cleanupPeriodDays ?? 'default (30)';
   settings.cleanupPeriodDays = KEEP_DAYS;
-  // The after-session auto-refresh is OPT-IN (`init --auto`). A tool that reads everything must not
-  // silently arm a background job that reads your history on every session — you turn that on yourself.
-  const hookInstalled = opts.auto ? installStopHook(settings) : false;
+  // INSTALL = ALIVE. Arming the after-session refresh IS the install — the door (index.ts) states the
+  // deal and takes one consent before this runs. A separate opt-in switch would guard nothing: the
+  // hook only ever does FREE work (collect + mirror + steady-state flush) and can NEVER trigger the
+  // paid build, which is TTY-gated in the worker (loop.ts). `stratless stop` is the single, total
+  // off-switch — that is the one ceremony.
+  const hookInstalled = installStopHook(settings);
   atomicWriteFileSync(SETTINGS, `${JSON.stringify(settings, null, 2)}\n`);
 
   // 2. put a copy beyond its reach. flat, deduped by project + filename.

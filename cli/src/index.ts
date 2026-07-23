@@ -2,7 +2,7 @@
 /**
  * stratless — build your AI a model of who you are, so it stops making you feel stupid.
  *
- *   stratless init      keep your history (add --auto for the after-session refresh)
+ *   stratless init      keep your history, see a free read, build your profile
  *   stratless profile   see the model of you — LOOKS, never spends; update LOADS
  *   stratless update    read what's new; rebuild + load the profile
  *   stratless stop      turn it off — stop refreshing and unload the profile
@@ -18,7 +18,7 @@ import { dailyCheck, fetchLatest, newerThan } from './notify.js';
 import { health } from './canary.js';
 import { loadRecentExchanges, sessionCount, findExchange } from './exchange.js';
 import { removeProfile, humanMdPath, claudeMdPath } from './sink.js';
-import { readRenders, type RenderMeta } from './state.js';
+import { readRenders, requestColdBuild, coldBuildRequested, type RenderMeta } from './state.js';
 import { readUsage } from './usage.js';
 import { atomicWriteFileSync, CorruptStoreError } from './atomic.js';
 import { acquireLock, releaseLock, readLock, lockFilePath, lockIsStale, stopWorker, spawnDetached, resolveBinPath } from './worker.js';
@@ -26,10 +26,15 @@ import { startRun, type Stopwatch } from './stopwatch.js';
 import { runWorker, installedVersion, JUDGE_WINDOW } from './loop.js';
 import { readProgress, type Progress } from './progress.js';
 import { makePalette } from './palette.js';
-import { existsSync, readFileSync, statSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { mirrorOfArchive } from './mirror.js';
+import { renderMirror } from './mirrorview.js';
+import { estimateBuild, estimateFromMessages, estimateLine } from './estimate.js';
+import { loadMoments } from './moments.js';
+import { loadCategories } from './categories.js';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createInterface } from 'node:readline/promises';
 
 // Two palettes, one per stream — results style by stdout's TTY, progress by stderr's (clig).
 const C = makePalette(process.stdout);
@@ -79,10 +84,16 @@ function stats(cwd: string): void {
   console.log(`    files it touched          ${C.b(String(files))}`);
   console.log(`    sessions                  ${C.b(String(sessions))}`);
   console.log(`    days                      ${C.b(String(days.size))}`);
-  console.log(`\n    ${C.dim(`archive reaches back to ${first} — anything older was deleted by the 30-day cleanup.`)}\n`);
+  // `first` is the oldest transcript STILL in the live ~/.claude/projects for this project. Once init
+  // has run, stratless has stopped the reaper and copied everything to the archive, so the honest line
+  // depends on whether that protection is in place — and doubles as the nudge to turn it on.
+  const preserved = existsSync(ARCHIVE);
+  console.log(
+    preserved
+      ? `\n    ${C.dim(`live transcripts here go back to ${first} · your full history is kept in ${ARCHIVE}`)}\n`
+      : `\n    ${C.dim(`live transcripts here go back to ${first} · Claude Code deletes them after 30 days — keep them with \`${hint('stratless init')}\``)}\n`,
+  );
 }
-
-const STRATLESS = join(homedir(), '.stratless');
 
 /**
  * Is the profile actually loaded? HUMAN.md exists AND CLAUDE.md carries our redirect block. The one
@@ -153,20 +164,28 @@ function preSpend(pending: number): void {
  * path is gone: nothing built yet now says so and points at the command that does spend.
  */
 async function profiler(_rest: string[] = []): Promise<void> {
-  const cachedFile = join(STRATLESS, 'profile.txt');
-  const meta = readRenders().profile;
-
-  if (!meta || !existsSync(cachedFile)) {
+  // The profile BODY is HUMAN.md (the discovery pipeline's output) — NOT the old ~/.stratless/profile.txt,
+  // which nothing writes any more. Gate on the body existing; the render sidecar only carries the header
+  // facts, and a profile with no sidecar is still a profile worth showing.
+  const human = humanMdPath();
+  if (!existsSync(human)) {
     console.log(`\n  ${C.it('Nothing built yet.')} ${C.dim('`profile` only ever looks — it never spends.')}`);
     console.log(`  ${C.dim('Build and load it with:')} ${C.b(hint('stratless update'))}\n`);
     return;
   }
 
-  const text = readFileSync(cachedFile, 'utf8').trimEnd();
-  console.log(
-    `\n  ${C.b("WHO YOU'RE WORKING WITH")}   ${C.dim(`(stratless · built ${meta.builtAt.slice(0, 10)} · ${meta.sessions} sessions · ${meta.exchanges} exchanges)`)}\n`,
-  );
-  console.log(text.split('\n').map((l) => `  ${l}`).join('\n'));
+  // Strip HUMAN.md's managed-by header (the `#` lines + the `<!-- humanmd/v1 -->` marker) — plumbing a
+  // person reading their own profile does not need to see.
+  const raw = readFileSync(human, 'utf8').split('\n');
+  const start = raw.findIndex((l) => l.trim() !== '' && !/^\s*#/.test(l) && !/^\s*<!--/.test(l));
+  const body = raw.slice(start === -1 ? 0 : start).join('\n').trimEnd();
+
+  const meta = readRenders().profile;
+  const header = meta
+    ? `(stratless · built ${meta.builtAt.slice(0, 10)} · ${meta.sessions} sessions · ${meta.exchanges.toLocaleString()} moments)`
+    : '(stratless · your profile)';
+  console.log(`\n  ${C.b("WHO YOU'RE WORKING WITH")}   ${C.dim(header)}\n`);
+  console.log(body.split('\n').map((l) => `  ${l}`).join('\n'));
   console.log(`\n  ${C.dim('free — this is the last build')}`);
   lookFooter();
 }
@@ -220,8 +239,12 @@ async function tailWorker(spawnedAtMs: number, prevStamp: string): Promise<numbe
     }
     const p = readProgress();
     if (alive && p && p.pid === holder!.pid && !TERMINAL_PHASES.has(p.phase)) {
-      const line = p.phase === 'judging' && p.total ? `judging ${p.done ?? 0}/${p.total} new…` : `${p.phase}…`;
-      process.stderr.write(`\r  ${CE.dim(line)}${' '.repeat(Math.max(0, 40 - line.length))}`);
+      // Prefer the worker's latest live line — the discovery pipeline narrates "scoring N/total · ~M
+      // min left" here; fall back to the phase when there is no line yet.
+      const latest = p.summary?.length ? p.summary[p.summary.length - 1] : undefined;
+      const line = latest ?? (p.phase === 'judging' && p.total ? `judging ${p.done ?? 0}/${p.total} new…` : `${p.phase}…`);
+      // clear the row fully first — a shorter line must not leave stale characters behind
+      process.stderr.write(`\r${' '.repeat(72)}\r  ${CE.dim(line)}`);
     }
     if (!alive) {
       // Trust a terminal frame only when it is strictly NEWER than the narration that existed
@@ -253,12 +276,52 @@ async function tailWorker(spawnedAtMs: number, prevStamp: string): Promise<numbe
 }
 
 /**
+ * One yes/no at the door — the only prompt in the product's life. Default is NO: a bare Enter, a pipe,
+ * or anything that is not an explicit yes leaves the paid build unspent. The caller only reaches this
+ * on a real TTY, so the readline is safe.
+ */
+async function confirmBuild(promptText: string): Promise<boolean> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return isYes(await rl.question(promptText));
+  } finally {
+    rl.close();
+  }
+}
+
+/** The consent parse, kept pure so the "default is NO" property is directly testable: only an explicit
+ *  y/yes builds; a bare Enter, EOF, a pipe, "yeah", or any garbage defers. */
+export function isYes(answer: string): boolean {
+  const a = answer.trim().toLowerCase();
+  return a === 'y' || a === 'yes';
+}
+
+/** Spawn the one detached worker. `flush` sets the consent signal for THIS worker's env (the fast
+ *  path); durable consent lives in state (requestColdBuild) so a lock race can never drop it. */
+function spawnWorker(bin: string, flush: boolean): number | undefined {
+  const env: Record<string, string> = {};
+  const abs = resolveBinPath(bin) ?? (bin.includes('/') ? bin : undefined);
+  if (abs) env.STRATLESS_CLAUDE_BIN = abs; // C5: the claude path, captured while the PATH is real
+  if (flush) env.STRATLESS_FLUSH = '1';
+  return spawnDetached(process.execPath, [fileURLToPath(import.meta.url), '__worker'], env);
+}
+
+/** Is a real worker (not a foreground command) holding the lock right now? */
+function workerAlive(): boolean {
+  const h = readLock();
+  return !!(h && !lockIsStale(h) && h.kind === 'worker');
+}
+
+/**
  * UPDATE — the doorbell (Phase 2). The work lives in THE WORKER (loop.ts), one detached process
  * that survives this terminal; `update` wakes it and — in a real terminal — watches it. The hook
  * and pipes get one line and their prompt back. Ctrl-C mid-watch detaches the display, never the
  * work; the kill ladder is printed at that exact moment of intent.
+ *
+ * `consented` forces the flush (the cold-start build) regardless of the stderr-TTY heuristic: the
+ * door already took an explicit yes, and a redirected stderr must not swallow that consent.
  */
-async function update(_rest: string[]): Promise<void> {
+async function update(_rest: string[], opts: { consented?: boolean } = {}): Promise<void> {
   const bin = findAssistant();
   if (!bin) {
     console.error(`\n  ${C.bad('stratless needs your assistant to read your history.')}`);
@@ -271,6 +334,15 @@ async function update(_rest: string[]): Promise<void> {
     console.log(`\n  No conversations found yet.\n  ${C.dim(`Talk to Claude Code a few times, run \`${hint('stratless init')}\`, then try this.`)}\n`);
     return;
   }
+
+  // A hand-run update (a real terminal) forces a flush; the background hook (no TTY) respects the
+  // gates. `consented` (the door's explicit yes) forces it too — stderr redirection must not swallow it.
+  const flushing = opts.consented || process.stderr.isTTY;
+  // Record a consented COLD-START build DURABLY, before any lock decision. Consent must survive a lock
+  // race (a background hook worker holding the lock) or a killed process — it must never live only in
+  // the spawned worker's env. A hook never sets this, so it can never manufacture consent.
+  const consentedColdBuild = flushing && loadCategories().length === 0;
+  if (consentedColdBuild) requestColdBuild();
 
   const holder = readLock();
   const alive = !!(holder && !lockIsStale(holder));
@@ -288,18 +360,8 @@ async function update(_rest: string[]): Promise<void> {
     const watching = process.stderr.isTTY ? ' — watching it' : '';
     console.log(`\n  ${C.dim(`a refresh is already running (pid ${holder!.pid})${watching}`)}`);
   } else {
-    // The bill is announced BEFORE the worker spends a token — same disclosure, new mouth. The
-    // estimate came from the judge's pending count; the discovery pipeline has to be able to price
-    // itself before this line can come back, and until stage 2 the worker spends nothing at all.
-    const env: Record<string, string> = {};
-    const abs = resolveBinPath(bin) ?? (bin.includes('/') ? bin : undefined);
-    if (abs) env.STRATLESS_CLAUDE_BIN = abs; // C5: the claude path, captured while the PATH is real
-    // A hand-run update (a real terminal) forces a flush; the background hook (no TTY) respects the gates.
-    if (process.stderr.isTTY) env.STRATLESS_FLUSH = '1';
     spawnedAtMs = Date.now();
-    const entry = fileURLToPath(import.meta.url);
-    const pid = spawnDetached(process.execPath, [entry, '__worker'], env);
-    if (!pid) {
+    if (!spawnWorker(bin, flushing)) {
       console.error(`\n  ${C.bad('could not start the background refresh.')}\n`);
       process.exit(1);
     }
@@ -310,7 +372,15 @@ async function update(_rest: string[]): Promise<void> {
     console.log(`  refresh running in the background · watch: ${hint('stratless status')}`);
     return;
   }
-  const code = await tailWorker(spawnedAtMs, prevStamp);
+  let code = await tailWorker(spawnedAtMs, prevStamp);
+  // We may have only tailed a FOREIGN collect-only worker (it held the lock when we arrived). If a
+  // consented build is still pending, the lock is free now — run it, and watch it. One re-attempt, so
+  // this can never loop.
+  if (!code && consentedColdBuild && coldBuildRequested() && !workerAlive()) {
+    const at = Date.now();
+    const stamp = readProgress()?.updatedAt ?? '';
+    if (spawnWorker(bin, true)) code = await tailWorker(at, stamp);
+  }
   if (code) process.exit(code);
 }
 
@@ -338,7 +408,7 @@ async function stop(): Promise<void> {
   if (hookRemoved) console.log(`  ${C.dim('· after-session refresh removed')}`);
   if (unloaded) console.log(`  ${C.dim('· profile unloaded from your CLAUDE.md')}`);
   console.log(`  ${C.dim('Your ~/.claude/HUMAN.md is left as-is — delete it yourself if you want it gone.')}`);
-  console.log(`  ${C.dim(`Run \`${hint('stratless update')}\` to load it again, \`${hint('stratless init --auto')}\` for background refresh.`)}\n`);
+  console.log(`  ${C.dim(`Run \`${hint('stratless update')}\` to load it again, \`${hint('stratless init')}\` to turn the refresh back on.`)}\n`);
 }
 
 /**
@@ -385,13 +455,27 @@ async function status(rest: string[] = []): Promise<void> {
     t >= 1e6 ? `${(t / 1e6).toFixed(1)}M` : t >= 1000 ? `${Math.round(t / 1000)}k` : String(t);
   const spend = `${fmtTok(tokens)} tokens across ${u.calls.toLocaleString()} read${u.calls === 1 ? '' : 's'}`;
   const api = `≈ $${u.costUsd.toFixed(2)} at API rates, on your own claude`;
-  const FEATURE_LABEL: Record<string, string> = { judge: 'judging', synthesis: 'profile builds', miner: 'mining', audit: 'audits', grade: 'grading' };
+  // The live discovery-pipeline stages. Miner-era keys (judge/mining/audit/grade) are gone; any that
+  // linger in an old ledger fall through to their raw name (honest historical spend), never a fresh user.
+  const FEATURE_LABEL: Record<string, string> = { discover: 'discovering', assign: 'scoring', write: 'writing' };
   const byFeature = Object.entries(u.byFeature)
     .map(([f, t]) => `${FEATURE_LABEL[f] ?? f} $${t.costUsd.toFixed(2)} (${t.calls.toLocaleString()})`)
     .join(' · ');
 
   console.log(`\n  ${C.b('stratless status')}\n`);
   console.log(`    after-session refresh   ${refresh ? C.ok('on') : C.dim('off')}`);
+  // The cold-start onramp: history collected but the paid build not yet run. Derived, never stored —
+  // no categories on disk while the pile holds moments means "free read live, full build pending".
+  try {
+    const cats = loadCategories();
+    const pile = loadMoments();
+    if (!cats.length && pile.length) {
+      const est = estimateLine(estimateBuild(pile.length));
+      console.log(`    profile build           ${C.warn('not run yet')}  ${C.dim(`${est} — run ${hint('stratless update')}`)}`);
+    }
+  } catch {
+    /* stores absent on a brand-new machine — nothing to report */
+  }
   // Phase 2: a live worker is visible here — the tail's Ctrl-C message points people HERE.
   {
     const holder = readLock();
@@ -423,7 +507,7 @@ async function status(rest: string[] = []): Promise<void> {
   if (u.unmeteredCalls) gaps.push(`${u.unmeteredCalls} call${u.unmeteredCalls === 1 ? '' : 's'} unmetered (no receipt — true cost unknown)`);
   if (u.pinEscapedCalls) gaps.push(`${u.pinEscapedCalls} ran on your default model (pin dropped)`);
   if (gaps.length) console.log(`    fallback calls          ${C.warn(gaps.join(' · '))}`);
-  if (!refresh) console.log(`\n  ${C.dim(`Run \`${hint('stratless init --auto')}\` to turn the after-session refresh on.`)}`);
+  if (!refresh) console.log(`\n  ${C.dim(`Run \`${hint('stratless init')}\` to turn the after-session refresh back on.`)}`);
   console.log('');
 }
 
@@ -432,7 +516,7 @@ async function status(rest: string[] = []): Promise<void> {
 // the user asked for — `update --npw` once ran as a PLAIN update while its author believed he had
 // forced a rebuild. Unknown flags and stray arguments exit loudly, with a did-you-mean.
 const COMMAND_ARGS: Record<string, { flags: string[]; positionals: number }> = {
-  init: { flags: ['--auto'], positionals: 0 },
+  init: { flags: [], positionals: 0 },
   profile: { flags: [], positionals: 0 },
   update: { flags: [], positionals: 0 },
   status: { flags: ['--check'], positionals: 0 },
@@ -490,37 +574,81 @@ async function main(): Promise<void> {
   }
 
   if (cmd === 'init') {
-    const auto = args.includes('--auto');
+    // THE DOOR — the product's only interactive moment. Keep the history, show a FREE read of the
+    // person (no spend), quote the paid build honestly, then take ONE consent: build now (watched) or
+    // later. The paid build never fires without an explicit yes on a real terminal.
     let r: InitResult;
     try {
-      r = doInit({ auto });
+      r = doInit();
     } catch (err) {
       // Refuse, don't clobber — say what's wrong (a malformed settings.json) and stop cleanly.
       console.error(`\n  ${C.bad('stratless could not update your settings.')}`);
       console.error(`  ${C.dim(String(err instanceof Error ? err.message : err).split('\n').join('\n  '))}\n`);
       process.exit(1);
     }
+
+    // 1. what we kept. Install = alive: the after-session refresh is on now; `stop` is the one ceremony.
     console.log(`\n  ${C.ok('stratless is keeping your history.')}\n`);
     console.log(`    reaper           ${C.dim(String(r.before))} → ${C.b(`${r.after} days`)}`);
     console.log(`    archived         ${C.b(String(r.copied))} transcripts${r.skipped ? C.dim(` (${r.skipped} already current)`) : ''}`);
     console.log(`    kept at          ${C.dim(ARCHIVE)}`);
-    console.log(`    after-session    ${auto ? C.b('auto-refresh ON') : C.dim('auto-refresh off')}`);
+    console.log(`    after-session    ${C.b('refresh on')}  ${C.dim(`· off any time: ${hint('stratless stop')}`)}`);
     console.log(`\n  ${C.dim('Claude Code deletes transcripts after 30 days — per file, even in a project you')}`);
     console.log(`  ${C.dim('use daily. Anything already gone is gone. Everything from here is kept.')}\n`);
-    console.log(
-      `  ${C.dim(
-        auto
-          ? `Auto-refresh rebuilds your profile in the background after each session. It also checks npm once a day so you hear about fixes. Turn it all off with: ${hint('stratless stop')}`
-          : `Auto-refresh is off. Turn on background updates any time with: ${hint('stratless init --auto')}`,
-      )}\n`,
-    );
-    if (auto && !onPath('stratless')) {
-      // The hook we just installed runs the bare `stratless` — from an npx-only install it will
-      // fail silently on every session. Never arm a background job without saying it can't run yet.
-      console.log(`  ${C.warn('heads up:')} ${C.dim('the background refresh runs `stratless update`, but `stratless` is not on')}`);
-      console.log(`  ${C.dim('your PATH yet. Install it properly or the refresh will silently do nothing:')} ${C.b('npm install -g stratless')}\n`);
+
+    // The armed hook runs the bare `stratless`; from an npx-only install it would silently do nothing.
+    if (!onPath('stratless')) {
+      console.log(`  ${C.warn('heads up:')} ${C.dim('the after-session refresh runs `stratless`, but it is not on your PATH yet.')}`);
+      console.log(`  ${C.dim('Install it so the refresh can run:')} ${C.b('npm install -g stratless')}\n`);
     }
-    console.log(`  ${C.dim('Next:')} ${hint('stratless profile')}\n`);
+
+    // 2. the free read — computed from the archive we just froze. No model call, no spend. The
+    //    archive walk blocks for ~10s on a big history, so LABEL the wait instead of hanging silent.
+    const readingMsg = '  reading your history…';
+    if (process.stdout.isTTY) process.stdout.write(C.dim(readingMsg));
+    let mirror: ReturnType<typeof mirrorOfArchive> | undefined;
+    try {
+      mirror = mirrorOfArchive(ARCHIVE);
+    } catch {
+      mirror = undefined;
+    }
+    if (process.stdout.isTTY) process.stdout.write(`\r${' '.repeat(readingMsg.length + 4)}\r`);
+    const rows = mirror ? renderMirror(mirror) : [];
+    if (!rows.length) {
+      console.log(`  ${C.dim('No conversations to read yet — talk to Claude Code a few times, then run')} ${C.b(hint('stratless update'))}${C.dim('.')}\n`);
+      return;
+    }
+    console.log(`  ${C.b('What I can already see')} ${C.dim('(free, from your own history):')}\n`);
+    const w = Math.max(...rows.map((row) => row.label.length));
+    for (const row of rows) console.log(`    ${C.dim(row.label.padEnd(w))}   ${C.b(row.value)}`);
+
+    // 3. the estimate — the cold quote from the shipped rate card (estimate.ts); the live ETA takes
+    //    over once the real build runs. Use the real pile if it exists; before it does, scale the
+    //    mirror's message count UP to estimated moments so the quote never lands under the real spend.
+    let pile = 0;
+    try {
+      pile = loadMoments().length;
+    } catch {
+      /* fresh machine: no pile yet */
+    }
+    const est = pile > 0 ? estimateBuild(pile) : estimateFromMessages(mirror!.scale.messages);
+    console.log(`\n  ${C.dim('Full profile:')}    ${C.b(estimateLine(est))}   ${C.dim('built on your own claude, nothing leaves.')}`);
+
+    // 4. the one consent. Only a real terminal can say yes; a pipe or a missing assistant points to
+    //    `update`, which is itself the consented build path.
+    const bin = findAssistant();
+    if (bin && process.stdin.isTTY && process.stdout.isTTY) {
+      console.log('');
+      let yes = false;
+      try {
+        yes = await confirmBuild(`  Build your profile now? ${C.dim('[y/N]')} `);
+      } catch {
+        yes = false; // an aborted prompt (Ctrl-D/EOF) is a no — never a crash, never a build
+      }
+      if (yes) return await update([], { consented: true }); // consent is explicit here — force the build
+    }
+    console.log(`\n  ${C.dim('No rush — the free read stays and stratless keeps it current after each session.')}`);
+    console.log(`  ${C.dim('Build the full profile any time with')} ${C.b(hint('stratless update'))}${C.dim('.')}\n`);
     return;
   }
 
@@ -539,7 +667,7 @@ async function main(): Promise<void> {
 
     ${C.dim('get started:')}  ${C.b('npx stratless init')}
 
-    ${C.b('stratless init')}       ${C.dim('keep your history safe (add --auto for background refresh)')}
+    ${C.b('stratless init')}       ${C.dim('keep your history, see a free read, build your profile')}
     ${C.b('stratless profile')}    ${C.dim('see the model of you — free, instant, never spends')}
     ${C.b('stratless update')}     ${C.dim('read what is new; rebuild + load the profile')}
     ${C.b('stratless stop')}       ${C.dim('turn it off — stop refreshing and unload the profile')}
@@ -585,4 +713,14 @@ async function main(): Promise<void> {
   process.exit(1);
 }
 
-void main();
+/** Run as a CLI only when invoked directly (`node index.js …` or the bin symlink), never when a test
+ *  imports this module for its pure helpers. Resolves symlinks so the npm-global bin still counts. */
+function invokedAsCli(): boolean {
+  try {
+    return !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false; // if we can't be sure it's the entrypoint, don't auto-run — safe for imports
+  }
+}
+
+if (invokedAsCli()) void main();

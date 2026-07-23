@@ -290,10 +290,16 @@ export function resolveBinPath(bin: string): string | undefined {
  */
 export function spawnDetached(command: string, args: string[], env?: Record<string, string>): number | undefined {
   try {
+    // Scrub STRATLESS_FLUSH from the inherited env: the cold-start consent signal must come ONLY from
+    // an explicit override here, never from whatever the ambient shell (or a borrowed claude) happens
+    // to carry. Without this, an exported STRATLESS_FLUSH=1 would turn every background hook into a
+    // paid build.
+    const base = { ...process.env };
+    delete base.STRATLESS_FLUSH;
     const child = spawn(command, args, {
       detached: true,
       stdio: 'ignore',
-      env: { ...process.env, ...env },
+      env: { ...base, ...env },
     });
     child.on('error', () => {}); // async spawn failure must never become an uncaught exception
     child.unref();

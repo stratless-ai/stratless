@@ -25,7 +25,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && chmod +x dist/index.js",
     "dev": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --test dist/*.test.js",
