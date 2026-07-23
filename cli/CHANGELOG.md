@@ -6,17 +6,47 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-07-23 — the discovery pipeline, and a profile you can read
+
+The miner is gone. In its place is a pipeline that reads your own words and shows its work: it gathers
+the recurring MOMENTS from your history, DISCOVERS the kinds of things you do from those moments (never
+from a list we wrote), ASSIGNS each moment to the kinds it fits, COUNTS them, and WRITES the profile. It
+costs a fraction of the old engine, and you can follow every step. This release also makes the read side
+whole: you can see at a glance who the profile thinks you are, how fresh it is, and how you and your
+assistant actually work together.
+
+### Added
+- **A version stamp.** `HUMAN.md` carries a `# built <UTC>` header, and `profile` and `status` show the
+  same stamp, so you can always tell whether you are reading the latest rebuild.
+- **`status`: recent builds.** A short trajectory of your last few rebuilds (when each ran, how your
+  history grew), so a stale profile can never hide.
+- **`stats`: the measured portrait of you.** Global across every conversation: how much you write, the
+  span, how often you cut the assistant off, how much of you the profile covers. It used to report the
+  assistant's code output in a single project, which was the wrong thing to measure for a tool about you.
+- **A loading cursor on every wait** (the build, the history read, the version check), so nothing ever
+  looks hung.
+- **The cold-start door.** `init` shows you a free read of yourself and an honest cost estimate, then
+  takes one yes before the one-time build. Installing turns the silent after-session refresh on.
+
 ### Changed
+- **The engine is the discovery pipeline** (moments, discover, assign, count, write), replacing the
+  miner. Categories are minted from your own pile and re-discovered when they stop fitting you.
+- **The profile refreshes on a trigger, not every turn** (a new session, a daily ceiling, or a hand-run
+  `stratless update`), so steady-state cost stays near zero.
+- **`status` spend is cleaner.** The retired mining stages collapse into one honest line instead of five.
 - **`report` folded into `profile --read`.** The human-facing prose copy is now a subfunction of
   `profile`, not its own command, and it renders LAZILY: your profile earns the build, and the read
   is written only when you ask for it, once per build, over exactly the evidence the loaded profile
   saw. It can no longer describe a different window than the profile you are running, and it never
   re-reads your history. Typing `stratless report` points you at `stratless profile --read`.
-- **`profile --now` retired.** `profile` now only *looks* — one clear rule, `profile` looks and
-  `update` loads. The old `profile --now` was a paid look that never loaded and never re-mined (it
-  re-synthesized from stale patterns), so it could show a fresh-looking profile your assistant never
-  saw. To rebuild and load, use `stratless update` (or `update --now` to force it). Typing
-  `profile --now` points you there.
+- **`profile --now` retired.** `profile` now only *looks* (one clear rule: `profile` looks, `update`
+  loads). The old `profile --now` was a paid look that never loaded and never re-mined (it re-synthesized
+  from stale patterns), so it could show a fresh-looking profile your assistant never saw. To rebuild and
+  load, use `stratless update` (or `update --now` to force it). Typing `profile --now` points you there.
+
+### Removed
+- **The miner, the auditor, the grader, and the verdict.** The whole mine-audit-grade engine (about $24
+  a build) is gone; the discovery pipeline does the same job for a fraction.
 
 ## [0.3.5] — 2026-07-18 — the worker: the work moves off your terminal
 
