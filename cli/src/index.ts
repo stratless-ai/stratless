@@ -18,7 +18,7 @@ import { init as doInit, ARCHIVE, stopRefresh, refreshArmed, type InitResult } f
 import { dailyCheck, fetchLatest, newerThan } from './notify.js';
 import { loadRecentExchanges, sessionCount, findExchange } from './exchange.js';
 import { removeProfile, humanMdPath, claudeMdPath } from './sink.js';
-import { readRenders, requestColdBuild, coldBuildRequested, type RenderMeta } from './state.js';
+import { readRenders, requestColdBuild, coldBuildRequested, readState, setFlushCadence, type FlushCadence, type RenderMeta } from './state.js';
 import { readUsage } from './usage.js';
 import { atomicWriteFileSync, CorruptStoreError } from './atomic.js';
 import { acquireLock, releaseLock, readLock, lockFilePath, lockIsStale, stopWorker, spawnDetached, resolveBinPath } from './worker.js';
@@ -368,6 +368,14 @@ function workerAlive(): boolean {
  * door already took an explicit yes, and a redirected stderr must not swallow that consent.
  */
 async function update(_rest: string[], opts: { consented?: boolean } = {}): Promise<void> {
+  // `update --daily|--weekly` records how often the worker may auto-rebuild on its own (this run
+  // rebuilds now regardless). Absent leaves the current setting; default is daily.
+  const cadence: FlushCadence | undefined = _rest.includes('--weekly') ? 'weekly' : _rest.includes('--daily') ? 'daily' : undefined;
+  if (cadence) {
+    setFlushCadence(cadence);
+    console.log(`\n  ${C.dim(`auto-rebuild set to ${C.b(cadence)} — \`${hint('stratless update')}\` still rebuilds now, anytime`)}`);
+  }
+
   const bin = findAssistant();
   if (!bin) {
     console.error(`\n  ${C.bad('stratless needs your assistant to read your history.')}`);
@@ -520,6 +528,7 @@ async function status(rest: string[] = []): Promise<void> {
 
   console.log(`\n  ${C.b('stratless status')}\n`);
   console.log(`    after-session refresh   ${refresh ? C.ok('on') : C.dim('off')}`);
+  console.log(`    auto-rebuild            ${C.dim(`${readState().flushCadence ?? 'daily'} · set with \`${hint('stratless update --daily|--weekly')}\``)}`);
   // The cold-start onramp: history collected but the paid build not yet run. Derived, never stored —
   // no categories on disk while the pile holds moments means "free read live, full build pending".
   try {
@@ -588,7 +597,7 @@ async function status(rest: string[] = []): Promise<void> {
 const COMMAND_ARGS: Record<string, { flags: string[]; positionals: number }> = {
   init: { flags: [], positionals: 0 },
   profile: { flags: [], positionals: 0 },
-  update: { flags: [], positionals: 0 },
+  update: { flags: ['--daily', '--weekly'], positionals: 0 },
   status: { flags: ['--check'], positionals: 0 },
   stats: { flags: [], positionals: 0 },
   stop: { flags: [], positionals: 0 },

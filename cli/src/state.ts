@@ -75,6 +75,9 @@ export interface SynthState {
    *  Durable on purpose: consent must survive a lock race or a killed process, never live only in one
    *  worker's env. Its presence always traces to an explicit yes, so it can never cause surprise spend. */
   buildRequestedAt?: string;
+  /** how often the worker may auto-rebuild on its own — set with `stratless update --daily|--weekly`.
+   *  Absent = daily, the default. `stratless update` always rebuilds now regardless of this. */
+  flushCadence?: FlushCadence;
 }
 
 /** Read the state. Missing or corrupt reads as never-synthesized and never throws. */
@@ -106,6 +109,7 @@ export function readState(file: string = statePath()): SynthState {
     if (typeof raw.lastDiscoverAt === 'string') out.lastDiscoverAt = raw.lastDiscoverAt;
     if (typeof raw.lastFlushAt === 'string') out.lastFlushAt = raw.lastFlushAt;
     if (typeof raw.buildRequestedAt === 'string') out.buildRequestedAt = raw.buildRequestedAt;
+    if (raw.flushCadence === 'daily' || raw.flushCadence === 'weekly') out.flushCadence = raw.flushCadence;
     return out;
   } catch {
     return {}; // fails open — one extra synthesis, never a crash
@@ -339,11 +343,32 @@ export function synthesisDue(
 // ── the flush gate (the per-turn-rebuild fix) ───────────────────────────────────────────────────
 
 /**
- * The flush ceiling — the "left-open safety net". Leftover moments below a session boundary still
- * flush once they have waited this long, so a session held open all day does not sit stale. Checked
- * at nudge time, never on a clock: there is no daemon to wake. Override with STRATLESS_FLUSH_MAX_AGE_MS.
+ * The auto-rebuild COOLDOWN — at most ONE automatic profile rebuild per this interval (default once a
+ * day). The pile collects every turn for free; this only governs how often the worker phones the
+ * assistant to score and rewrite. `stratless update` bypasses it entirely. Checked at nudge time,
+ * never on a clock: there is no daemon to wake. Override with STRATLESS_FLUSH_MAX_AGE_MS.
  */
 export const FLUSH_MAX_AGE_MS = 24 * 3600 * 1000;
+
+/** The named auto-rebuild cadences a person can choose; daily is the default. */
+export const CADENCE_MS = { daily: FLUSH_MAX_AGE_MS, weekly: 7 * FLUSH_MAX_AGE_MS } as const;
+export type FlushCadence = keyof typeof CADENCE_MS;
+
+/** The effective cooldown in ms: the STRATLESS_FLUSH_MAX_AGE_MS env override (an exact number) wins,
+ *  else the person's stored cadence, else daily. One place so the loop and the tests agree. */
+export function flushCooldownMs(
+  cadence: FlushCadence | undefined,
+  env: string | undefined = process.env.STRATLESS_FLUSH_MAX_AGE_MS,
+): number {
+  const n = Number(env);
+  if (Number.isFinite(n) && n > 0) return Math.floor(n);
+  return CADENCE_MS[cadence ?? 'daily'];
+}
+
+/** Store the person's chosen auto-rebuild cadence. Best-effort, like the rest of state. */
+export function setFlushCadence(cadence: FlushCadence, file: string = statePath()): void {
+  writeState({ ...readState(file), flushCadence: cadence }, file);
+}
 
 export interface FlushDecision {
   flush: boolean;
@@ -356,15 +381,15 @@ export interface FlushDecision {
  * them collected for later? Pure, so the whole gate is unit-testable. Collecting is free and happens
  * every nudge regardless; this decides only whether to PHONE THE ASSISTANT this run.
  *
- * Flush when: the run is MANUAL (`stratless update` typed by hand — it beats every automatic gate) ·
- * a waiting moment belongs to a session that is NOT the current one (a previous session ended, catch
- * up on its leftovers) · or anything has waited past the ceiling (a session left open all day).
- * Otherwise collect and wait, and a mid-session nudge costs nothing.
+ * Flush when: the run is MANUAL (`stratless update` typed by hand — it beats the cooldown) · or the
+ * last flush was longer ago than the cooldown (default 24h, so at most one automatic rebuild a day).
+ * Otherwise collect and wait. A finished session no longer forces a rebuild on its own: rebuilding on
+ * every session boundary was near-identical work for cents each, and the profile barely moves between
+ * sessions. Want it fresh now? `stratless update`.
  *
- * `waiting` is the un-tagged moments; the newest by `ts` names the active session. Empty and not
- * manual is never a flush (nothing to do). Never-flushed-before with anything waiting flushes once,
- * to set the baseline the ceiling measures from — and an unreadable stamp fails OPEN (flush), the
- * same posture as the rest of state.
+ * `waiting` is the un-tagged moments. Empty and not manual is never a flush (nothing to do).
+ * Never-flushed-before with anything waiting flushes once, to set the baseline the cooldown measures
+ * from — and an unreadable stamp fails OPEN (flush), the same posture as the rest of state.
  */
 export function flushDue(
   waiting: { session: string; ts: string }[],
@@ -376,16 +401,16 @@ export function flushDue(
   if (manual) return { flush: true, reason: 'you asked' };
   if (!waiting.length) return { flush: false, reason: '' };
 
-  const maxAgeMs = opts.maxAgeMs ?? FLUSH_MAX_AGE_MS;
-
-  // The active session is the most recent waiting moment's; a waiting moment from any other session
-  // is a finished session's leftover.
-  let active = waiting[0];
-  for (const w of waiting) if (Date.parse(w.ts) > Date.parse(active.ts)) active = w;
-  if (waiting.some((w) => w.session !== active.session)) return { flush: true, reason: 'a session ended' };
-
-  const ageMs = lastFlushAt ? now - Date.parse(lastFlushAt) : Infinity;
-  if (!(ageMs <= maxAgeMs)) return { flush: true, reason: lastFlushAt ? 'over the flush ceiling' : 'first flush' };
+  // A COOLDOWN, not a per-session trigger: auto-rebuild at most once per interval (default 24h). A
+  // finished session no longer flushes on its own — rebuilding on every session boundary was near-
+  // identical work for cents each, and the profile barely moves between sessions. The pile still
+  // collects every turn for free; it just gets scored and written on the daily tick, or the instant
+  // you run `stratless update`.
+  const cooldownMs = opts.maxAgeMs ?? FLUSH_MAX_AGE_MS;
+  // A missing OR unreadable stamp fails OPEN (age = Infinity → flush), never wedges the profile shut.
+  const last = lastFlushAt ? Date.parse(lastFlushAt) : NaN;
+  const ageMs = Number.isNaN(last) ? Infinity : now - last;
+  if (ageMs >= cooldownMs) return { flush: true, reason: Number.isNaN(last) ? 'first flush' : 'the daily rebuild' };
 
   return { flush: false, reason: '' };
 }

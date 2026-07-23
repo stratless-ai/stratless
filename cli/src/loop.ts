@@ -37,7 +37,7 @@ import { injectProfile, humanMdPath } from './sink.js';
 import { startRun } from './stopwatch.js';
 import { dailyCheck } from './notify.js';
 import { refreshArmed } from './init.js';
-import { readState, writeState, writeRender, SYNTH_EVERY, flushDue, FLUSH_MAX_AGE_MS, coldBuildRequested, clearColdBuildRequest } from './state.js';
+import { readState, writeState, writeRender, SYNTH_EVERY, flushDue, flushCooldownMs, coldBuildRequested, clearColdBuildRequest } from './state.js';
 import { readUsage, diffUsage, fmtTokens } from './usage.js';
 import { killActiveSession } from './stream.js';
 import { acquireLock, releaseLock, lockFilePath } from './worker.js';
@@ -97,11 +97,9 @@ const REDISCOVER_WINDOW_MS = 14 * 24 * 3600 * 1000;
 const REDISCOVER_COOLDOWN_MS = 7 * 24 * 3600 * 1000;
 const REDISCOVER_MISFIT = 0.15;
 
-/** The flush ceiling, env-overridable (STRATLESS_FLUSH_MAX_AGE_MS) like the other knobs. */
-const flushMaxAgeMs = (): number => {
-  const n = Number(process.env.STRATLESS_FLUSH_MAX_AGE_MS);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : FLUSH_MAX_AGE_MS;
-};
+/** The effective auto-rebuild cooldown: the env override wins, else the person's stored cadence
+ *  (`update --daily|--weekly`), else daily. */
+const flushMaxAgeMs = (): number => flushCooldownMs(readState().flushCadence);
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -220,8 +218,8 @@ export async function runWorker(): Promise<number> {
         }
       } else {
         // STEADY STATE: collect always (free, above); only tag + rebuild — phone the assistant — when
-        // a flush is due: a previous session left leftovers, the ceiling passed, or you ran `update`
-        // by hand. A plain mid-session nudge just leaves the new moments collected and spends nothing.
+        // a flush is due: you ran `update` by hand, or it has been past the cooldown (default once a
+        // day). Every other nudge just leaves the new moments collected and spends nothing.
         const waiting = pendingMoments();
         flush = flushDue(waiting, readState().lastFlushAt, Date.now(), manual, { maxAgeMs: flushMaxAgeMs() }).flush;
 
