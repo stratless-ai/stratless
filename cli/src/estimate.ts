@@ -16,21 +16,23 @@
  * receipt in loop.ts — quoted, never hidden.
  */
 
-/** The one paid measurement — the 0.4.0 confirmation run (2026-07-23): 5,141 moments scored for ~$14.63
- *  in ~33 min, on an archive of 5,120 submitted messages (49 categories, 4 rounds). Update all four here
- *  from a fresh confirmation run. NOTE: the earlier 07-21 prototype quoted 4,950 / $8.73 / 15 min — the
- *  real build ran ~61% costlier and ~2× longer, mostly because a large category set fattens every assign
- *  prompt. If category minting or the haiku/sonnet call pairing is tightened later, re-measure and lower. */
+/** The one paid measurement — the 0.4.0 cost-pass run (2026-07-23): 5,210 moments scored for ~$13.27,
+ *  on an archive of ~5,120 submitted messages (27 categories, 3 rounds, assign batched 400/call). Update
+ *  all four here from a fresh confirmation run. NOTE: this pass halved the assign call count (52 -> 21) but
+ *  cost fell only 23% ($17.31 -> $13.27) — 71% of every build is 1-hour cache-creation the harness writes
+ *  and never reads back, and that tax scales with pile tokens, not call count. So this is near the floor of
+ *  what batching can do; the real cut needs the direct-API / adapter path. `minutes` is carried forward —
+ *  this run's wall-clock was sleep-interrupted (not cleanly measurable), and batching did not speed it up. */
 export const REFERENCE = {
-  moments: 5141,
-  usd: 14.63,
+  moments: 5210,
+  usd: 13.27,
   minutes: 33,
   messages: 5120,
 } as const;
 
-const USD_PER_MOMENT = REFERENCE.usd / REFERENCE.moments; // ≈ $0.00176
-const MIN_PER_MOMENT = REFERENCE.minutes / REFERENCE.moments; // ≈ 0.0030 min
-/** The pile (moments) runs above submitted messages (~1.11× on the reference archive). The door can
+const USD_PER_MOMENT = REFERENCE.usd / REFERENCE.moments; // ≈ $0.00255
+const MIN_PER_MOMENT = REFERENCE.minutes / REFERENCE.moments; // ≈ 0.0063 min
+/** The pile (moments) runs above submitted messages (~1.02× on the reference archive). The door can
  *  only cheaply count messages before the pile is built, so it scales UP to an estimated moment count:
  *  quoting from messages directly would UNDER-state the per-moment spend, the one direction a cost
  *  quote must never err (underquoting our own product is the meter catching us lying). */
@@ -47,7 +49,7 @@ export interface BuildEstimate {
 
 /**
  * Quote a cold build of `pileCount` moments from the shipped rate card. Linear in the pile: assign is
- * the dominant cost and it is ~flat per moment (batched 200/call, thinking capped to 0). A negative
+ * the dominant cost and it is ~flat per moment (batched 400/call, thinking capped to 0). A negative
  * or fractional count is floored to a sane non-negative integer.
  */
 export function estimateBuild(pileCount: number): BuildEstimate {

@@ -7,11 +7,14 @@
  * The discovery CALL is validated (probe 2026-07-21: 14 act-only, correctly-scoped, one-party
  * categories, $0.78). This module is the ORCHESTRATION around it:
  *
- *   - the call is BLIND: never told which pile a moment came from (else it finds "the interrupt
- *     category"), never handed counts (assignment counts, on independent work), shown no seed.
+ *   - ROUND 0 is BLIND: never told which pile a moment came from (else it finds "the interrupt
+ *     category"), never handed counts (assignment counts, on independent work), shown no seed — an
+ *     unbiased first read.
  *   - the ROUNDS: discover a sample → assign the leftovers → discover again on what's STILL
  *     unmatched → stop when a round's new categories are too small to ship. One pass finds the loud
- *     moves; the tail only shows in the moments the first pass missed.
+ *     moves; the tail only shows in the moments the first pass missed. Later rounds ARE shown the
+ *     categories already found and told to add only genuinely NEW kinds — otherwise, since `uniquify`
+ *     dedups on exact name only, a leftover round freely re-mints round-0 patterns as synonyms.
  *   - the HARNESS is downstream: the model proposes freely, but a category only survives if the
  *     evidence holds — the 3-conversation floor and the circular guard prune the flukes.
  *
@@ -31,8 +34,9 @@ import { MIN_CONVERSATIONS } from './count.js';
 
 /** Blind sample size per discovery call — enough breadth, few enough tokens. */
 const SAMPLE_SIZE = 400;
-/** Hard cap so the rounds can never run away. */
-const MAX_ROUNDS = 4;
+/** Hard cap so the rounds can never run away. Lowered 4 → 3 (2026-07-23 cost pass): the later rounds
+ *  re-score the unmatched tail, the biggest call-count inflator, and STOP_FRACTION already ends early. */
+const MAX_ROUNDS = 3;
 /** Stop when a round's new categories absorb fewer than this share of all moments (too small to ship). */
 const STOP_FRACTION = 0.02;
 /** A category whose members are this fraction anchors (interrupt/decline) re-derives our own
@@ -102,13 +106,46 @@ const DISCOVER_SCHEMA = JSON.stringify({
   required: ['categories'],
 });
 
+/**
+ * The already-found block, injected into rounds 1+ of discovery. Round 0 stays deliberately blind
+ * (empty block) for an unbiased first read; every later round is shown the categories already minted
+ * and told to propose only genuinely NEW kinds. This is the fix for over-minting: `uniquify` dedups
+ * only by exact name, so without this a later round freely re-mints round-0 patterns under synonym
+ * names (`asks-for-recap` vs `requests-progress-recap`) — 49 categories where ~20 would do, and every
+ * assign prompt then ships all of them. Prompt-only; no extra model calls.
+ */
+export function knownCategoriesBlock(known: Candidate[]): string {
+  if (!known.length) return '';
+  const list = known.map((c) => `- ${c.name}: ${c.description}`).join('\n');
+  return `\n\nYOU HAVE ALREADY FOUND these kinds from this same person — do NOT propose any of them again, and do NOT propose a synonym or a narrower/broader restatement of one (many moments below simply have not been matched to one of these yet; that is NOT a reason to mint a near-duplicate):\n${list}\n\nPropose ONLY genuinely NEW kinds that none of the above already covers. If nothing new recurs, return an empty list.`;
+}
+
+/**
+ * From the categories minted so far and the assignments accumulated in `kinds`, the subset that WOULD
+ * SURVIVE the final prune on the evidence so far — the only ones safe to feed a later discovery round.
+ * A not-yet-proven fluke must NEVER be fed forward: the model could suppress a genuine look-alike as a
+ * "restatement" of it, and the fluke is then pruned at the end — silently losing the real category. It
+ * REUSES `pruneCategories`, so the confident-check and the final prune are the SAME predicate (the
+ * 3-conversation floor AND the circular guard) — neither half can drift from the other, and a category
+ * that will be pruned (floor OR circular) can never be fed forward. Erring toward keeping (a few
+ * surviving synonyms) beats erring toward loss.
+ */
+export function confidentCategories(born: Candidate[], kinds: Map<string, Set<string>>, moments: Moment[]): Candidate[] {
+  if (!born.length) return [];
+  const soFar: Assignment[] = moments.map((m) => ({ key: m.key, at: '', kinds: [...(kinds.get(m.key) ?? [])] }));
+  const survivors = pruneCategories(born, soFar, moments);
+  return born.filter((c) => survivors.has(c.name));
+}
+
 /** One discovery call over a sample of the pool. Thinking left ON (a reasoning task). Returns raw
- *  candidates — validation and uniquifying happen in the loop. */
-function discoverCall(bin: string, pool: Moment[]): Candidate[] {
+ *  candidates — validation and uniquifying happen in the loop. `known` is empty on round 0 (the blind
+ *  first read) and carries the already-found categories on later rounds, so the model adds only new
+ *  kinds instead of re-minting synonyms. */
+function discoverCall(bin: string, pool: Moment[], known: Candidate[] = []): Candidate[] {
   const sample = sampleFor(pool);
   const convId = new Map<string, string>();
   const conv = (s: string): string => (convId.has(s) ? convId.get(s)! : convId.set(s, `c${convId.size + 1}`).get(s)!);
-  const input = `${DISCOVER_PROMPT}\n\nMOMENTS:\n\n${sample.map((m, i) => renderBlind(m, i + 1, conv)).join('\n\n')}`;
+  const input = `${DISCOVER_PROMPT}${knownCategoriesBlock(known)}\n\nMOMENTS:\n\n${sample.map((m, i) => renderBlind(m, i + 1, conv)).join('\n\n')}`;
   const raw = runClaude(bin, input, 'sonnet', 'discover', DISCOVER_TIMEOUT_MS, DISCOVER_SCHEMA); // no thinking cap
   if (!raw) return [];
   const m = raw.match(/\{[\s\S]*\}/);
@@ -182,10 +219,15 @@ export async function discover(opts: { onProgress?: (line: string) => void; shou
 
   for (let r = 0; r < MAX_ROUNDS; r++) {
     if (opts.shouldStop?.()) break;
+    if (!unmatched.length) break; // everything is matched — a discover call over zero moments would pay for nothing
     // The category-minting call is a slow thinking pass with no sub-steps — name the wait so the tail
     // is never a silent hang.
     opts.onProgress?.(r === 0 ? 'discovering the kinds of thing you do…' : `discovering more categories · round ${r + 1}…`);
-    const candidates = uniquify(discoverCall(bin, unmatched), new Set(born.map((c) => c.name)));
+    // Feed the later rounds the categories already found — but ONLY the CONFIDENT ones (cleared the
+    // conversation floor on the evidence so far), never an unproven fluke. `born` is empty on round 0,
+    // so round 0 stays blind. uniquify still guards exact-name re-mints against ALL of born.
+    const known = confidentCategories(born, kinds, allMoments);
+    const candidates = uniquify(discoverCall(bin, unmatched, known), new Set(born.map((c) => c.name)));
     if (!candidates.length) break;
     born.push(...candidates); // in memory only — nothing is written until the build finishes (all-or-nothing)
     rounds++;
@@ -246,8 +288,15 @@ export async function discover(opts: { onProgress?: (line: string) => void; shou
 export function rediscover(unmatched: Moment[]): string[] {
   const bin = findAssistant();
   if (!bin || !unmatched.length) return [];
-  const existing = new Set(loadCategories().map((c) => c.name));
-  const candidates = uniquify(discoverCall(bin, unmatched), existing);
+  const live = loadCategories();
+  const existing = new Set(live.map((c) => c.name));
+  // Category-aware here too: show the LIVE categories so the re-mint adds only genuinely-new kinds
+  // instead of dripping synonyms back in — the same over-minting cold start now avoids. No confident-only
+  // filter is needed here: steady state never prunes/retires a category, so a fed-forward category can
+  // never be suppress-THEN-pruned (the cold-start loss mode requires a later prune, which there is none
+  // of here) — the whole live set is safe to show.
+  const known = live.map((c) => ({ name: c.name, description: c.description, scope: c.scope ?? 'person' }));
+  const candidates = uniquify(discoverCall(bin, unmatched, known), existing);
   if (!candidates.length) return [];
   appendCategories(candidates.map((c) => ({ name: c.name, description: c.description, scope: c.scope })));
   return candidates.map((c) => c.name);
