@@ -29,10 +29,10 @@ No account. No API key. No cloud. It reads transcripts already on your disk and 
 ## What it builds
 
 <p align="center">
-  <img src="assets/profile-hero.svg" alt="A sample stratless profile printed in a terminal, in sections When something has gone wrong and How they work, each line carrying its real count and a quote: insists on a plan before any code (256 times); muses openly about direction (876 times); gives a short signal to authorize the next step (727 times). Then stratless update loads it and the assistant talks to a person, not a blank." width="620">
+  <img src="assets/profile-hero.svg?v=2" alt="A sample stratless profile printed in a terminal, in sections When something has gone wrong and How they work, each line carrying its real count and a quote: insists on a plan before any code (256 times); muses openly about direction (876 times); gives a short signal to authorize the next step (727 times). Then stratless update loads it and the assistant talks to a person, not a blank." width="620">
 </p>
 
-Run `stratless profile` and it hands your assistant the picture above. Not a rules sheet you wrote. A model of a person, reasoned from your real history, and it sharpens as that history grows.
+Run `stratless profile` and it shows you the picture above, the one `stratless update` hands to your assistant. Not a rules sheet you wrote. A model of a person, reasoned from your real history, and it sharpens as that history grows.
 
 Install and the full command list live in **[cli/README.md](cli/README.md)**.
 
