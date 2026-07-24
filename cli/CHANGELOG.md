@@ -6,6 +6,21 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+## [0.4.4] · 2026-07-24 · one read, not two
+
+`stats` and `mirror` printed the same portrait, so `stats` is retired into `mirror`. They were never
+really two things: `stats` read a frozen snapshot of your history taken at `init` time, while `mirror`
+reads it live, so `mirror` already showed everything `stats` did and then some.
+
+### Changed
+- **`mirror` is now the one read.** It picked up the one thing `stats` had that it lacked: the
+  `profile captures X%` coverage line, shown once you have built a profile. When a profile exists the
+  footer points you at `stratless update` to refresh it; before that, at `stratless init` to build it.
+
+### Removed
+- **`stats` is retired.** Typing it now points you at `stratless mirror`. That is seven commands, down
+  from eight.
+
 ## [0.4.3] · 2026-07-24 · the run-it-now free read
 
 A way to see your number before you commit to anything. `stratless mirror` reads your live history and

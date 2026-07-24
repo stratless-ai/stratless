@@ -57,7 +57,6 @@ stratless profile    see the model of you, free and instant
 stratless update     read what is new, rebuild and load the profile
 stratless stop       turn it off, and unload the profile
 stratless status     its own state, and what it has cost (--check: newer version?)
-stratless stats      you and your AI, measured, instant and free
 ```
 
 `mirror` is the run-it-now, change-nothing door: it reads your live history and shows the free read,

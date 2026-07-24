@@ -63,7 +63,7 @@ export interface SynthState {
   /** the stopwatch (C8): the last runs' measured walls — every ETA and quote derives from these */
   stopwatch?: RunRecord[];
   /** the last build's scoreboard rate — the WIDER distress read (~13/100). RECORDED, never shown: the
-   *  one user-facing friction number is the mirror's course-corrections rate (`stats` + the door), so
+   *  one user-facing friction number is the mirror's course-corrections rate (`mirror` + the door), so
    *  two near-identical "per 100" figures never collide on screen. Kept for the record / later use. */
   scoreboard?: { rate: number; at: string };
   /** when discover last ran — the re-discovery cooldown reads it so a high misfit can't re-mint every run */

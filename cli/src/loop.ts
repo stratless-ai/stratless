@@ -278,7 +278,7 @@ export async function runWorker(): Promise<number> {
       if (flush) {
         // The scoreboard (the WIDER distress rate — moments the categories flag as correcting, ~13/100)
         // is RECORDED here but NEVER shown to the user. The one user-facing friction number is the
-        // mirror's course-corrections rate (`stats` + the door, ~2.5/100 — literal Escape presses).
+        // mirror's course-corrections rate (`mirror` + the init door, ~2.5/100 — literal Escape presses).
         // Showing both would put two near-identical "corrections per 100" figures on screen, 5x apart —
         // the exact confusion the mirror's KPI was split out to avoid. Kept in state for the record.
         const board = scoreboard(joinLabelled(loadMoments(), loadAssignments()), cats);

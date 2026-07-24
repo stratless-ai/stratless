@@ -115,4 +115,12 @@ test('`stratless help` still lists every verb, including mirror', () => {
   const out = run(home, 'help');
   assert.match(out, /stratless mirror/, 'mirror is in the help');
   assert.match(out, /stratless init/, 'and the rest of the surface is still reachable');
+  assert.doesNotMatch(out, /stratless stats/, 'stats is retired — no longer listed');
+});
+
+test('the retired `stats` redirects to mirror, it does not error', () => {
+  const home = makeHome('stats-redirect', { withLogs: true });
+  const out = run(home, 'stats'); // execFileSync throws on non-zero exit; reaching here proves exit 0
+  assert.match(out, /stats is now `?mirror`?/i, 'names the survivor');
+  assert.match(out, /stratless mirror/, 'points at the command to run');
 });

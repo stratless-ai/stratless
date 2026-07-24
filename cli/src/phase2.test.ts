@@ -300,7 +300,7 @@ test('strict args: unknown flags refuse loudly with a did-you-mean; clean args s
   assert.equal(typo.code, 1, 'the typo refuses');
   assert.ok(typo.out.includes('unknown flag'), 'and says why');
   assert.ok(typo.out.includes('--check'), 'with the did-you-mean');
-  const stray = run(['stats', 'extra']);
+  const stray = run(['mirror', 'extra']);
   assert.equal(stray.code, 1, 'a stray argument refuses too');
   assert.ok(stray.out.includes('unexpected argument'));
   const clean = run(['--version']);

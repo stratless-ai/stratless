@@ -24,12 +24,12 @@ That does two things, and the first one is urgent:
 ## The commands
 
 ```
+stratless mirror     a free read of you and your AI, changes nothing
 stratless init       keep your history, and build your profile
 stratless profile    see the model of you, free and instant
 stratless update     read what is new, rebuild and load it
 stratless stop       turn it off, and unload the profile
 stratless status     its own state, and what it has cost
-stratless stats      you and your AI, measured, free
 ```
 
 Full reference on the [Commands](/docs/commands) page.

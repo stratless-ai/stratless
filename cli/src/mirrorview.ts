@@ -64,8 +64,8 @@ function topToolRow(m: Mirror): MirrorRow | undefined {
 /**
  * A few honest rows for the free read. Empty when there is no history yet (no submitted messages) —
  * the caller shows the "talk to your assistant first" path instead. Any row whose data is missing is
- * skipped rather than shown as a zero. `full` adds the span and writing fingerprint for the `stats`
- * dashboard; the door leaves them off to stay a tight teaser.
+ * skipped rather than shown as a zero. `full` adds the span and writing fingerprint for the `mirror`
+ * read; the init door leaves them off to stay a tight teaser.
  */
 export function renderMirror(m: Mirror, opts: { full?: boolean } = {}): MirrorRow[] {
   const messages = m.scale.messages;
@@ -78,7 +78,7 @@ export function renderMirror(m: Mirror, opts: { full?: boolean } = {}): MirrorRo
     value: `${messages.toLocaleString()} messages · ${m.scale.activeDays} active day${m.scale.activeDays === 1 ? '' : 's'}`,
   });
 
-  // FULL (the `stats` dashboard, not the door's tight teaser): the span and the writing fingerprint.
+  // FULL (the `mirror` read, not the init door's tight teaser): the span and the writing fingerprint.
   // Both are already computed for the free read — the door just keeps them tucked away.
   if (opts.full) {
     if (m.scale.firstMessage && m.scale.lastMessage) {
