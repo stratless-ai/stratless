@@ -51,6 +51,7 @@ One note first: `npx` runs stratless without installing it, so after `npx stratl
 prefixing every command below with `npx `. Both work.
 
 ```
+stratless mirror     a free read of you and your AI, changes nothing (--share for a card)
 stratless init       keep your history, and build your profile
 stratless profile    see the model of you, free and instant
 stratless update     read what is new, rebuild and load the profile
@@ -59,7 +60,9 @@ stratless status     its own state, and what it has cost (--check: newer version
 stratless stats      you and your AI, measured, instant and free
 ```
 
-`stratless --version` (or `-v`) prints the installed version.
+`mirror` is the run-it-now, change-nothing door: it reads your live history and shows the free read,
+with no setup and no archive, so bare `npx stratless` (no verb) runs it too. `stratless --version`
+(or `-v`) prints the installed version.
 
 `init` is the one thing you can't do later. Claude Code **deletes your transcripts after 30 days**,
 per file, so your history rots from the back even in a project you use every day. `init` stops that
