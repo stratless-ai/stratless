@@ -293,7 +293,7 @@ export async function runWorker(): Promise<number> {
             injectProfile(profile.text, undefined, undefined, builtAt); // writes ~/.claude/HUMAN.md AND points CLAUDE.md at it — the load
             writeRender('profile', { builtAt, sessions: profile.meta.sessions, exchanges: profile.meta.moments, categories: loadCategories().length });
             summary.push(
-              `profile written and loaded · ${profile.meta.signals} distress signal${profile.meta.signals === 1 ? '' : 's'} + ${profile.meta.working} working-style trait${profile.meta.working === 1 ? '' : 's'}${profile.meta.shorthand ? ` + ${profile.meta.shorthand} shorthand handles` : ''}`,
+              `profile written and loaded · ${profile.meta.frame} to offer + ${profile.meta.judge} to catch + ${profile.meta.register} register${profile.meta.shorthand ? ` + ${profile.meta.shorthand} shorthand handles` : ''}`,
             );
           } else {
             summary.push('profile not rebuilt — not enough clear evidence yet');

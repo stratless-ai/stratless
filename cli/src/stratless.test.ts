@@ -666,11 +666,11 @@ test('runStreamBatch: a dying session hands the remainder to the fallback ladder
 
 // ── the grader (0.3.2): every pattern is a dated prediction; misses are the best signal ────────
 
-test('HUMAN.md carries the person-layer schema marker (0.3.1: the sectioned protocol)', () => {
+test('HUMAN.md carries the person-layer schema marker (0.5.0: the conductor brief)', () => {
   const humanMd = join(dir, 'HUMAN-schema.md');
   const claudeMd = join(dir, 'CLAUDE-schema.md');
   injectProfile('WHAT THEY KNOW\nbackend architecture', humanMd, claudeMd);
-  assert.ok(readFileSync(humanMd, 'utf8').includes('<!-- humanmd/v1 -->'), 'the protocol version is declared in the artifact');
+  assert.ok(readFileSync(humanMd, 'utf8').includes('<!-- humanmd/v2 -->'), 'the protocol version is declared in the artifact');
 });
 
 // ── the promise layer: a wrong frequency is a lie wearing precision ───────────────────────────

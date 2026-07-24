@@ -14,3 +14,7 @@ package-lock.json
 
 # session tooling artifacts (exploration logs, local settings) — not repo content
 /.claude/
+
+
+# env files (can opt-in for committing if needed)
+.env*

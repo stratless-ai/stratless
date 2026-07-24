@@ -67,17 +67,38 @@ test('pruneCategories: retires under the conversation floor and the circular gua
   assert.ok(!survivors.has('circular'), 'all-anchor members are circular');
 });
 
-// A fake `claude` that answers BOTH stages by inspecting the prompt: the discovery call gets a
-// category, the assign calls get every shown moment tagged with it.
+test('pruneCategories: exempt names skip ONLY the circular guard, never the floor (the judgment catches)', () => {
+  seq = 0;
+  const [m1, m2, m3, m4] = [mo('s1', 'interrupt'), mo('s2', 'interrupt'), mo('s3', 'interrupt'), mo('s4', 'interrupt')];
+  const moments = [m1, m2, m3, m4];
+  const records: Assignment[] = [
+    asn(m1.key, ['catch']), asn(m2.key, ['catch']), asn(m3.key, ['catch']), // 3 anchor conversations
+    asn(m4.key, ['catch-thin']), // only 1 conversation
+  ];
+  const born = [cand('catch'), cand('catch-thin')];
+  // Not exempt: a catch is all-anchors by nature, so the circular guard would wrongly delete it.
+  assert.ok(!pruneCategories(born, records, moments).has('catch'), 'not exempt: the all-anchor catch is pruned as circular');
+  // Exempt: it survives (it still cleared the conversation floor); the floor is NEVER bypassed.
+  const survivors = pruneCategories(born, records, moments, new Set(['catch', 'catch-thin']));
+  assert.ok(survivors.has('catch'), 'exempt: the all-anchor catch survives the circular guard');
+  assert.ok(!survivors.has('catch-thin'), 'exemption never bypasses the 3-conversation floor');
+});
+
+// A fake `claude` that answers ALL THREE stages by inspecting the prompt: the behavioural discovery
+// call gets a behaviour, the judgment-lens call gets a catch, and every assign call tags each shown
+// moment with whatever kind(s) its fixed list names (so the catch gets scored across the whole pile).
 const FAKE = `#!/usr/bin/env node
 const args = process.argv.slice(2);
 const input = args.find((a) => a.includes('MOMENTS:')) || '';
 let result;
 if (input.includes('recurring KINDS')) {
   result = JSON.stringify({ categories: [{ name: 'planning', description: 'wants a plan first', scope: 'person' }] });
+} else if (input.includes('THIS PERSON JUDGES')) {
+  result = JSON.stringify({ categories: [{ name: 'rejects-patch-jobs', description: 'refuses quick fixes that leave debt', scope: 'person' }] });
 } else {
+  const kinds = [...input.matchAll(/(?:^|\\n)- ([a-z-]+):/g)].map((m) => m[1]);
   const ids = [...input.matchAll(/(?:^|\\n)#(\\d+)/g)].map((m) => Number(m[1]));
-  result = JSON.stringify({ assignments: ids.map((id) => ({ id, kinds: ['planning'] })) });
+  result = JSON.stringify({ assignments: ids.map((id) => ({ id, kinds })) });
 }
 process.stdout.write(JSON.stringify({ result, is_error: false, total_cost_usd: 0.001, usage: { input_tokens: 1, output_tokens: 1 } }));
 `;
@@ -105,12 +126,13 @@ test('discover: cold start mints a category and writes every moment against it, 
   Object.assign(process.env, { STRATLESS_MOMENTS: m, STRATLESS_CATEGORIES: c, STRATLESS_ASSIGNMENTS: a, STRATLESS_CLAUDE_BIN: bin, STRATLESS_USAGE: join(dir, 'u.json') });
 
   const dr = await discover();
-  assert.equal(dr.categories, 1, 'planning survived (6 conversations, ordinary)');
-  assert.ok(dr.rounds >= 1);
+  assert.equal(dr.categories, 2, 'planning (behavioural) + rejects-patch-jobs (judgment pass) both survived');
+  assert.ok(dr.rounds >= 2, 'a behavioural round plus the judgment pass');
   assert.equal(dr.assigned, 6);
 
-  assert.deepEqual(loadCategories(c).map((x) => x.name), ['planning']);
+  assert.deepEqual(loadCategories(c).map((x) => x.name).sort(), ['planning', 'rejects-patch-jobs']);
   const rows = loadAssignments(a);
   assert.equal(rows.length, 6, 'every moment persisted exactly once');
-  assert.ok(rows.every((r) => r.kinds.includes('planning')), 'all assigned to planning');
+  assert.ok(rows.every((r) => r.kinds.includes('planning')), 'all assigned to the behaviour');
+  assert.ok(rows.every((r) => r.kinds.includes('rejects-patch-jobs')), 'the judgment pass scored the catch across the whole pile');
 });
