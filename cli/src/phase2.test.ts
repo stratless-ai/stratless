@@ -524,7 +524,7 @@ test('profile: reads HUMAN.md (the pipeline output), not the dead profile.txt, h
   const human = join(dir, 'profile-HUMAN.md');
   writeFileSync(
     human,
-    '# Who you are working with\n# (managed by stratless — do not edit)\n<!-- humanmd/v1 -->\n\nDerived from 12 conversations.\n\n## How they work\n\n**States their reasoning** — 99 times\n',
+    '# Who you are working with\n# (managed by stratless — do not edit)\n<!-- humanmd/v2 -->\n\nDerived from 12 conversations.\n\n## What to catch for me\n\n**Catch unverified numbers** — 99 times\n',
   );
   const env = {
     ...process.env,
