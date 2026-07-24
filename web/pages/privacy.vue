@@ -2,8 +2,6 @@
 import { legal } from '~/lib/legal'
 import { useSeo } from '~/lib/seo'
 
-// computed at build from cli/src (see nuxt.config.ts) — the trust claim must never go stale by hand
-const cliLines = useRuntimeConfig().public.cliLines
 useSeo({
   title: 'Privacy',
   description:
@@ -35,8 +33,8 @@ useSeo({
 
         <h2>What it writes, and where</h2>
         <p>
-          Everything stratless produces is a plain text file on your machine: the per-exchange
-          judgments and your profile under <code>~/.stratless</code>, the canonical
+          Everything stratless produces is a plain text file on your machine: the moments and
+          scores it derives, and your profile, under <code>~/.stratless</code>, the canonical
           <code>HUMAN.md</code> at <code>~/.claude/HUMAN.md</code>, and a clearly marked block in
           your <code>CLAUDE.md</code> that points at it. All of it is yours to read, edit, or
           delete. <code>stratless stop</code> unloads the profile in one command.
@@ -44,19 +42,19 @@ useSeo({
 
         <h2>Network calls, the tiered truth</h2>
         <p>
-          To judge your history and write your profile, stratless borrows
+          To read your history and write your profile, stratless borrows
           <strong>the coding assistant you already have installed</strong>. It shells out to it
           (<code>claude -p</code>), on your own subscription or key, and that request goes to your
           assistant's provider exactly as it does when you use it normally. That is the whole
           default story: your own claude, doing the reading.
         </p>
         <p>
-          Two things can add one more call, both by your hand:
-          <code>stratless status --check</code> asks the npm registry whether a newer version
-          exists, when you run it, on screen. And turning on <code>--auto</code> — explicit consent
-          to background activity — adds a once-daily version check to npm during the background
-          refresh, so you hear about fixes; <code>init --auto</code> tells you this at the moment
-          you arm it. Plain-<code>init</code> users get nothing ambient, ever.
+          Two things can add one more call. <code>stratless status --check</code> asks the npm
+          registry whether a newer version exists, when you run it, on screen. And the after-session
+          refresh, which <code>init</code> turns on, is itself your consent to background activity:
+          while it is on, a cached once-daily version check rides along during a refresh, so you
+          hear about fixes. Run <code>stratless stop</code> and the machine goes fully quiet, with
+          nothing ambient at all.
         </p>
         <p>
           <strong>None of it touches us.</strong> We ship no model, hold no key, and run no proxy;
@@ -68,10 +66,10 @@ useSeo({
         <p>
           <strong>Nothing.</strong> No telemetry, no analytics, no crash reports, no usage counters,
           no phone-home of any kind. This is not a promise we're asking you to take on trust:
-          <a :href="legal.source" target="_blank" rel="noopener">the source is public and it is
-          about {{ cliLines }} lines</a>. You can read the whole thing in an afternoon and confirm
-          the only network code in it is the opt-in version check described above — one file, one
-          URL, no payload.
+          <a :href="legal.source" target="_blank" rel="noopener">the source is public</a>. Read it
+          and confirm the only calls it makes are the ones above: your own <code>claude</code>
+          reading your history, and the version check. No payload, no telemetry, nowhere for your
+          data to go.
         </p>
 
         <h2>This website</h2>

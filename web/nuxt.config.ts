@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 
 const TITLE = 'stratless · teach your AI coding assistant who you are'
 const DESC =
@@ -14,29 +14,11 @@ const VERSION = (
   }
 ).version
 
-// The line-count trust claim ("~N lines you can audit in an afternoon") is COMPUTED at build,
-// never hand-typed — it went stale twice (900, then 1,500 while the tool was 1,858). Counts
-// cli/src/*.ts minus tests, rounded UP to the next hundred so the claim stays true as code grows.
-// Pages read it from runtimeConfig; the docs markdown carries a %CLI_LINES% token that lib/docs.ts
-// substitutes via the __CLI_LINES__ define below.
-const CLI_LINES = (() => {
-  const dir = new globalThis.URL('../cli/src/', import.meta.url)
-  let n = 0
-  for (const f of readdirSync(dir)) {
-    if (!f.endsWith('.ts') || f.endsWith('.test.ts')) continue
-    n += readFileSync(new globalThis.URL(f, dir), 'utf8').split('\n').length
-  }
-  return (Math.ceil(n / 100) * 100).toLocaleString('en-US')
-})()
-
 export default defineNuxtConfig({
   runtimeConfig: {
-    public: { version: VERSION, cliLines: CLI_LINES },
+    public: { version: VERSION },
   },
-  vite: {
-    define: { __CLI_LINES__: JSON.stringify(CLI_LINES) },
-  },
-  // No modules. Not one. The docs renderer is 83 lines of markdown-it in lib/docs.ts, and the
+  // No modules. Not one. The docs renderer is markdown-it in lib/docs.ts, and the
   // language switcher is CSS-only. Every dependency here is a dependency you have to maintain
   // alone, forever, and this site is maintained by a solo builder with a CLI to ship.
   ssr: true,

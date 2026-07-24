@@ -12,7 +12,7 @@
  */
 export const SITE = 'https://stratless.com'
 
-export function useSeo(opts: { title: string; description: string; path: string }) {
+export function useSeo(opts: { title: string; description: string; path: string; noindex?: boolean }) {
   // Trailing slash: Pages serves the directory form, so canonicalise to it (except the root).
   // The leading slash is FORCED — a caller passing 'terms' instead of '/terms' would otherwise
   // silently produce `https://stratless.comterms/`, which is a valid string and a broken URL.
@@ -20,16 +20,24 @@ export function useSeo(opts: { title: string; description: string; path: string 
   const path = raw === '/' ? '/' : `${raw.replace(/\/+$/, '')}/`
   const url = `${SITE}${path}`
 
-  useHead({
-    title: `${opts.title} — stratless`,
-    link: [{ rel: 'canonical', href: url }],
-    meta: [
-      { name: 'description', content: opts.description },
-      { property: 'og:title', content: `${opts.title} — stratless` }, // branded, like <title>
-      { property: 'og:description', content: opts.description },
-      { property: 'og:url', content: url },
-      { name: 'twitter:title', content: `${opts.title} — stratless` },
-      { name: 'twitter:description', content: opts.description },
-    ],
-  })
+  const meta = [
+    { name: 'description', content: opts.description },
+    { property: 'og:title', content: `${opts.title} · stratless` }, // branded, like <title>
+    { property: 'og:description', content: opts.description },
+    { name: 'twitter:title', content: `${opts.title} · stratless` },
+    { name: 'twitter:description', content: opts.description },
+  ]
+  const link: { rel: string; href: string }[] = []
+
+  if (opts.noindex) {
+    // The 404 body is copied over `404.html` and served for EVERY unknown URL, and its own route
+    // (`/not-found`) is deleted from the build. So it has no single canonical: mark it noindex and
+    // emit NO canonical / og:url — the old build pointed both at `/not-found/`, a URL that 404s.
+    meta.push({ name: 'robots', content: 'noindex' })
+  } else {
+    link.push({ rel: 'canonical', href: url })
+    meta.push({ property: 'og:url', content: url })
+  }
+
+  useHead({ title: `${opts.title} · stratless`, link, meta })
 }

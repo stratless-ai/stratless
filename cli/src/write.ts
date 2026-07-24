@@ -97,15 +97,16 @@ export function pickQuotes(bin: string, work: { name: string; description: strin
 Give two things per behaviour.
 
 QUOTE: pick the ONE quote (by number) that most clearly SHOWS the behaviour to someone who has never
-met this person — the quote you could read cold and see the behaviour happening.
+met this person: the quote you could read cold and see the behaviour happening.
 - Prefer a quote that demonstrates the behaviour over one that merely mentions the same topic.
 - Prefer short and unmistakable over long and meandering.
 - Avoid quotes that name a specific product, company or file, if a clearer alternative exists.
 - Answer 0 if none of them shows it.
 
-SIGNAL: a plain decode, SIX WORDS OR FEWER, of what the person is ASKING FOR when they do this — what
+SIGNAL: a plain decode, SIX WORDS OR FEWER, of what the person is ASKING FOR when they do this: what
 it MEANS, never what the assistant should do. E.g. "wants a plan before building", "wants it proven,
-not asserted", "thinking out loud, not deciding". Never an instruction ("do X").
+not asserted", "thinking out loud, not deciding". Never an instruction ("do X"). Use commas or colons,
+never an em dash.
 
 Reply with JSON only:
 {"picks":[{"behaviour":"<exact name>","quote":<number or 0>,"signal":"<six words or fewer>"}]}
@@ -172,7 +173,7 @@ export function assemble(
     '',
   ];
   if (decodeLines.length) {
-    head.push('## In the moment', '', 'Their shorthand — recognise these live; the detail is in the sections below.', '', ...decodeLines, '');
+    head.push('## In the moment', '', 'Their shorthand. Recognise these live; the detail is in the sections below.', '', ...decodeLines, '');
   }
   head.push(
     '## When something has gone wrong',
@@ -183,7 +184,7 @@ export function assemble(
   let text = head.join('\n');
   for (const e of repair) text += block(e.stat, e.quote);
 
-  text += ['## How they work', '', 'This is not friction and none of it should go away. It is how this person thinks and directs work — expect it, and read it correctly rather than trying to reduce it.', '', ''].join('\n');
+  text += ['## How they work', '', 'This is not friction and none of it should go away. It is how this person thinks and directs work. Expect it, and read it correctly rather than trying to reduce it.', '', ''].join('\n');
   let shipped = 0;
   for (const e of working) {
     if (text.length + block(e.stat, e.quote).length > CHAR_BUDGET) break;

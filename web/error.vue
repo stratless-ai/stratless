@@ -25,7 +25,7 @@ useHead({ title: `${props.error?.statusCode ?? 'Error'} — stratless` })
 <template>
   <div class="site">
     <SiteHeader />
-    <main id="main">
+    <main id="main" tabindex="-1">
       <NotFound :code="error?.statusCode ?? 500" :message="error?.message" />
     </main>
     <SiteFooter />

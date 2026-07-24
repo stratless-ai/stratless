@@ -9,11 +9,16 @@ const route = useRoute()
          error.vue — see the note there for why the copy had to go -->
     <SiteHeader />
 
-    <main id="main">
+    <main id="main" tabindex="-1">
       <slot />
     </main>
 
-    <SiteFooter v-if="route.meta.footer !== false" />
+    <!-- Footer lives OUTSIDE <main> so it is a real `contentinfo` landmark. The homepage uses the
+         sea variant (SiteFooter inside the SeigaihaField wave band); other pages get the plain one. -->
+    <SeigaihaField v-if="route.meta.seaFooter">
+      <SiteFooter bare />
+    </SeigaihaField>
+    <SiteFooter v-else-if="route.meta.footer !== false" />
   </div>
 </template>
 

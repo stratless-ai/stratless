@@ -15,7 +15,7 @@ import { useSeo } from '~/lib/seo'
  * Hence the plain name.
  * The URL /_not-found does not exist in the shipped site; the hook removes it.
  */
-useSeo({ title: 'Not found', description: 'That page does not exist.', path: '/not-found' })
+useSeo({ title: 'Not found', description: 'That page does not exist.', path: '/not-found', noindex: true })
 </script>
 
 <template>
