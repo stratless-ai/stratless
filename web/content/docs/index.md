@@ -12,6 +12,14 @@ It runs on your machine. There is no account, no API key, no cloud, and no serve
 
 ## Install
 
+Try it first. No account, no setup, nothing touched:
+
+```
+npx stratless
+```
+
+A free read of you and your AI, computed from the history already on your disk. It changes nothing and keeps nothing. When you want to keep it:
+
 ```
 npx stratless init
 ```

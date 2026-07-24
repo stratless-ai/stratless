@@ -1,5 +1,7 @@
 # stratless-web
 
+**Made for your AI. Meant for you.**
+
 **stratless.com** — the front door.
 
 The site for [stratless](https://github.com/stratless-ai/stratless), a local tool that reads your

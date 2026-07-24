@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs'
 
-const TITLE = 'stratless · teach your AI coding assistant who you are'
+const TITLE = 'stratless · Made for your AI. Meant for you.'
 const DESC =
-  'stratless reads your coding-assistant sessions and writes a HUMAN.md your AI loads every session, so it stops talking over your head. Runs locally. Nothing leaves your machine.'
+  'Made for your AI. Meant for you. stratless reads your coding-assistant sessions and writes a HUMAN.md your AI loads every session, so it stops talking over your head. Runs locally. Nothing leaves your machine.'
 const URL = 'https://stratless.com'
 
 // The version shown on the site is the CLI's real version, read from cli/package.json at BUILD so it
