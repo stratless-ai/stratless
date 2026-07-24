@@ -60,6 +60,15 @@ test('assemble: three sections, count-ordered, project held back, no-quote dropp
   assert.ok(t.includes('**offer a plan first**\n300 times across 5 conversations\n> lets make a plan'), 'block format');
 });
 
+test('assemble: a multi-line quote collapses onto one blockquote line', () => {
+  // Most stored replies carry newlines; a picked multi-line quote must not break out of the `> ` block.
+  const stats: CategoryStat[] = [stat({ name: 'plan', lift: 1, count: 200, scope: 'person' })];
+  const voiced = new Map<string, Voiced>([['plan', v('frame', 'open the file\n\nand show me', 'offer a plan first')]]);
+  const t = assemble(stats, voiced, prov)!.text;
+  assert.ok(t.includes('> open the file and show me'), 'newlines collapse into a single blockquote line');
+  assert.ok(!t.includes('\nand show me'), 'no unprefixed line escapes the blockquote');
+});
+
 test('assemble: rising/fading and bursts show in the weight line', () => {
   const stats = [
     stat({ name: 'rise', lift: 1, count: 10, scope: 'person', direction: 'rising' }),

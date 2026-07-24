@@ -173,7 +173,10 @@ function block(claim: string, stat: CategoryStat, quote: string): string {
   if (stat.burst) bits.push('comes in bursts');
   const note = bits.length ? ` · ${bits.join(' · ')}` : '';
   const c = claim.replace(/\s+/g, ' ').trim();
-  return `**${c}**\n${stat.count} times across ${stat.sessions} conversations${note}\n> ${quote}\n\n`;
+  // Collapse the quote to one line, exactly as the claim above is. A raw reply carries newlines (most
+  // do), and only its first line would get the `> ` prefix — the rest would break out of the blockquote.
+  const q = quote.replace(/\s+/g, ' ').trim();
+  return `**${c}**\n${stat.count} times across ${stat.sessions} conversations${note}\n> ${q}\n\n`;
 }
 
 interface Entry {
