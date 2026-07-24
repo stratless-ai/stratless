@@ -12,7 +12,7 @@ const version = useRuntimeConfig().public.version
   <footer class="footer" :class="{ bare }">
     <div class="container footer-inner">
       <Logo :height="24" />
-      <nav class="footer-links">
+      <nav class="footer-links" aria-label="Footer">
         <NuxtLink to="/docs">Docs</NuxtLink>
         <a href="https://github.com/stratless-ai/stratless" target="_blank" rel="noopener">GitHub</a>
         <NuxtLink to="/privacy">Privacy</NuxtLink>
@@ -58,7 +58,6 @@ const version = useRuntimeConfig().public.version
 /* resting-clean, underline on hover, 0.9rem/500 — mirrors the header nav so the two read as one system */
 .footer-links a {
   text-decoration: none;
-  font-weight: 500;
 }
 .footer-links a:hover {
   text-decoration: underline;

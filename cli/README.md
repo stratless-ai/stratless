@@ -1,7 +1,6 @@
 # stratless
 
-**stratless builds your AI a living model of who you are (what you know, how you think, what
-you're building), so it stops making you feel stupid.**
+**stratless builds your AI a living model of who you are, so it stops making you feel stupid.**
 
 Your coding assistant has no idea who it's talking to. So it only has two registers: silence, or a
 wall of jargon. stratless gives it the missing third thing, a picture of *you*, read from the
@@ -21,29 +20,29 @@ You need three things, and you probably have all of them: **Claude Code** instal
 
 ## What it builds
 
-Run `stratless profile` and it shows you the model it has built, the one `stratless update` hands
-to your assistant:
+Run `stratless profile` and it shows you the model it has built, the one `stratless update` hands to
+your assistant. Every line is observed and carries the count behind it:
 
 ```
-WHO YOU'RE WORKING WITH                        (stratless · read from your own history)
+Who you are working with              (stratless · read from your own history)
 
-You're talking to a solo founder building stratless, a human-profiler: a CLI
-that reads your coding-assistant transcripts, judges them, and writes a
-HUMAN.md the assistant loads at session start to know who it is talking to.
+## When something has gone wrong
 
-They are not fluent in the tech, and the tech is never what stalls them.
-Altitude is. Concrete, nameable architecture lands; abstract strategy
-framings get redirected. On implementation they give short orders, "go,"
-"ok," "commit," and rely on you for the how.
+Insists on a plan, and plan mode, before any code gets written.
+256 times · "wait. are you in plan mode?"
 
-Failure signal: go abstract or long and they don't argue, they redirect: to
-a concrete task, to "just summarize the blockers," to correcting one fact
-and moving on. That pivot means you left ground level. Drop the frame, give
-the next move. And they gate real decisions on verification.
+## How they work
+
+Muses openly about direction and invites free-form discussion
+rather than a single pointed question.
+876 times · "fast to sell and painkiller?"
+
+Gives a short signal (go, commit it) to authorize the next step.
+727 times · "Go with A, fix the counts"
 ```
 
-Not a rules sheet you wrote. A model of a person, reasoned from your real history, and it sharpens
-as that history grows.
+Not a rules sheet you wrote. A model of a person, derived from your real history and nothing you
+declared, and it sharpens as that history grows.
 
 ## The commands
 
@@ -52,14 +51,12 @@ One note first: `npx` runs stratless without installing it, so after `npx stratl
 prefixing every command below with `npx `. Both work.
 
 ```
-stratless init       turn it on: keep your history, and start reading it
-stratless profile    see the model of you — free, instant (--read: your copy)
-stratless update     judge what's new; rebuild + load the profile
-stratless patterns   the evidence behind your profile: every claim, numbered, with receipts
-stratless receipt    prove a claim: the raw exchanges behind it (receipt 3, or a hash prefix)
-stratless stop       turn it off: stop refreshing and unload the profile
-stratless status     stratless's own state and what it has cost (--check: newer version?)
-stratless stats      raw counts about your assistant in a project, instant and free
+stratless init       keep your history, and build your profile
+stratless profile    see the model of you, free and instant
+stratless update     read what is new, rebuild and load the profile
+stratless stop       turn it off, and unload the profile
+stratless status     its own state, and what it has cost (--check: newer version?)
+stratless stats      you and your AI, measured, instant and free
 ```
 
 `stratless --version` (or `-v`) prints the installed version.
@@ -73,33 +70,29 @@ and copies everything somewhere safe. Everything else reads from there.
 No model of ours. No server. No training. No separate bill.
 
 1. **Read.** Every session Claude Code has is already on your disk, in `~/.claude/projects`.
-   stratless walks each one into `(what the assistant said → how you reacted)` pairs.
-2. **Judge.** It hands each pair to the `claude` you already have (`claude -p`, on your own plan)
-   and asks one question: *what did you actually do here?* It records the action and never a grade
-   on it. Pushing back, redirecting and cutting an answer short are things you **do**, not evidence
-   you missed something. Anything the code can establish for itself (which project, how long you
-   paused, whether you interrupted, what the assistant ran) is written down as fact rather than
-   guessed at by a model. One line back, **cached**, so each exchange is read once.
-3. **Mine + synthesize.** The judgments are mined into named patterns, each with a real count and
-   **receipts**: the exchanges that witnessed it. No receipt, no claim. A separate pass audits the
-   evidence, and the profile is written from what survives; a number the evidence can't back
-   refuses the whole build. `stratless patterns` shows you all of it.
-4. **Load.** `stratless update` writes the profile to `~/.claude/HUMAN.md` and points your assistant's
-   own config at it, so your next session starts already knowing you. Run it again any time to refresh,
-   or `stratless init --auto` to have it refresh automatically after each session. `stratless stop`
-   turns that off and unloads it.
+   stratless walks each one into moments: what you typed, and what the assistant was doing.
+2. **Discover.** It reads your pile and finds the recurring kinds of thing you actually do, from
+   your own history and nothing it shipped. **Derived, not pre-matched**: there is no category list
+   to sort you into, because a list we wrote would be our model of a generic person, not a reading
+   of you.
+3. **Count.** Each moment is checked against those columns and counted: how often, over what span,
+   rising or fading. Every number is counted by code, so none of it in your profile is a guess.
+4. **Load.** `stratless update` writes the profile to `~/.claude/HUMAN.md` and points your
+   assistant's config at it, so your next session starts already knowing you. The after-session
+   refresh keeps it current; `stratless stop` turns that off and unloads it.
 
-It spends your own plan's tokens, never a separate bill (`stratless status` shows the running total).
-The first run reads a recent window of your history; after that it only ever reads what's new. If the assistant
-can't answer honestly, it says nothing: a confidently-wrong profile is the one failure that would end
-this, so silence always beats a guess.
+It spends your own plan's tokens, never a separate bill (`stratless status` shows the running
+total). It reads all of your history, deduped and cached, so the first build is the one real cost
+and every update after only pays for what is new. If the assistant can't answer honestly, it writes
+nothing: a confidently-wrong profile is the one failure that would end this, so silence always beats
+a guess.
 
 ## Privacy
 
-Everything runs on your machine. **Your conversations, the judgments, and your profile never leave
-it**, not for telemetry, not for "aggregate insight," not ever. There is no server, no account,
-nothing to sign up for. The only network call is to your own assistant, on your own plan, the same
-place your code was already going.
+Everything runs on your machine. **Your conversations, the moments stratless derives, and your
+profile never leave it**, not for telemetry, not for "aggregate insight," not ever. There is no
+server, no account, nothing to sign up for. The only network call is to your own assistant, on your
+own plan, the same place your code was already going.
 
 The profile is a plain text file. It's yours: load it into any other assistant, read it, or delete
 it.

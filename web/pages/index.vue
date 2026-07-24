@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { samples } from '~/lib/samples'
 
-// The footer renders inside the SeigaihaField band below (the sea footer) — the layout stands down.
-definePageMeta({ footer: false })
+// The sea footer (SiteFooter inside the SeigaihaField wave band) is rendered by the LAYOUT, after
+// </main>, so it sits OUTSIDE the main landmark. A <footer> nested inside <main> is not a
+// `contentinfo` landmark, so on a page that put it there the footer landmark silently vanished.
+// `seaFooter` tells the layout to use the wave variant here instead of the plain footer.
+definePageMeta({ footer: false, seaFooter: true })
 
 const GITHUB = 'https://github.com/stratless-ai/stratless'
 
@@ -10,9 +13,8 @@ const GITHUB = 'https://github.com/stratless-ai/stratless'
 const openFile = ref<string | null>(null)
 const activeSample = computed(() => (openFile.value ? (samples[openFile.value] ?? null) : null))
 
-// The CLI version + line count, read/computed from cli/ at build (see nuxt.config.ts) — never hand-typed.
+// The CLI version, read from cli/package.json at build (see nuxt.config.ts) so it never goes stale by hand.
 const version = useRuntimeConfig().public.version
-const cliLines = useRuntimeConfig().public.cliLines
 
 // Where HUMAN.md is headed. Claude Code is live; the rest are the roadmap. `logo` is a local monochrome
 // mark in /public/logos (from simple-icons, recolored via CSS mask); null = no clean official mark, so
@@ -76,40 +78,40 @@ useHead({
         head or under it.
       </p>
 
-      <div class="term realterm" role="img" aria-label="Terminal showing stratless profile printing the model of the person, then stratless update loading it into the assistant">
-        <div class="term-bar">
+      <!-- Not role="img": that collapsed the whole real profile below to one aria-label sentence,
+           hiding the actual patterns and counts from screen readers. The content is real text, so
+           expose it. The window chrome (title, traffic lights) and the prompt glyphs are decorative
+           (aria-hidden); the body is a keyboard-reachable, named region because it scrolls. -->
+      <div class="term realterm">
+        <div class="term-bar" aria-hidden="true">
           <div class="term-dots"><span class="d-r" /><span class="d-y" /><span class="d-g" /></div>
           <div class="term-title">my-app — -zsh — 72×24</div>
         </div>
-        <pre class="term-body"><code><span class="t-arrow">➜</span>  <span class="t-path">~/my-app</span> <span class="t-c">stratless profile</span>
+        <pre class="term-body" tabindex="0" role="region" aria-label="stratless profile, printed to the terminal"><code><span class="t-arrow" aria-hidden="true">➜</span>  <span class="t-path">~/my-app</span> <span class="t-c">stratless profile</span>
 
 <span class="t-d"># who you are working with, read from your own history</span>
 
-<span class="t-b">WHAT THEY KNOW</span>
-Holds the system's architecture actively in mind, restating
-a proposed design accurately before moving on. Carries
-granular competitive intelligence and uses it directly in
-strategic reasoning.
-
 <span class="t-b">HOW THEY WORK</span>
-A settled recommendation gets a terse <span class="t-you">"go"</span> or <span class="t-you">"continue."</span>
-They drive the release pipeline hands-on and <span class="t-b">personally
-check a live artifact against your status report</span> rather
-than trust it.
+Muses openly about direction and invites free-form
+discussion rather than a single pointed question.
+<span class="t-d">876 times ·</span> <span class="t-you">"fast to sell and painkiller?"</span>
 
-<span class="t-b">FAILURE SIGNALS</span>
-Catches gaps in your status claims (an unpublished page, a
-missed release note) and stops to demand verification. A
-dense answer to a narrow question gets bypassed for a
-<span class="t-b">blunt yes/no.</span>
+Gives a short signal (go, commit it) to authorize the
+next step without further discussion.
+<span class="t-d">727 times ·</span> <span class="t-you">"Go with A, fix the counts"</span>
+
+<span class="t-b">WHEN SOMETHING HAS GONE WRONG</span>
+Insists on a plan, and plan mode, before any code
+gets written.
+<span class="t-d">256 times ·</span> <span class="t-you">"wait. are you in plan mode?"</span>
 
 <span class="t-d">not loaded yet · load it into your assistant: stratless update</span>
 
-<span class="t-arrow">➜</span>  <span class="t-path">~/my-app</span> <span class="t-c">stratless update</span>
+<span class="t-arrow" aria-hidden="true">➜</span>  <span class="t-path">~/my-app</span> <span class="t-c">stratless update</span>
 
 <span class="t-ok">↳ loaded</span>  <span class="t-d">your assistant now talks to a person, not a blank.</span>
 
-<span class="t-arrow">➜</span>  <span class="t-path">~/my-app</span> <span class="term-cursor" /></code></pre>
+<span class="t-arrow" aria-hidden="true">➜</span>  <span class="t-path">~/my-app</span> <span class="term-cursor" aria-hidden="true" /></code></pre>
       </div>
 
       <!-- PROFILER HERO, two beats: `stratless profile` prints the model (a faithful excerpt of real
@@ -120,7 +122,7 @@ dense answer to a narrow question gets bypassed for a
         <Btn href="#install" primary>Install</Btn>
         <Btn :href="GITHUB" target="_blank" rel="noopener">Read the source</Btn>
       </div>
-      <p class="free-note cursor">MIT. No account, no API key, no cloud. ~{{ cliLines }} lines you can audit in an afternoon.</p>
+      <p class="free-note cursor">MIT. No account, no API key, no cloud. Nothing leaves your machine.</p>
     </div>
   </section>
 
@@ -166,6 +168,7 @@ dense answer to a narrow question gets bypassed for a
   <!-- INSTALL — one command. -->
   <section id="install" class="section install">
     <div class="container">
+      <h2 class="sr-only">Install</h2>
       <p class="eyebrow center">One command</p>
       <div class="install-lead">
         <div class="cmd"><code>npx stratless init</code></div>
@@ -175,11 +178,11 @@ dense answer to a narrow question gets bypassed for a
       <div class="three">
         <div class="card">
           <code class="k">stratless profile</code>
-          <p>The briefing <strong>your AI</strong> reads: what you know, how you think, what you're building. Loads at the start of every session.</p>
+          <p>The briefing <strong>your AI</strong> reads: how you work, where it tends to go wrong, and the shorthand you actually use. Loads at the start of every session.</p>
         </div>
         <div class="card">
           <code class="k">stratless update</code>
-          <p>Judges what's new and rebuilds your profile once enough has changed, so it never spends on a rebuild that would say the same thing. <code>--now</code> skips the wait.</p>
+          <p>Reads what's new and rebuilds your profile when enough has changed, so it never spends on a rebuild that would say the same thing. Run it by hand and it rebuilds now.</p>
         </div>
         <div class="card">
           <code class="k">stratless stop</code>
@@ -200,24 +203,25 @@ dense answer to a narrow question gets bypassed for a
         <strong>Nobody reads it.</strong>
       </p>
       <p>
-        stratless reads it. It walks each session into pairs, what the assistant said and how you
-        reacted, and asks the <code>claude</code> you already have one question: did that land? Your
-        <em>"wait, what does this mean"</em> is a wall. Your <em>"ok, next"</em> is a clear.
-        <strong>It reads the reaction, not the answer.</strong>
+        stratless reads it. It walks each session into moments, what you typed and what the
+        assistant was doing, and finds the kinds of thing you do again and again. Your
+        <em>"wait, what does this mean"</em> is one. Your <em>"ok, next"</em> is another.
+        <strong>It reads what you did, not what it said.</strong>
       </p>
       <p>
-        Thousands of those become your <code>HUMAN.md</code>, written by the assistant you already
-        have, on your own plan. If a reaction carries no honest signal, it records nothing.
+        The patterns that survive, each carrying the real count behind it, become your
+        <code>HUMAN.md</code>, written by the assistant you already have, on your own plan. If a
+        moment carries no honest signal, it records nothing.
         <strong>A confident guess is the one thing that would end this.</strong>
       </p>
 
-      <div class="verdicts">
-        <div><code class="v-ok">cleared</code><span>it landed, you moved on</span></div>
-        <div><code class="v-mid">partial</code><span>half landed, you circled back</span></div>
-        <div><code class="v-bad">stuck</code><span>it didn't; you pushed back or went quiet</span></div>
-        <div><code class="v-you">none</code><span>no signal, pure logistics</span></div>
+      <div class="pipeline">
+        <div><code>moments</code><span>what you typed, and what the assistant was doing</span></div>
+        <div><code>discover</code><span>the recurring things you do, found in your own logs</span></div>
+        <div><code>count</code><span>how often, over what span, rising or fading</span></div>
+        <div><code>write</code><span>the patterns that survive become your HUMAN.md</span></div>
       </div>
-      <p class="quiet">Four verdicts. The one it learns from most is <code>stuck</code>.</p>
+      <p class="quiet">Four steps, all on your machine. No scheme we shipped, no model of a generic person. <strong>Derived, not pre-matched.</strong></p>
     </div>
   </section>
 
@@ -239,11 +243,6 @@ dense answer to a narrow question gets bypassed for a
       <p class="quiet center rm-note">Live on Claude Code today. Aider, Gemini, Codex, Cline, Copilot and more, coming.</p>
     </div>
   </section>
-
-  <!-- THE SEA — footer inside the wave band. -->
-  <SeigaihaField>
-    <SiteFooter bare />
-  </SeigaihaField>
 
   <FileModal
     :open="!!openFile"
@@ -378,6 +377,12 @@ h1 {
   line-height: 1.7;
   color: #e6e2d6;
   -webkit-font-smoothing: antialiased;
+}
+/* The body is tabbable so a keyboard user can scroll it; the global focus ring (--accent-deep) is
+   too dim on #1b1a16, so use the terminal's lighter blue, inset to hug the panel. */
+.term-body:focus-visible {
+  outline: 2px solid #6cb6d9;
+  outline-offset: -3px;
 }
 .term-body::-webkit-scrollbar {
   width: 9px;
@@ -612,13 +617,14 @@ h1 {
 .reveal strong {
   color: var(--ink);
 }
-.verdicts {
+/* the discovery pipeline steps under the reveal (moments · discover · count · write) */
+.pipeline {
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
   margin: 1.8rem 0 0.9rem;
 }
-.verdicts div {
+.pipeline div {
   display: flex;
   gap: 0.9rem;
   align-items: baseline;
@@ -626,18 +632,15 @@ h1 {
   font-size: var(--fs-md);
   color: var(--ink-2);
 }
-.verdicts code {
+.pipeline code {
   font-family: var(--font-mono);
   font-size: var(--fs-sm);
   font-weight: 700;
   min-width: 5.5rem;
   background: none;
   padding: 0;
+  color: #1f6f8b;
 }
-.v-ok { color: #2f7d32; }
-.v-mid { color: #8a6d1f; }
-.v-you { color: #1f6f8b; }
-.v-bad { color: #9b2c2c; }
 .quiet {
   font-size: var(--fs-sm);
   color: var(--mid);

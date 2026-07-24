@@ -45,7 +45,7 @@ useSeo({
 
         <h2>Your own assistant, your own bill</h2>
         <p>
-          The judging and the writing are done by the coding assistant already installed on your
+          The reading and the writing are done by the coding assistant already installed on your
           machine, on your own subscription or key. Any cost, rate limit, or term attached to that
           is between you and that provider. {{ legal.operator }} is not a party to it.
         </p>

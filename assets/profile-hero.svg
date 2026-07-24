@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 648" xml:space="preserve">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 575" xml:space="preserve">
   <defs>
-    <clipPath id="card"><rect x="18" y="14" width="564" height="620" rx="11"/></clipPath>
+    <clipPath id="card"><rect x="18" y="14" width="564" height="547" rx="11"/></clipPath>
     <linearGradient id="bar" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#3a3831"/><stop offset="1" stop-color="#322f29"/>
     </linearGradient>
@@ -17,7 +17,7 @@
     </style>
   </defs>
 
-  <g filter="url(#sh)"><rect x="18" y="14" width="564" height="620" rx="11" fill="#1b1a16" stroke="#000"/></g>
+  <g filter="url(#sh)"><rect x="18" y="14" width="564" height="547" rx="11" fill="#1b1a16" stroke="#000"/></g>
   <g clip-path="url(#card)">
     <rect x="18" y="14" width="564" height="40" fill="url(#bar)"/>
     <line x1="18" y1="54" x2="582" y2="54" stroke="#000"/>
@@ -31,30 +31,26 @@
 
   <text x="36" y="106" class="d"># who you are working with, read from your own history</text>
 
-  <text x="36" y="142" class="w">WHAT THEY KNOW</text>
-  <text x="36" y="163">Holds the system's architecture actively in mind, restating</text>
-  <text x="36" y="184">a proposed design accurately before moving on. Carries</text>
-  <text x="36" y="205">granular competitive intelligence and uses it directly in</text>
-  <text x="36" y="226">strategic reasoning.</text>
+  <text x="36" y="142" class="w">HOW THEY WORK</text>
+  <text x="36" y="167">Muses openly about direction and invites free-form</text>
+  <text x="36" y="188">discussion rather than a single pointed question.</text>
+  <text x="36" y="209"><tspan class="d">876 times ·</tspan> <tspan class="y">"fast to sell and painkiller?"</tspan></text>
 
-  <text x="36" y="262" class="w">HOW THEY WORK</text>
-  <text x="36" y="283">A settled recommendation gets a terse <tspan class="y">"go"</tspan> or <tspan class="y">"continue."</tspan></text>
-  <text x="36" y="304">They drive the release pipeline hands-on and <tspan class="w">personally</tspan></text>
-  <text x="36" y="325"><tspan class="w">check a live artifact against your status report</tspan> rather</text>
-  <text x="36" y="346">than trust it.</text>
+  <text x="36" y="251">Gives a short signal (go, commit it) to authorize</text>
+  <text x="36" y="272">the next step without further discussion.</text>
+  <text x="36" y="293"><tspan class="d">727 times ·</tspan> <tspan class="y">"Go with A, fix the counts"</tspan></text>
 
-  <text x="36" y="382" class="w">FAILURE SIGNALS</text>
-  <text x="36" y="403">Catches gaps in your status claims (an unpublished page, a</text>
-  <text x="36" y="424">missed release note) and stops to demand verification. A</text>
-  <text x="36" y="445">dense answer to a narrow question gets bypassed for a</text>
-  <text x="36" y="466"><tspan class="w">blunt yes/no.</tspan></text>
+  <text x="36" y="335" class="w">WHEN SOMETHING HAS GONE WRONG</text>
+  <text x="36" y="360">Insists on a plan, and plan mode, before any code</text>
+  <text x="36" y="381">gets written.</text>
+  <text x="36" y="402"><tspan class="d">256 times ·</tspan> <tspan class="y">"wait. are you in plan mode?"</tspan></text>
 
-  <text x="36" y="502" class="d">not loaded yet · load it into your assistant: stratless update</text>
+  <text x="36" y="444" class="d">not loaded yet · load it into your assistant: stratless update</text>
 
-  <text x="36" y="538"><tspan class="g">➜</tspan>  <tspan class="pa">~/my-app</tspan> <tspan class="w">stratless update</tspan></text>
+  <text x="36" y="480"><tspan class="g">➜</tspan>  <tspan class="pa">~/my-app</tspan> <tspan class="w">stratless update</tspan></text>
 
-  <text x="36" y="570"><tspan class="g">↳ loaded</tspan>  <tspan class="d">your assistant now talks to a person, not a blank.</tspan></text>
+  <text x="36" y="512"><tspan class="g">↳ loaded</tspan>  <tspan class="d">your assistant now talks to a person, not a blank.</tspan></text>
 
-  <text x="36" y="602"><tspan class="g">➜</tspan>  <tspan class="pa">~/my-app</tspan></text>
-  <rect x="133" y="590" width="8" height="15" fill="#e6e2d6"/>
+  <text x="36" y="544"><tspan class="g">➜</tspan>  <tspan class="pa">~/my-app</tspan></text>
+  <rect x="133" y="532" width="8" height="15" fill="#e6e2d6"/>
 </svg>

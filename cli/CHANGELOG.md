@@ -6,6 +6,17 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+## [0.4.2] · 2026-07-24 · weekly by default
+
+0.4.1 gave you the cadence choice. This makes weekly the default, not daily. It reads your whole
+history, so a lighter default is the right call. `stratless update` still rebuilds right then,
+whenever you want it fresh.
+
+### Changed
+- Auto-rebuild defaults to weekly now, not daily. Your turns still get collected free every session;
+  the profile just rewrites on the weekly tick. `stratless update --daily` if you want it more often.
+- The profile dropped its em dashes. Plain commas and colons now.
+
 ## [0.4.1] — 2026-07-23 — auto-rebuild, once a day (your call)
 
 0.4.0 rebuilt your profile every time a session ended, so a busy multi-session day meant a rebuild

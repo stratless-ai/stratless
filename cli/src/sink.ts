@@ -65,7 +65,7 @@ export function injectProfile(
   const stamp = `${builtAt.slice(0, 16).replace('T', ' ')} UTC`; // 2026-07-23T12:28:56.777Z -> "2026-07-23 12:28 UTC"
   const human = [
     '# Who you are working with',
-    '# (managed by stratless — do not edit by hand; refreshed by `stratless update`)',
+    '# (managed by stratless: do not edit by hand; refreshed by `stratless update`)',
     `# built ${stamp}`,
     '<!-- humanmd/v1 -->', // the person-layer protocol's schema marker (0.3.1: sectioned form)
     '',
@@ -85,7 +85,7 @@ export function injectProfile(
 function upsertBlock(humanTarget: string, claudeTarget: string): void {
   const block = [
     START,
-    '# Who you are working with — managed by stratless. Edit HUMAN.md, not here.',
+    '# Who you are working with. Managed by stratless; edit HUMAN.md, not here.',
     importLine(humanTarget),
     END,
   ].join('\n');

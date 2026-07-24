@@ -191,6 +191,13 @@
   outline: 2px solid var(--accent-deep);
   outline-offset: 2px;
 }
+/* <main tabindex="-1"> is the skip link's target: it takes focus only programmatically, to move the
+   reading/tab position. It is not interactive, so it gets no ring — the next Tab shows one on the
+   first real control. Without this the skip link would outline the entire page. */
+main:focus,
+main:focus-visible {
+  outline: none;
+}
 html,
 body {
   margin: 0;
@@ -343,6 +350,19 @@ kbd {
 }
 .section {
   padding: 5rem 0;
+}
+/* Visually hidden, still read by screen readers and still a real heading in the document outline.
+   Used to name a section (e.g. Install) that is designed with an eyebrow rather than a visible <h2>. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* ── docs prose (rendered markdown — global, ContentRenderer output is unscoped) ── */

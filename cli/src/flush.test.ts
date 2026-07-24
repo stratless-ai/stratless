@@ -62,9 +62,9 @@ test('the cooldown honours the maxAgeMs override (env-style / a user setting)', 
   assert.equal(flushDue([w('s1', 2 * H)], iso(NOW - 2 * H), NOW, false, { maxAgeMs: 1 * H }).flush, true);
 });
 
-test('flushCooldownMs: named cadences, the env override, and the daily default', () => {
+test('flushCooldownMs: named cadences, the env override, and the weekly default', () => {
   const DAY = 24 * H, WEEK = 7 * DAY;
-  assert.equal(flushCooldownMs(undefined, undefined), DAY, 'unset resolves to daily');
+  assert.equal(flushCooldownMs(undefined, undefined), WEEK, 'unset resolves to weekly');
   assert.equal(flushCooldownMs('daily', undefined), DAY);
   assert.equal(flushCooldownMs('weekly', undefined), WEEK);
   assert.equal(flushCooldownMs('weekly', '3600000'), 3600000, 'an exact env override beats the cadence');

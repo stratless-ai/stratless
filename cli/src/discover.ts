@@ -78,7 +78,7 @@ YOUR JOB: find the recurring KINDS OF THING THIS PERSON DOES when they reply.
 Rules:
 - Describe what the PERSON did. Never describe what the assistant did. Never rule on whether the
   assistant was right, or whether the person understood, agreed, or was satisfied.
-- Name the ACT, not the SUBJECT. "Floats their own approach and asks if it's sound" (the act) — never
+- Name the ACT, not the SUBJECT. "Floats their own approach and asks if it's sound" (the act), never
   "...about pricing" (the subject). The subject changes every time; the act is what recurs.
 - A kind must be able to happen again, on a different day, about a different subject.
 - Only name a kind you can see happening in MORE THAN ONE conversation (the c-label in brackets).
@@ -87,6 +87,7 @@ Rules:
 - Mark scope: "person" if it is about how they think or communicate (travels to any project),
   "project" if it is tied to this specific product/tool (competitor research, UI tuning, bug reports).
 - Name as many or as few as the material actually supports.
+- Write each description plainly: use commas or colons, never an em dash.
 
 Reply with JSON only:
 {"categories":[{"name":"short-kebab-name","description":"one sentence naming the ACT","scope":"person|project"}]}`;

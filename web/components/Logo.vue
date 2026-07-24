@@ -10,7 +10,7 @@ withDefaults(defineProps<{ height?: number; wordmark?: boolean }>(), { height: 3
 </script>
 
 <template>
-  <NuxtLink to="/" class="logo" :style="{ '--logo-h-default': `${height}px` }" aria-label="stratless — home">
+  <NuxtLink to="/" class="logo" :style="{ '--logo-h-default': `${height}px` }" aria-label="stratless, home">
     <!-- Same URL as the <link rel=icon> in nuxt.config, so the browser reuses ONE cache entry.
          width/height attrs are the anti-FOUC: favicon.svg has a viewBox but NO intrinsic size, so on a
          full document load (e.g. back from the console/reference) the img painted FULL-SCREEN for a

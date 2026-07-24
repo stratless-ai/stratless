@@ -35,30 +35,10 @@ const currentIdx = computed(() => flat.findIndex((l) => l.to === (route.path.rep
 const prev = computed(() => (currentIdx.value > 0 ? flat[currentIdx.value - 1] : null))
 const next = computed(() => (currentIdx.value >= 0 && currentIdx.value < flat.length - 1 ? flat[currentIdx.value + 1] : null))
 
-// "On this page" — built from the RENDERED h2s (ids assigned from heading text; markdown-it emits none).
-const article = ref<HTMLElement | null>(null)
-const toc = ref<{ id: string; text: string }[]>([])
-const slug = (s: string) =>
-  s
-    .toLowerCase()
-    .replace(/[^\w\s-]/g, '')
-    .trim()
-    .replace(/\s+/g, '-')
-    .slice(0, 60)
-function buildToc() {
-  const el = article.value
-  if (!el) return
-  const items: { id: string; text: string }[] = []
-  for (const h of Array.from(el.querySelectorAll('h2'))) {
-    const text = h.textContent?.trim() ?? ''
-    if (!text) continue
-    if (!h.id) h.id = slug(text)
-    items.push({ id: h.id, text })
-  }
-  toc.value = items
-}
-onMounted(buildToc)
-watch(current, () => nextTick(buildToc))
+// "On this page" — the h2s and their ids are stamped at BUILD time in lib/docs.ts, so the rail
+// ships in the static HTML (no post-hydration flash), the anchors work on a cold load, and it
+// updates on client-side nav for free (it is a computed off `current`, no watcher needed).
+const toc = computed(() => current.value?.toc ?? [])
 
 // Each doc page needs its OWN og:url, description and canonical. They all used to inherit the
 // homepage's, so sharing /docs/why previewed as the homepage.
@@ -82,7 +62,7 @@ useSeo({
 <template>
   <div class="docs container">
     <aside class="docs-nav">
-      <nav>
+      <nav aria-label="Documentation">
         <div v-for="g in nav" :key="g.group" class="nav-group">
           <span class="nav-group-title">{{ g.group }}</span>
           <NuxtLink
@@ -102,7 +82,7 @@ useSeo({
       </nav>
     </aside>
 
-    <article ref="article" class="docs-body prose">
+    <article class="docs-body prose">
       <!-- eslint-disable-next-line vue/no-v-html -- trusted, build-time markdown -->
       <div v-if="current" v-html="current.html" />
       <div v-else class="notfound">

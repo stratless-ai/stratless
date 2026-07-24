@@ -350,19 +350,20 @@ export function synthesisDue(
  */
 export const FLUSH_MAX_AGE_MS = 24 * 3600 * 1000;
 
-/** The named auto-rebuild cadences a person can choose; daily is the default. */
+/** The named auto-rebuild cadences a person can choose; weekly is the default (a lighter background
+ *  footprint for a privacy-first tool — `stratless update` still rebuilds now, any time). */
 export const CADENCE_MS = { daily: FLUSH_MAX_AGE_MS, weekly: 7 * FLUSH_MAX_AGE_MS } as const;
 export type FlushCadence = keyof typeof CADENCE_MS;
 
 /** The effective cooldown in ms: the STRATLESS_FLUSH_MAX_AGE_MS env override (an exact number) wins,
- *  else the person's stored cadence, else daily. One place so the loop and the tests agree. */
+ *  else the person's stored cadence, else weekly. One place so the loop and the tests agree. */
 export function flushCooldownMs(
   cadence: FlushCadence | undefined,
   env: string | undefined = process.env.STRATLESS_FLUSH_MAX_AGE_MS,
 ): number {
   const n = Number(env);
   if (Number.isFinite(n) && n > 0) return Math.floor(n);
-  return CADENCE_MS[cadence ?? 'daily'];
+  return CADENCE_MS[cadence ?? 'weekly'];
 }
 
 /** Store the person's chosen auto-rebuild cadence. Best-effort, like the rest of state. */

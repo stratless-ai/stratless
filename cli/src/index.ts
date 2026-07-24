@@ -369,7 +369,7 @@ function workerAlive(): boolean {
  */
 async function update(_rest: string[], opts: { consented?: boolean } = {}): Promise<void> {
   // `update --daily|--weekly` records how often the worker may auto-rebuild on its own (this run
-  // rebuilds now regardless). Absent leaves the current setting; default is daily.
+  // rebuilds now regardless). Absent leaves the current setting; default is weekly.
   const cadence: FlushCadence | undefined = _rest.includes('--weekly') ? 'weekly' : _rest.includes('--daily') ? 'daily' : undefined;
   if (cadence) {
     setFlushCadence(cadence);
@@ -528,7 +528,7 @@ async function status(rest: string[] = []): Promise<void> {
 
   console.log(`\n  ${C.b('stratless status')}\n`);
   console.log(`    after-session refresh   ${refresh ? C.ok('on') : C.dim('off')}`);
-  console.log(`    auto-rebuild            ${C.dim(`${readState().flushCadence ?? 'daily'} · set with \`${hint('stratless update --daily|--weekly')}\``)}`);
+  console.log(`    auto-rebuild            ${C.dim(`${readState().flushCadence ?? 'weekly'} · set with \`${hint('stratless update --daily|--weekly')}\``)}`);
   // The cold-start onramp: history collected but the paid build not yet run. Derived, never stored —
   // no categories on disk while the pile holds moments means "free read live, full build pending".
   try {

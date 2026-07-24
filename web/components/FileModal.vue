@@ -5,17 +5,102 @@
 const props = defineProps<{ open: boolean; name?: string | null; html?: string }>()
 const emit = defineEmits<{ close: [] }>()
 
+// FOCUS MANAGEMENT. Until 2026-07-20 this dialog had none, and the consequence was not subtle: the
+// body is a scroll region containing no focusable elements, and focus never moved off the .file-icon
+// button that opened it. A keyboard-only visitor could open the modal, see a scrollable document, and
+// neither scroll nor read it — arrow keys acted on the scroll-locked body behind. Tab walked invisibly
+// through that background page, and because focus never entered, `aria-modal` never constrained a
+// screen reader either, so the whole page stayed readable underneath. The feature was open only to
+// people using a mouse.
+//
+// Four things make it work, and all four are required — a dialog with three of them is still broken:
+//   1. move focus in on open        (else nothing below matters)
+//   2. keep Tab inside while open   (else focus escapes to a page the user cannot see)
+//   3. put focus back on close      (else the reader is dumped at the top of the document)
+//   4. make the background inert    (else assistive tech reads straight through the overlay)
+const win = ref<HTMLElement | null>(null)
+let lastFocused: HTMLElement | null = null
+
+// Only one FileModal is ever mounted (index.vue renders a single instance), so a constant id is safe
+// and avoids depending on useId's auto-import.
+const titleId = 'fm-title'
+
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+function focusables(): HTMLElement[] {
+  if (!win.value) return []
+  return [...win.value.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
+    // `tabIndex >= 0` is the load-bearing clause. Without it the trap re-introduces exactly the
+    // elements the browser is right to skip: the red close-light is tabindex="-1" + aria-hidden, so
+    // native Tab passes over it, but a naive `button` query still matches it and the wrap-around
+    // would focus it anyway — putting a silent, invisible stop back into the cycle.
+    (el) => el.offsetParent !== null && el.tabIndex >= 0 && !el.closest('[aria-hidden="true"]'),
+  )
+}
+
 function onKey(e: KeyboardEvent) {
-  if (e.key === 'Escape') emit('close')
+  if (e.key === 'Escape') {
+    emit('close')
+    return
+  }
+  if (e.key !== 'Tab' || !win.value) return
+  const items = focusables()
+  if (!items.length) {
+    e.preventDefault()
+    win.value.focus()
+    return
+  }
+  const first = items[0]!
+  const last = items[items.length - 1]!
+  const active = document.activeElement as HTMLElement | null
+  // Focus somehow outside the dialog (e.g. the browser chrome round-trip) — pull it back.
+  if (!active || !win.value.contains(active)) {
+    e.preventDefault()
+    first.focus()
+  } else if (e.shiftKey && (active === first || active === win.value)) {
+    e.preventDefault()
+    last.focus()
+  } else if (!e.shiftKey && active === last) {
+    e.preventDefault()
+    first.focus()
+  }
+}
+
+// The dialog is teleported to <body>, so it sits OUTSIDE #__nuxt — marking that root inert hides the
+// page without touching the dialog. `inert` also blocks pointer and focus, which aria-hidden alone
+// does not; both are set because older Safari honours only the latter.
+function setBackgroundInert(on: boolean) {
+  const root = document.getElementById('__nuxt')
+  if (!root) return
+  if (on) {
+    root.setAttribute('inert', '')
+    root.setAttribute('aria-hidden', 'true')
+  } else {
+    root.removeAttribute('inert')
+    root.removeAttribute('aria-hidden')
+  }
 }
 
 watch(
   () => props.open,
-  (open) => {
+  async (open) => {
     if (typeof document === 'undefined') return
     document.body.style.overflow = open ? 'hidden' : ''
-    if (open) window.addEventListener('keydown', onKey)
-    else window.removeEventListener('keydown', onKey)
+    if (open) {
+      lastFocused = document.activeElement as HTMLElement | null
+      window.addEventListener('keydown', onKey)
+      setBackgroundInert(true)
+      await nextTick()
+      win.value?.focus()
+    } else {
+      window.removeEventListener('keydown', onKey)
+      setBackgroundInert(false)
+      // Back to the file-icon that opened it, so the reader resumes where they left off rather than
+      // at the top of the page.
+      lastFocused?.focus?.()
+      lastFocused = null
+    }
   },
 )
 
@@ -23,6 +108,7 @@ onBeforeUnmount(() => {
   if (typeof document === 'undefined') return
   document.body.style.overflow = ''
   window.removeEventListener('keydown', onKey)
+  setBackgroundInert(false)
 })
 </script>
 
@@ -30,17 +116,43 @@ onBeforeUnmount(() => {
   <Teleport to="body">
     <Transition name="fm">
       <div v-if="open" class="fm-overlay" @click.self="emit('close')">
-        <div class="fm-window" role="dialog" aria-modal="true" :aria-label="name ?? 'file'">
+        <div
+          ref="win"
+          class="fm-window"
+          role="dialog"
+          aria-modal="true"
+          tabindex="-1"
+          :aria-labelledby="name ? titleId : undefined"
+          :aria-label="name ? undefined : 'File preview'"
+        >
           <div class="fm-bar">
             <div class="fm-dots">
-              <button class="fm-dot d-r" type="button" aria-label="Close" @click="emit('close')" />
+              <!-- The red light still closes on click, but it is hidden from assistive tech and out of
+                   the tab order: it and the ✕ were both announced as "Close, button. Close, button."
+                   One control, one name. It is also a 12px target, so it is a mouse affordance only. -->
+              <button
+                class="fm-dot d-r"
+                type="button"
+                tabindex="-1"
+                aria-hidden="true"
+                @click="emit('close')"
+              />
               <span class="fm-dot d-y" />
               <span class="fm-dot d-g" />
             </div>
-            <div class="fm-title">{{ name }}</div>
+            <div :id="titleId" class="fm-title">{{ name }}</div>
             <button class="fm-close" type="button" aria-label="Close" @click="emit('close')">✕</button>
           </div>
-          <div class="fm-body md" v-html="html" />
+          <!-- tabindex="0" is load-bearing, not decoration: this region scrolls but contains nothing
+               focusable, so without it a keyboard user can reach the dialog and still never scroll the
+               document. role="region" + a name is what makes it announce as something enterable. -->
+          <div
+            class="fm-body md"
+            tabindex="0"
+            role="region"
+            :aria-label="name ? `${name} contents` : 'File contents'"
+            v-html="html"
+          />
         </div>
       </div>
     </Transition>
@@ -120,6 +232,15 @@ onBeforeUnmount(() => {
 .fm-close:hover {
   color: #fff;
 }
+/* The window takes focus programmatically on open, purely so a screen reader announces the dialog.
+   A ring around the whole window would read as a rendering glitch, so suppress it there — but the
+   body IS tabbed to deliberately, so it keeps a clearly visible one. The global ring (--accent-deep,
+   tuned for the paper background) is too dim against #1b1a16; this is the terminal's lighter blue,
+   inset so it follows the panel rather than bleeding past the rounded corners. */
+.fm-window:focus,
+.fm-window:focus-visible {
+  outline: none;
+}
 .fm-body {
   overflow-y: auto;
   padding: 1.7rem 1.95rem 2rem;
@@ -127,6 +248,10 @@ onBeforeUnmount(() => {
   font-size: 0.82rem;
   color: #cfcabb;
   line-height: 1.65;
+}
+.fm-body:focus-visible {
+  outline: 2px solid #6cb6d9;
+  outline-offset: -3px;
 }
 
 /* rendered markdown (v-html, so :deep) — editor preview look */

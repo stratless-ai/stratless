@@ -1,9 +1,5 @@
 import MarkdownIt from 'markdown-it'
 
-// Injected by the `vite.define` in nuxt.config.ts — the CLI line count, computed at build so the
-// docs' trust claim can never go stale by hand. Markdown carries it as a %CLI_LINES% token.
-declare const __CLI_LINES__: string
-
 /**
  * The docs renderer. Runs ONCE at module load (not per component mount), so the generated HTML is
  * identical on the server and the client → clean hydration.
@@ -25,7 +21,13 @@ md.linkify.set({ fuzzyLink: false })
 export interface Doc {
   title: string
   html: string
+  toc: { id: string; text: string }[]
 }
+
+// Heading id from its text: lowercase, punctuation stripped, spaces to hyphens. This is the anchor
+// a browser expects for `/docs/x#heading`. markdown-it emits no ids, so we stamp them at build.
+const slug = (s: string): string =>
+  s.toLowerCase().replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '-').slice(0, 60)
 
 function buildDocs(): Record<string, Doc> {
   // Every markdown file under content/docs/ becomes a route. `1.why.md` → `/docs/why` (the numeric
@@ -55,7 +57,25 @@ function buildDocs(): Record<string, Doc> {
       .map((seg) => seg.replace(/^\d+\./, ''))
       .join('/')
       .replace(/\/?index$/, '')
-    out[`/docs${p ? `/${p}` : ''}`] = { title, html: md.render(body.replaceAll('%CLI_LINES%', __CLI_LINES__)) }
+    // Stamp heading ids and collect the h2 TOC at BUILD time, so deep links (`/docs/x#heading`) and
+    // the "On this page" rail both work on a cold load, with no JS and no post-hydration flash.
+    const env = {}
+    const tokens = md.parse(body, env)
+    const toc: { id: string; text: string }[] = []
+    const used = new Set<string>()
+    for (let i = 0; i < tokens.length; i++) {
+      const t = tokens[i]!
+      if (t.type !== 'heading_open') continue
+      const text = tokens[i + 1]?.content?.trim() ?? ''
+      if (!text) continue
+      const base = slug(text) || 'section'
+      let id = base
+      for (let n = 2; used.has(id); n++) id = `${base}-${n}` // dedupe repeated headings
+      used.add(id)
+      t.attrSet('id', id)
+      if (t.tag === 'h2') toc.push({ id, text })
+    }
+    out[`/docs${p ? `/${p}` : ''}`] = { title, html: md.renderer.render(tokens, md.options, env), toc }
   }
   return out
 }
