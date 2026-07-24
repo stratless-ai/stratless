@@ -6,7 +6,7 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 
-import { renderMirror } from './mirrorview.js';
+import { renderMirror, renderCard } from './mirrorview.js';
 import type { Mirror } from './mirror.js';
 
 /** A complete Mirror with sane values; tests mutate the fields they care about. */
@@ -96,4 +96,33 @@ test('a repo root with a trailing slash still yields a clean basename', () => {
   const m = base();
   m.context.repos = [{ root: '/Users/jx/stratless-mono/', messages: 10 }];
   assert.equal(renderMirror(m).find((r) => r.label === 'busiest repo')!.value, 'stratless-mono');
+});
+
+// ── The shareable card (`renderCard`) — the screenshot-safe subset. Same numbers as the full read,
+// minus anything that can carry a name, and the two friction numbers still separate.
+
+test('the card omits the busiest-repo row — a repo basename can be a client/project name', () => {
+  const rows = renderCard(base());
+  assert.ok(!rows.some((r) => r.label === 'busiest repo'), 'no repo row on the shareable card');
+  // and no row value carries the repo basename anywhere
+  assert.ok(!rows.some((r) => r.value.includes('stratless-mono')), 'no repo name leaks into any card value');
+});
+
+test('the card keeps the two friction numbers separate — never summed', () => {
+  const rows = renderCard(base());
+  assert.equal(rows.find((r) => r.label === 'course corrections')!.value, '2.68 / 100 messages', 'corrections ALONE (119/4443*100), not summed with declines');
+  assert.equal(rows.find((r) => r.label === 'tool declines')!.value, '26', 'declines as a raw count');
+});
+
+test('the card carries the universal, safe rows: activity, writing, top tool', () => {
+  const rows = renderCard(base());
+  assert.equal(rows.find((r) => r.label === 'activity')!.value, '4,443 messages · 40 active days · longest streak 10 days');
+  assert.equal(rows.find((r) => r.label === 'how you write')!.value, 'median 12 words · 30% four words or fewer · 20% questions');
+  assert.equal(rows.find((r) => r.label === 'most-used tool')!.value, 'Edit (50%)');
+});
+
+test('the card is empty when there is no history', () => {
+  const m = base();
+  m.scale.messages = 0;
+  assert.deepEqual(renderCard(m), []);
 });

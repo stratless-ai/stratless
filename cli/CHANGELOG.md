@@ -6,6 +6,24 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+## [0.4.3] · 2026-07-24 · the run-it-now free read
+
+A way to see your number before you commit to anything. `stratless mirror` reads your live history and
+shows the free read on the spot, with no setup, no archive, and nothing spent. It changes nothing on
+your machine, so you can run it, see it, and share it.
+
+### Added
+- **`stratless mirror`**: a read-only free read of you and your AI, computed from your live history in
+  `~/.claude/projects`. No `init`, no archive, no model call, no spend, and it writes nothing. Works
+  the first time you ever run stratless.
+- **`stratless mirror --share`**: a clean, screenshot-ready card of the universal numbers (scale, how
+  you write, the two friction numbers, your top tool). It leaves out anything that could name a repo
+  or a project, so it is safe to forward.
+
+### Changed
+- **Bare `npx stratless` (no command) now shows the mirror**, not the help wall. `stratless help`
+  (or `--help`) still prints the full command list.
+
 ## [0.4.2] · 2026-07-24 · weekly by default
 
 0.4.1 gave you the cadence choice. This makes weekly the default, not daily. It reads your whole

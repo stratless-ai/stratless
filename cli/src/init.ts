@@ -21,7 +21,7 @@ import { atomicWriteFileSync } from './atomic.js';
 
 const HOME = homedir();
 const SETTINGS = join(HOME, '.claude', 'settings.json');
-const PROJECTS = join(HOME, '.claude', 'projects');
+export const PROJECTS = join(HOME, '.claude', 'projects');
 export const ARCHIVE = join(HOME, '.stratless', 'archive');
 
 const KEEP_DAYS = 3650; // ten years. long enough to mean "never".

@@ -2,6 +2,7 @@
 /**
  * stratless — build your AI a model of who you are, so it stops making you feel stupid.
  *
+ *   stratless mirror    a free read of you and your AI, from live logs — changes nothing, no setup
  *   stratless init      keep your history, see a free read, build your profile
  *   stratless profile   see the model of you — LOOKS, never spends; update LOADS
  *   stratless update    read what's new; rebuild + load the profile
@@ -14,7 +15,7 @@
 import { loadAssignments } from './assign.js';
 import { join as joinLabelled, misfitRate } from './count.js';
 import { findAssistant, onPath } from './claude.js';
-import { init as doInit, ARCHIVE, stopRefresh, refreshArmed, type InitResult } from './init.js';
+import { init as doInit, ARCHIVE, PROJECTS, stopRefresh, refreshArmed, type InitResult } from './init.js';
 import { dailyCheck, fetchLatest, newerThan } from './notify.js';
 import { loadRecentExchanges, sessionCount, findExchange } from './exchange.js';
 import { removeProfile, humanMdPath, claudeMdPath } from './sink.js';
@@ -27,7 +28,7 @@ import { runWorker, installedVersion, JUDGE_WINDOW } from './loop.js';
 import { readProgress, type Progress } from './progress.js';
 import { makePalette } from './palette.js';
 import { mirrorOfArchive, mirrorOfArchiveAsync } from './mirror.js';
-import { renderMirror } from './mirrorview.js';
+import { renderMirror, renderCard } from './mirrorview.js';
 import { estimateBuild, estimateFromMessages, estimateLine } from './estimate.js';
 import { loadMoments } from './moments.js';
 import { loadCategories } from './categories.js';
@@ -125,6 +126,51 @@ async function stats(): Promise<void> {
   for (const row of rows) console.log(`    ${C.dim(row.label.padEnd(w))}   ${C.b(row.value)}`);
   if (completeness) console.log(`    ${C.dim('profile captures'.padEnd(w))}   ${C.b(completeness)}`);
   console.log('');
+}
+
+/**
+ * MIRROR — the zero-commitment free read. A stranger runs `stratless mirror` (or bare `stratless`) and
+ * sees how they and their AI work, computed from their LIVE Claude Code logs at ~/.claude/projects —
+ * with NO `init`, no archive, no settings touched, no spend. Pure arithmetic → stdout. This is the
+ * run-it-now, change-nothing surface the launch forwards; `--share` renders the screenshot-safe card
+ * (aggregate-only, no repo or session names). The mirror is the diagnosis; `init`/`update` is the cure,
+ * pointed at in the footer — never auto-run, because the whole promise is that this changed nothing.
+ */
+async function mirror(args: string[]): Promise<void> {
+  const share = args.includes('--share');
+  const empty = (): void =>
+    console.log(
+      `\n  ${C.dim('No conversations to read yet. Talk to Claude Code a few times, then run')} ${C.b(hint('stratless mirror'))} ${C.dim('again.')}\n`,
+    );
+
+  // The LIVE logs, not the archive — this must work with nothing archived and no init ever run.
+  if (!existsSync(PROJECTS)) return empty();
+
+  // The nested-tree walk is the ~10s wait; the async twin lets the spinner rotate through it.
+  const stopReading = startSpinner('reading your history…', process.stdout);
+  let m: ReturnType<typeof mirrorOfArchive> | undefined;
+  try {
+    m = await mirrorOfArchiveAsync(PROJECTS);
+  } catch {
+    m = undefined;
+  } finally {
+    stopReading();
+  }
+  const rows = m ? (share ? renderCard(m) : renderMirror(m, { full: true })) : [];
+  if (!rows.length) return empty();
+
+  console.log(`\n  ${C.b(share ? 'You and your AI' : 'You and your AI, measured')}\n`);
+  const w = Math.max(...rows.map((r) => r.label.length));
+  for (const row of rows) console.log(`    ${C.dim(row.label.padEnd(w))}   ${C.b(row.value)}`);
+
+  if (share) {
+    // A screenshot carries no funnel — just the neutral repro line, so a viewer can get their own.
+    console.log(`\n  ${C.dim('npx stratless mirror · runs on your machine, nothing leaves')}\n`);
+  } else {
+    // The funnel: the read is free and changed nothing; init/update is how you keep + deepen it.
+    console.log(`\n  ${C.dim('Nothing was changed on your machine.')} ${C.dim('Keep it fresh + build the full profile:')} ${C.b(hint('stratless init'))}`);
+    console.log(`  ${C.dim('all commands:')} ${C.b(hint('stratless help'))}\n`);
+  }
 }
 
 /**
@@ -600,6 +646,7 @@ const COMMAND_ARGS: Record<string, { flags: string[]; positionals: number }> = {
   update: { flags: ['--daily', '--weekly'], positionals: 0 },
   status: { flags: ['--check'], positionals: 0 },
   stats: { flags: [], positionals: 0 },
+  mirror: { flags: ['--share'], positionals: 0 },
   stop: { flags: [], positionals: 0 },
   __worker: { flags: [], positionals: 0 },
 };
@@ -739,12 +786,13 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (!cmd || cmd === 'help' || cmd === '--help' || cmd === '-h') {
+  if (cmd === 'help' || cmd === '--help' || cmd === '-h') {
     console.log(`
   ${C.b('stratless')} — build your AI a model of who you are
 
-    ${C.dim('get started:')}  ${C.b('npx stratless init')}
+    ${C.dim('get started:')}  ${C.b('npx stratless')} ${C.dim('(a free read)')}  ·  ${C.b('npx stratless init')} ${C.dim('(keep + build)')}
 
+    ${C.b('stratless mirror')}     ${C.dim('a free read of you and your AI, changes nothing, no setup (--share: a card)')}
     ${C.b('stratless init')}       ${C.dim('keep your history, see a free read, build your profile')}
     ${C.b('stratless profile')}    ${C.dim('see the model of you — free, instant, never spends')}
     ${C.b('stratless update')}     ${C.dim('read what is new; rebuild + load the profile')}
@@ -758,6 +806,10 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Bare `stratless` is the one-word CTA: show the free read, not the help wall. The explicit help
+  // flags above still print the full list, so nothing is unreachable.
+  if (!cmd) return mirror([]);
+
   // C2's command-layer half: a damaged spend-cache surfaces as ONE clear refusal, wherever it was
   // hit. Reading corruption as "empty" would re-bill the person's whole history without a word.
   try {
@@ -767,6 +819,7 @@ async function main(): Promise<void> {
       return;
     }
     if (cmd === 'stats') return stats();
+    if (cmd === 'mirror') return await mirror(args.slice(1));
     if (cmd === 'status') return await status(args.slice(1));
     if (cmd === 'profile') return await profiler(args.slice(1));
     if (cmd === 'update') return await update(args.slice(1));
@@ -784,7 +837,7 @@ async function main(): Promise<void> {
 
   // A mistyped COMMAND gets the same courtesy as a mistyped flag (0.3.5): name the nearest one,
   // never just reject. The user-facing verbs, in help order.
-  const KNOWN = ['init', 'profile', 'update', 'stop', 'status', 'stats', 'help'];
+  const KNOWN = ['init', 'mirror', 'profile', 'update', 'stop', 'status', 'stats', 'help'];
   const guess = cmd ? KNOWN.map((k) => [k, editDistance(cmd, k)] as const).filter(([, d]) => d <= 3).sort((a, b) => a[1] - b[1])[0]?.[0] : undefined;
   console.error(`\n  ${C.bad(`unknown command: ${cmd}`)}${guess ? C.dim(`  (did you mean ${guess}?)`) : ''}`);
   console.error(`  ${C.dim(`see \`${hint('stratless help')}\` for the full list`)}\n`);
