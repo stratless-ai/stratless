@@ -3,10 +3,13 @@
 The published tool (`npm: stratless`). TypeScript, **zero runtime dependencies**, shipped standalone.
 Both matter: the "audit the whole thing in an afternoon" trust argument depends on a small, dep-free surface.
 
-Pipeline: `transcript.ts` (parse raw JSONL) → `exchange.ts` (→ AI-turn / human-reaction pairs) →
-`judge.ts` (borrowed `claude -p`, cached, read-once) → `synthesize.ts` (→ the profile) → `sink.ts`
-(load it). Supporting: `claude.ts` (the borrow), `init.ts` (protect history + install the Stop hook),
-`canary.ts` (refuse on format drift), `index.ts` (CLI entry).
+Pipeline: `transcript.ts` (parse raw JSONL) → `moments.ts` (the persisted pile: what you typed and
+what the assistant was doing) → `discover.ts` (mint the categories from the person's own logs) →
+`assign.ts` (score each moment against them; the one stage that spends) → `count.ts` (pure arithmetic
+over the checkmarks, no model) → `write.ts` (assemble `HUMAN.md` from the scored pile) → `sink.ts`
+(load it where the assistant reads it). Supporting: `claude.ts` (the borrow), `mirror.ts` (the free,
+zero-side-effect read), `worker.ts`/`loop.ts` (the after-session refresh), `init.ts` (protect history
++ install the Stop hook), `canary.ts` (refuse on format drift), `index.ts` (CLI entry).
 
 ## Commands (from `cli/`)
 
