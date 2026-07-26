@@ -17,25 +17,13 @@ import { atomicWriteFileSync } from './atomic.js';
 /** Where the worker narrates. Override with STRATLESS_PROGRESS (tests). */
 export const progressPath = (): string => process.env.STRATLESS_PROGRESS || join(homedir(), '.stratless', 'progress.json');
 
-export type WorkerPhase =
-  | 'starting'
-  | 'judging'
-  | 'mining'
-  | 'auditing'
-  | 'grading'
-  | 'writing'
-  | 'done'
-  | 'stopped'
-  | 'failed';
+export type WorkerPhase = 'starting' | 'done' | 'stopped' | 'failed';
 
 export interface Progress {
   pid: number;
   startedAt: string;
   updatedAt: string;
   phase: WorkerPhase;
-  /** judging progress, when phase === 'judging' */
-  done?: number;
-  total?: number;
   /** terminal phases only: the closing lines, plain text — the tail styles them */
   summary?: string[];
   /** terminal phases only: did the run end well (done) or not (failed/stopped) */
@@ -57,8 +45,6 @@ export function readProgress(file: string = progressPath()): Progress | undefine
       startedAt: typeof raw.startedAt === 'string' ? raw.startedAt : '',
       updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : '',
       phase: raw.phase as WorkerPhase,
-      ...(Number.isFinite(Number(raw.done)) ? { done: Number(raw.done) } : {}),
-      ...(Number.isFinite(Number(raw.total)) ? { total: Number(raw.total) } : {}),
       ...(Array.isArray(raw.summary) ? { summary: raw.summary.filter((l): l is string => typeof l === 'string') } : {}),
       ...(typeof raw.ok === 'boolean' ? { ok: raw.ok } : {}),
       ...(typeof raw.spend === 'string' ? { spend: raw.spend } : {}),

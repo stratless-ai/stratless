@@ -10,7 +10,7 @@ import { test } from 'node:test';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readTurns, readSessions, isTypedMessage, stripWrappers, dayKey, PASTE_BOUND } from './reader.js';
+import { readTurns, readSessions, isTypedMessage, stripWrappers, dayKey, PASTE_BOUND, driftCheck } from './reader.js';
 
 let n = 0;
 const rec = (o: Record<string, unknown>) => ({
@@ -43,6 +43,58 @@ test('our own borrowed calls are excluded, whole file at a time', () => {
     ],
   });
   assert.deepEqual(typedTexts(dir), ['what I really typed']);
+  rmSync(dir, { recursive: true });
+});
+
+test('the pipeline never eats its own exhaust: a <stratless-…> turn is dropped, the person survives', () => {
+  const dir = archiveOf({
+    'a.jsonl': [
+      rec({ type: 'user', message: { content: [{ type: 'text', text: '<stratless-judge>\nPERSON ASKED: x' }] } }),
+      user('why do we need a queue?'),
+    ],
+  });
+  assert.deepEqual(typedTexts(dir), ['why do we need a queue?']);
+  rmSync(dir, { recursive: true });
+});
+
+// ── the canary (v3): refuse when the log format moves; never lie "no data" over unreadable history ──
+
+test('the canary: real transcripts that read as NOTHING are a refusal, not "no data"', () => {
+  const dir = archiveOf({
+    // records in a shape the reader no longer recognises — the format moved (`type` renamed)
+    'moved.jsonl': Array.from({ length: 40 }, (_, i) => ({
+      uuid: `x${i}`,
+      sessionId: 's1',
+      timestamp: '2026-07-01T10:00:00.000Z',
+      kind: 'human',
+      body: 'a real message the reader can no longer see',
+    })),
+  });
+  const r = driftCheck([dir], { minBytes: 200 });
+  assert.equal(r.ok, false, 'content on disk + zero typed turns = drift, not emptiness');
+  assert.equal(r.typed, 0);
+  assert.match(r.reason ?? '', /format/i);
+  rmSync(dir, { recursive: true });
+});
+
+test('the canary stays silent when the reader still works (a talk-only or normal history)', () => {
+  const dir = archiveOf({ 'ok.jsonl': [user('a real typed message'), asst('reply'), user('another')] });
+  assert.equal(driftCheck([dir], { minBytes: 10 }).ok, true, 'one typed turn read → the reader works → not drift');
+  rmSync(dir, { recursive: true });
+});
+
+test('the canary does not fire on a nearly-empty archive (a fresh machine)', () => {
+  const dir = archiveOf({ 'tiny.jsonl': [{ kind: 'human', body: 'x' }] });
+  assert.equal(driftCheck([dir]).ok, true, 'below the byte floor = "nothing yet", never a false refusal');
+  rmSync(dir, { recursive: true });
+});
+
+test('the canary ignores our OWN borrowed calls — only the person can be unreadable', () => {
+  const dir = archiveOf({
+    'ours.jsonl': Array.from({ length: 60 }, () =>
+      rec({ type: 'user', entrypoint: 'sdk-cli', message: { content: [{ type: 'text', text: 'PERSON ASKED: '.repeat(20) }] } })),
+  });
+  assert.equal(driftCheck([dir], { minBytes: 200 }).ok, true, 'an all-machine archive is stratless talking to itself, not the reader failing');
   rmSync(dir, { recursive: true });
 });
 

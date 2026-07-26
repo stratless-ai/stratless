@@ -7,6 +7,8 @@
  * and "make a plan" (lift 20.6) surface cleanly, while generics ("i think", lift 1.1) filter out.
  * No model, no store — derived at build time from the labelled pile, exactly like the quotes.
  */
+import { hostname, userInfo } from 'node:os';
+
 import type { Labelled } from './count.js';
 import type { Category } from './categories.js';
 
@@ -77,6 +79,38 @@ function allStop(phrase: string): boolean {
   return phrase !== NUMBERED && phrase.split(' ').every((w) => STOPWORDS.has(w));
 }
 
+/**
+ * A phrase that is really the MACHINE talking, not the person. Pasted terminal output carries the
+ * shell prompt line ("jxs-MacBook-Air web % …") often enough that its fragments clear every
+ * statistical bar and land in the decode key as if they were speech — the first real build shipped
+ * `"jxs macbook" → wants space to reason toward pivot`, and after a containment-only filter the
+ * phrase simply grew the prompt's cwd ("jxs macbook air web") and escaped (both 2026-07-26). Two
+ * rules, both local and generic — this machine's names, nobody else's:
+ *   · the phrase sits inside the hostname+username word string (a pure fragment), or
+ *   · its FIRST word is the hostname's lead token or the username — the shell prompt starts with
+ *     them, so an extracted opening that starts there is a paste, whatever trails behind it.
+ */
+export interface MachineNames {
+  text: string;
+  leads: Set<string>;
+}
+export function isMachineArtifact(phrase: string, m: MachineNames = MACHINE): boolean {
+  if (phrase === NUMBERED) return false;
+  if (m.text.includes(` ${phrase} `)) return true;
+  return m.leads.has(phrase.split(' ')[0]);
+}
+const MACHINE: MachineNames = ((): MachineNames => {
+  let user = '';
+  try {
+    user = userInfo().username;
+  } catch {
+    /* some sandboxes have no user info — the hostname alone still covers the pasted prompt line */
+  }
+  const host = norm(hostname());
+  const leads = new Set([host.split(' ')[0], norm(user)].filter(Boolean));
+  return { text: ` ${norm(`${hostname()} ${user}`)} `, leads };
+})();
+
 /** A handle must not END on a dangling article/preposition ("make a", "i was thinking per") — its
  *  content-bearing extension ("make a plan") reads far better and survives in its place. */
 const DANGLING = new Set(['a', 'an', 'the', 'to', 'of', 'for', 'and', 'or', 'with', 'per', 'at']);
@@ -110,7 +144,7 @@ export function signatures(labelled: Labelled[], categories: Category[]): Signat
       }
 
     const qualifying = [...count.entries()]
-      .filter(([p, c]) => c >= MIN_COUNT && (convs.get(p)?.size ?? 0) >= MIN_CONVS && !allStop(p) && !endsDangling(p) && lift(p, c, members.length, corpus, N) >= MIN_LIFT)
+      .filter(([p, c]) => c >= MIN_COUNT && (convs.get(p)?.size ?? 0) >= MIN_CONVS && !allStop(p) && !endsDangling(p) && !isMachineArtifact(p) && lift(p, c, members.length, corpus, N) >= MIN_LIFT)
       .sort((a, b) => a[0].length - b[0].length) // shortest first, so dedup keeps the canonical form
       .map(([p]) => p);
     const deduped = dedupNested(qualifying);

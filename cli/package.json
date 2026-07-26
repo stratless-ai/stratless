@@ -1,7 +1,7 @@
 {
   "name": "stratless",
-  "version": "0.4.4",
-  "description": "Give your AI coding assistant a model of who you are, read from your own history, so it stops making you feel stupid. Local, private, no account.",
+  "version": "0.5.0",
+  "description": "Give your AI coding assistant a brief on who you are, read from your own history, so it stops making you feel stupid. Local, private, no account.",
   "type": "module",
   "bin": {
     "stratless": "dist/index.js"
@@ -41,6 +41,15 @@
     "agents-md"
   ],
   "license": "MIT",
+  "//dep": "THE ONE RUNTIME DEPENDENCY, taken deliberately (2026-07-26). A local embedding model is",
+  "//dep1": "what makes a cold build $0.20 instead of $13.27 — it replaces ~190,000 model calls with",
+  "//dep2": "arithmetic on this machine. It BREAKS 'zero runtime dependency'; it KEEPS 'nothing leaves',",
+  "//dep3": "since the model runs here and only the weights ever arrive. transformers.js is pinned to",
+  "//dep4": "its WASM backend in embed.ts: no native binary, so it cannot fail-to-install the way native",
+  "//dep5": "deps do. The weights are NOT bundled — `npx stratless` runs mirror, which needs no model.",
+  "dependencies": {
+    "@xenova/transformers": "^2.17.2"
+  },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "tsx": "^4.19.0",

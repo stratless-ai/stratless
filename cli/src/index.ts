@@ -15,8 +15,9 @@ import { loadAssignments } from './assign.js';
 import { join as joinLabelled, misfitRate } from './count.js';
 import { findAssistant, onPath } from './claude.js';
 import { init as doInit, ARCHIVE, PROJECTS, stopRefresh, refreshArmed, type InitResult } from './init.js';
+import { ensureModel, modelPresent, modelDir } from './embed.js';
 import { dailyCheck, fetchLatest, newerThan } from './notify.js';
-import { loadRecentExchanges, sessionCount, findExchange } from './exchange.js';
+import { loadRecentExchanges } from './exchange.js';
 import { removeProfile, humanMdPath, claudeMdPath } from './sink.js';
 import { readRenders, requestColdBuild, coldBuildRequested, readState, setFlushCadence, type FlushCadence, type RenderMeta } from './state.js';
 import { readUsage } from './usage.js';
@@ -300,10 +301,10 @@ async function tailWorker(spawnedAtMs: number, prevStamp: string): Promise<numbe
     }
     const p = readProgress();
     if (alive && p && p.pid === holder!.pid && !TERMINAL_PHASES.has(p.phase)) {
-      // Prefer the worker's latest live line — the discovery pipeline narrates "scoring N/total · ~M
-      // min left" here; fall back to the phase when there is no line yet.
+      // Prefer the worker's latest live line — the engine narrates ("fingerprinting 1280/5697",
+      // "naming 30 patterns") here; fall back to the phase when there is no line yet.
       const latest = p.summary?.length ? p.summary[p.summary.length - 1] : undefined;
-      const line = latest ?? (p.phase === 'judging' && p.total ? `judging ${p.done ?? 0}/${p.total} new` : p.phase);
+      const line = latest ?? p.phase;
       // The rotating cursor carries the "in progress" signal now, so the trailing "…" is gone. TTY only —
       // a pipe (the hook worker, CI) gets the plain line, never a stream of cursor frames.
       const spin = process.stderr.isTTY ? `${CE.ok(SPINNER_FRAMES[frame])} ` : '';
@@ -481,6 +482,9 @@ async function stop(): Promise<void> {
   if (hookRemoved) console.log(`  ${C.dim('· after-session refresh removed')}`);
   if (unloaded) console.log(`  ${C.dim('· profile unloaded from your CLAUDE.md')}`);
   console.log(`  ${C.dim('Your ~/.claude/HUMAN.md is left as-is — delete it yourself if you want it gone.')}`);
+  if (existsSync(modelDir())) {
+    console.log(`  ${C.dim(`The local model (~34MB) is still at ${modelDir()} — remove it if you want the disk back.`)}`);
+  }
   console.log(`  ${C.dim(`Run \`${hint('stratless update')}\` to load it again, \`${hint('stratless init')}\` to turn the refresh back on.`)}\n`);
 }
 
@@ -532,12 +536,16 @@ async function status(rest: string[] = []): Promise<void> {
   const tokens = u.inputTokens + u.outputTokens + u.cacheCreationTokens + u.cacheReadTokens;
   const fmtTok = (t: number): string =>
     t >= 1e6 ? `${(t / 1e6).toFixed(1)}M` : t >= 1000 ? `${Math.round(t / 1000)}k` : String(t);
-  // Split lifetime spend into the LIVE discovery-pipeline stages and the RETIRED miner era. The dead
-  // keys (judge/synthesis/miner/audit/grade) roll into ONE honest line instead of five dead labels;
-  // the total still counts them, so the sum never lies — only the clutter is gone. A fresh user, who
-  // never ran the miner, has no retired spend and never sees that line.
-  const RETIRED = new Set(['judge', 'synthesis', 'miner', 'audit', 'grade']);
-  const STAGE_LABEL: Record<string, string> = { discover: 'discovering', assign: 'scoring', write: 'writing' };
+  // Split lifetime spend into the LIVE engine stages and everything RETIRED. The dead keys roll into
+  // ONE honest line instead of a column of dead labels; the total still counts them, so the sum never
+  // lies — only the clutter is gone. A fresh user has no retired spend and never sees that line.
+  //
+  // `discover` and `assign` joined the retired set on 2026-07-26: v3 replaced them with `build` (the
+  // cold run: shape, fingerprint, cluster, name) and `grow` (placing new moments — free). Anyone who
+  // ran a previous version still has that spend on their meter, and it must keep a readable label
+  // rather than disappearing or printing a raw key.
+  const RETIRED = new Set(['judge', 'synthesis', 'miner', 'audit', 'grade', 'discover', 'assign']);
+  const STAGE_LABEL: Record<string, string> = { build: 'building', grow: 'placing', name: 'naming', write: 'writing' };
   let retiredUsd = 0;
   const stageParts: string[] = [];
   for (const [f, t] of Object.entries(u.byFeature)) {
@@ -565,9 +573,7 @@ async function status(rest: string[] = []): Promise<void> {
     const holder = readLock();
     const wp = readProgress();
     if (holder && !lockIsStale(holder)) {
-      const ph = wp && wp.pid === holder.pid
-        ? (wp.phase === 'judging' && wp.total ? `judging ${wp.done ?? 0}/${wp.total}` : wp.phase)
-        : 'working';
+      const ph = wp && wp.pid === holder.pid ? wp.phase : 'working';
       console.log(`    running now             ${C.ok('yes')}  ${C.dim(`${ph} · pid ${holder.pid} · stop: ${hint('stratless stop')}`)}`);
     } else {
       if (wp && wp.phase === 'stopped') {
@@ -730,6 +736,13 @@ async function main(): Promise<void> {
     }
     const est = pile > 0 ? estimateBuild(pile) : estimateFromMessages(mirror!.scale.messages);
     console.log(`\n  ${C.dim('Full profile:')}    ${C.b(estimateLine(est))}   ${C.dim('built on your own claude, nothing leaves.')}`);
+    // THE DOWNLOAD IS PART OF THE ASK. Most of the build now runs on a small local model, which is
+    // why it costs cents instead of dollars — but it is ~34MB and it has to arrive once. Consenting
+    // to a build must mean consenting to that, said out loud, before the yes. Silently pulling 34MB
+    // because someone agreed to a price is the kind of surprise the whole door exists to prevent.
+    if (!modelPresent()) {
+      console.log(`  ${C.dim('One-time:')}         ${C.b('~34MB local model')}   ${C.dim('downloaded once, then every build runs offline.')}`);
+    }
 
     // 4. the one consent. Only a real terminal can say yes; a pipe or a missing assistant points to
     //    `update`, which is itself the consented build path.
@@ -742,7 +755,25 @@ async function main(): Promise<void> {
       } catch {
         yes = false; // an aborted prompt (Ctrl-D/EOF) is a no — never a crash, never a build
       }
-      if (yes) return await update([], { consented: true }); // consent is explicit here — force the build
+      if (yes) {
+        // FOREGROUND, on the consented path only. The background Stop hook must never do this: a
+        // 34MB fetch that happens invisibly while someone is working is exactly the surprise the
+        // door exists to prevent. If it fails, say so and stop — the build would only fail later.
+        if (!modelPresent()) {
+          const stopFetch = startSpinner('fetching the local model (one time, ~34MB)…', process.stdout);
+          try {
+            await ensureModel();
+          } catch (err) {
+            stopFetch();
+            console.error(`\n  ${C.bad('could not download the local model.')}`);
+            console.error(`  ${C.dim(String(err instanceof Error ? err.message : err))}`);
+            console.error(`  ${C.dim(`check your connection and run ${hint('stratless init')} again.`)}\n`);
+            process.exit(1);
+          }
+          stopFetch();
+        }
+        return await update([], { consented: true }); // consent is explicit here — force the build
+      }
     }
     console.log(`\n  ${C.dim('No rush — the free read stays and stratless keeps it current after each session.')}`);
     console.log(`  ${C.dim('Build the full profile any time with')} ${C.b(hint('stratless update'))}${C.dim('.')}\n`);

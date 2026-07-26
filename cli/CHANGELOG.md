@@ -6,6 +6,43 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+## [0.5.0] · 2026-07-26 · a brief, not a portrait
+
+Two changes that go together. Your profile stops describing you and starts telling your assistant
+what to do, and the engine that finds the patterns now runs on your own machine.
+
+### Changed
+- **`HUMAN.md` is now a brief, not a description.** Four parts: *In the moment* — your shorthand
+  decoded live, phrase by phrase. *What to offer me before I ask* — the things you reliably want set
+  up or handed over, so your assistant offers them unprompted. *What to catch for me* — what you
+  reliably challenge or refuse, so it pre-empts instead of waiting to be corrected. *How to talk to
+  me* — the register you work in, matched rather than smoothed over. No section is guaranteed: the
+  file carries whatever your history actually supports, never a heading filled for its own sake.
+- **Every line is one instruction with its receipt.** `- offer a quick sketch of the idea before
+  building it out. (218×, rising)` — the count is what separates a measured profile from a written
+  prompt, and the trend rides beside it. The evidence sentences and example quotes moved out of the
+  file: your recurring phrases now live inside the instructions themselves, and a "how to talk to
+  me" line still has to be backed by a real quote to ship at all — it just isn't printed.
+- **The patterns are found locally.** A small embedding model groups your moments on your machine;
+  the model is borrowed only to *name* the groups and *word* the brief. A cold build now takes a few
+  minutes and spends cents. Naming last is deliberate: a model asked to invent categories can be led
+  by its prompt into finding whatever the prompt implies, and one that only names what the maths
+  already grouped cannot — and nothing can be *dropped* on a model's opinion either.
+
+### Added
+- **A local model, fetched once at `init`.** `stratless init` downloads ~34MB of model weights in the
+  foreground, after your consent. It is the first runtime dependency stratless has ever had.
+  **Nothing about you leaves your machine** — the weights come in, nothing goes out — and the
+  after-session refresh is unable to fetch anything at all, enforced in code rather than left true by
+  habit. `npx stratless` (the free mirror) needs no model and never touches one.
+- **A format-drift alarm.** If Claude Code's transcript format ever changes under stratless, the
+  build refuses loudly instead of quietly writing a profile from an empty read. Refuse, don't lie.
+
+### Fixed
+- A pasted terminal prompt (your machine's own hostname) can no longer enter your shorthand as if it
+  were something you say.
+- The shorthand list no longer runs straight into the first section heading.
+
 ## [0.4.4] · 2026-07-24 · one read, not two
 
 `stats` and `mirror` printed the same portrait, so `stats` is retired into `mirror`. They were never

@@ -6,19 +6,21 @@
  * the work that would otherwise hang the terminal, or the after-session hook:
  *
  *   build   read what's new into the pile (moments.jsonl) — free, code only
- *   assign  label the new moments against the live categories — the spend, ~one call per 200
- *   count   add up the columns — lift, misfit, the scoreboard — free, arithmetic
+ *   place   fingerprint the new moments and attach them to the frozen pile centres — free, on this
+ *           machine. On a FIRST run this is instead the cold build: cluster, then ONE call to name.
+ *   count   add up the columns — lift, the scoreboard — free, arithmetic
+ *   write   assemble the profile and load it
  *   release, exit   nothing runs when there is nothing new
  *
- * Discovery (minting the categories) and the profile file are stages 3 and 4; until they land, a
- * machine with no categories on disk builds the pile, says so, and spends nothing.
+ * A machine with no consent yet builds the pile, says so, and spends nothing.
  *
  * It narrates to progress.json (the tail and `status` read it) and records the stopwatch wherever
- * money moves. RESUMABILITY IS THE STORE'S JOB, NOT THE LOOP'S: each batch of checkmarks is
- * appended the instant it lands, so an interrupted run re-spends at most the one in-flight batch —
- * next run's seen-set skips everything already banked. On stop it labels the run "stopped by you",
- * releases the lock, and exits — a graceful signal is processed between batches, since an in-flight
- * assign call is currently synchronous (the stop-latency caveat, flagged for the worker pass).
+ * money moves. RESUMABILITY IS THE STORE'S JOB, NOT THE LOOP'S — and v3 made it simpler: a cold
+ * build writes its three stores TOGETHER at the end, so an interrupted build leaves them untouched
+ * and the next run starts clean rather than reading a half-built model as whole. On stop it labels
+ * the run "stopped by you",
+ * releases the lock, and exits — a graceful signal is processed between stages, since the in-flight
+ * naming call is synchronous (the stop-latency caveat, flagged for the worker pass).
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -27,11 +29,12 @@ import { fileURLToPath } from 'node:url';
 import { atomicWriteFileSync, CorruptStoreError } from './atomic.js';
 import { findAssistant } from './claude.js';
 import { buildMoments, loadMoments } from './moments.js';
+import { driftCheck } from './reader.js';
 import { loadCategories } from './categories.js';
-import { assignMoments, loadAssignments, pendingMoments } from './assign.js';
-import { join as joinLabelled, scoreboard, misfitRate } from './count.js';
+import { loadAssignments, pendingMoments } from './assign.js';
+import { join as joinLabelled, scoreboard } from './count.js';
 import { buildProfile, looksLikeProfile } from './write.js';
-import { discover, rediscover } from './discover.js';
+import { coldBuild, engineReady, grow } from './engine.js';
 import { estimateBuild, estimateLine } from './estimate.js';
 import { injectProfile, humanMdPath } from './sink.js';
 import { startRun } from './stopwatch.js';
@@ -51,16 +54,6 @@ const STRATLESS_DIR = join(homedir(), '.stratless');
  * and bounding it keeps every run cheap and SAFE regardless of how deep a history goes.
  */
 export const JUDGE_WINDOW = 200;
-
-/** Amortize default: a good first profile without chewing the whole window in one run. */
-const DEFAULT_JUDGE_LIMIT = 50;
-
-/** Per-run cap on FRESH judge calls (cache hits are always free). STRATLESS_JUDGE_LIMIT overrides. */
-export const judgeLimit = (): number => {
-  const env = Number(process.env.STRATLESS_JUDGE_LIMIT);
-  if (Number.isFinite(env) && env > 0) return env;
-  return DEFAULT_JUDGE_LIMIT;
-};
 
 /** The synthesis gate size. STRATLESS_SYNTH_EVERY overrides. */
 export const synthEvery = (): number => {
@@ -91,12 +84,6 @@ export function installedVersion(): string {
  * to expect the lints to stay quiet, not a reason to ship without them.
  */
 
-/** Re-discovery: when the misfit rate over the last window stays above the trigger, mint the new
- *  behaviours — but no more than once per cooldown, so it can never run away. */
-const REDISCOVER_WINDOW_MS = 14 * 24 * 3600 * 1000;
-const REDISCOVER_COOLDOWN_MS = 7 * 24 * 3600 * 1000;
-const REDISCOVER_MISFIT = 0.15;
-
 /** The effective auto-rebuild cooldown: the env override wins, else the person's stored cadence
  *  (`update --daily|--weekly`), else daily. */
 const flushMaxAgeMs = (): number => flushCooldownMs(readState().flushCadence);
@@ -106,7 +93,7 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 /**
  * The worker's whole life. Returns the process exit code. Assumes it IS the worker process —
  * takes the lock (losing it means another worker lives: this wake was a no-op, exit clean),
- * builds the pile, assigns the new moments, counts, narrates, releases, ends.
+ * builds the pile, places the new moments, counts, narrates, releases, ends.
  */
 export async function runWorker(): Promise<number> {
   if (!acquireLock(lockFilePath(), 'worker')) return 0; // a live worker exists — the doorbell already did its job
@@ -134,8 +121,8 @@ export async function runWorker(): Promise<number> {
     }
   };
 
-  // Stop is cooperative (C7): a signal flips this flag; the assign loop checks it between batches
-  // (each already banked) and unwinds gracefully — the caller labels the run and the `finally`
+  // Stop is cooperative (C7): a signal flips this flag; the engine checks it between stages
+  // (fingerprint, cluster, name) and unwinds gracefully — the caller labels the run and the `finally`
   // releases the lock. stopWorker signals the whole process GROUP, so the in-flight borrowed call
   // is terminated too and the loop reaches its next checkpoint at once; the SIGKILL after the grace
   // window is the backstop. No immediate exit here — that is what let the old design skip the label.
@@ -166,28 +153,36 @@ export async function runWorker(): Promise<number> {
 
     const summary: string[] = [];
 
-    // STAGES 1-2 of the discovery pipeline, in a harness (lock, progress frames, receipt, version
-    // check) that predates them and stays put. Build the pile (free), assign the new moments against
-    // the live categories (the spend), add up the columns (free), write the profile. With no
-    // categories yet, discover mints them from the pile (cold start); at steady state a rising misfit
-    // rate re-discovers the behaviours we have no column for.
+    // THE ENGINE, in a harness (lock, progress frames, receipt, version check) that predates it and
+    // stays put. Build the pile (free) · place the new moments against the frozen centres (free) ·
+    // add up the columns (free) · write the profile. With no frozen model yet, the cold build shapes,
+    // fingerprints and clusters on this machine, then spends ONE call naming what it found.
     const sw = startRun();
     const built = buildMoments();
 
     if (!built.total) {
+      // Zero moments is usually a fresh start — but if the person's own transcripts are substantial
+      // and the reader still got nothing, the log format moved under us. Refuse loudly rather than
+      // quietly reporting "no conversations" over a profile we cannot honestly build. (v3 canary.)
+      const drift = driftCheck();
+      if (!drift.ok) return fail(drift.reason!.split('\n'));
       summary.push('no conversations found yet — talk to your assistant a few times, then run `stratless update`');
     } else {
       let cats = loadCategories();
       let changed = false; // categories or assignments changed this run → force the profile rebuild
       let flush = true; // cold start always flushes; steady state decides (flushDue) — the per-turn-rebuild fix
 
-      if (!cats.length) {
-        // COLD START. discover mints the categories AND assigns the whole pile — this is the paid
-        // stage. It only ever runs on CONSENT: `manual` (STRATLESS_FLUSH, set by a hand-typed update or
-        // the door's yes for THIS worker) OR a DURABLE consent flag (coldBuildRequested), so a lock
-        // race that hands the build to a different worker still honors the yes. A background hook has
-        // neither, so it collects the pile (free, above) and stops HERE — no discover, no assign,
-        // nothing billed. Both signals are set only by an explicit yes: "no surprise spend" is structural.
+      // COLD when there is no profile yet OR no frozen model to grow against. That second clause is
+      // THE UPGRADE PATH and it is not optional: a machine that ran a previous engine has categories
+      // but no engine.json, and branching on categories alone would send it down the steady path
+      // forever — nothing to join against, nothing placed, silently never updating again.
+      if (!cats.length || !engineReady()) {
+        // COLD START — the one paid run: shape, fingerprint, cluster, then ONE call to name. It only
+        // ever runs on CONSENT: `manual` (STRATLESS_FLUSH, set by a hand-typed update or the door's
+        // yes for THIS worker) OR a DURABLE consent flag (coldBuildRequested), so a lock race that
+        // hands the build to a different worker still honors the yes. A background hook has neither,
+        // so it collects the pile (free, above) and stops HERE — nothing billed. Both signals are set
+        // only by an explicit yes: "no surprise spend" is structural.
         const consented = manual || coldBuildRequested();
         if (!consented) {
           flush = false; // nothing scored, no profile yet — skip the scoreboard/rebuild block below
@@ -196,24 +191,33 @@ export async function runWorker(): Promise<number> {
             `collected ${built.total} moment${built.total === 1 ? '' : 's'} · full build not run yet — run \`stratless update\` to build your profile (${est})`,
           );
         } else {
-          // COLD START (stage 3): discover mints the categories and writes the assignments store. The
-          // consent is now being taken up — consume the durable flag so it is honored exactly once.
+          // COLD START: the engine shapes, fingerprints, clusters, names, and freezes. Everything up
+          // to the naming call is arithmetic on this machine — the whole build is one small call.
+          // The consent is now being taken up: consume the durable flag so it is honored exactly once.
           clearColdBuildRequest();
-          const discoverStart = Date.now();
-          const dr = await discover({
-            onProgress: (l) => writeProgress({ phase: 'starting', startedAt, summary: [l] }),
-            shouldStop: () => stopRequested,
-          });
-          sw.stage('discover', Date.now() - discoverStart, dr.assigned);
+          const buildStart = Date.now();
+          const bin = findAssistant();
+          const dr = bin
+            ? await coldBuild(bin, {
+                onProgress: (l: string) => writeProgress({ phase: 'starting', startedAt, summary: [l] }),
+                shouldStop: () => stopRequested,
+              })
+            : { categories: 0, scored: 0, piles: 0 };
+          sw.stage('build', Date.now() - buildStart, dr.scored);
           cats = loadCategories();
           if (dr.categories) {
             changed = true;
-            // Start the re-discovery cooldown clock here too — otherwise the first steady-state run
-            // after a cold start sees "never discovered" and could re-mint immediately on a high misfit.
-            writeState({ ...readState(), lastDiscoverAt: new Date().toISOString() });
             summary.push(
-              `discovered ${dr.categories} categor${dr.categories === 1 ? 'y' : 'ies'} across ${dr.rounds} round${dr.rounds === 1 ? '' : 's'} · ${dr.assigned} moment${dr.assigned === 1 ? '' : 's'} scored`,
+              `found ${dr.categories} pattern${dr.categories === 1 ? '' : 's'} in ${dr.scored} moment${dr.scored === 1 ? '' : 's'} — fingerprinted on this machine, one call to name them`,
             );
+          } else if (dr.noModel) {
+            // A wrong reason is worse than none: without this the person is told there is not enough
+            // behaviour to profile, when in fact the model never arrived.
+            summary.push('the local model is not available yet — run `stratless init` to fetch it, then `stratless update`');
+          } else if (!bin) {
+            summary.push('no assistant found to name the patterns — install Claude Code, then run `stratless update`');
+          } else {
+            summary.push('not enough recurring behaviour to build a profile yet — keep working, then run `stratless update`');
           }
         }
       } else {
@@ -230,35 +234,26 @@ export async function runWorker(): Promise<number> {
               : 'nothing new since the last flush',
           );
         } else {
-          const assignStart = Date.now();
-          const res = await assignMoments({ shouldStop: () => stopRequested });
-          sw.stage('assign', Date.now() - assignStart, res.assigned);
-          if (res.assigned) {
+          // STEADY STATE: new moments come to the FROZEN pile centres. No clustering, no naming, no
+          // model call — this path is free. Piles keep their names and birth dates, which is what
+          // makes "rising" and "fading" mean anything: you are watching the same crowd over time,
+          // not comparing this month's piles against last month's different ones.
+          const growStart = Date.now();
+          const res = await grow({ shouldStop: () => stopRequested });
+          sw.stage('grow', Date.now() - growStart, res.scored);
+          if (res.scored) {
             changed = true;
             summary.push(
-              `assigned ${res.assigned} new moment${res.assigned === 1 ? '' : 's'} across ${res.batches} call${res.batches === 1 ? '' : 's'} against ${cats.length} categories`,
+              `placed ${res.scored} new moment${res.scored === 1 ? '' : 's'} against ${cats.length} patterns — free, on this machine`,
             );
           } else if (manual) {
-            summary.push('already current — nothing new to score');
+            summary.push('already current — nothing new to place');
           }
 
-          // RE-DISCOVERY: when the recent misfit rate stays high, mint the behaviours we have no
-          // column for — once per cooldown, so it never runs away.
-          if (!stopRequested) {
-            const labelledNow = joinLabelled(loadMoments(), loadAssignments());
-            const since = new Date(Date.now() - REDISCOVER_WINDOW_MS);
-            const st = readState();
-            const dueRedisc = !st.lastDiscoverAt || Date.now() - Date.parse(st.lastDiscoverAt) > REDISCOVER_COOLDOWN_MS;
-            if (dueRedisc && misfitRate(labelledNow, { since }) > REDISCOVER_MISFIT) {
-              const recent = labelledNow.filter((l) => !l.kinds.length && Date.parse(l.moment.ts) >= since.getTime()).map((l) => l.moment);
-              const added = rediscover(recent);
-              if (added.length) {
-                changed = true;
-                summary.push(`re-discovered ${added.length} new categor${added.length === 1 ? 'y' : 'ies'} — recent misfit rose`);
-                writeState({ ...readState(), lastDiscoverAt: new Date().toISOString() });
-              }
-            }
-          }
+          // NOT YET: a moment near NOTHING should be parked, and parked moments that later resemble
+          // each other should be born as a new pile and named. Until that lands, a genuinely new
+          // behaviour is absorbed into the nearest existing pile and cannot surface. This is where
+          // re-discovery used to sit, and it is the next build.
         }
       }
 
@@ -293,7 +288,7 @@ export async function runWorker(): Promise<number> {
             injectProfile(profile.text, undefined, undefined, builtAt); // writes ~/.claude/HUMAN.md AND points CLAUDE.md at it — the load
             writeRender('profile', { builtAt, sessions: profile.meta.sessions, exchanges: profile.meta.moments, categories: loadCategories().length });
             summary.push(
-              `profile written and loaded · ${profile.meta.signals} distress signal${profile.meta.signals === 1 ? '' : 's'} + ${profile.meta.working} working-style trait${profile.meta.working === 1 ? '' : 's'}${profile.meta.shorthand ? ` + ${profile.meta.shorthand} shorthand handles` : ''}`,
+              `profile written and loaded · ${profile.meta.frame} to offer + ${profile.meta.judge} to catch + ${profile.meta.register} register${profile.meta.shorthand ? ` + ${profile.meta.shorthand} shorthand handles` : ''}`,
             );
           } else {
             summary.push('profile not rebuilt — not enough clear evidence yet');

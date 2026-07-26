@@ -7,7 +7,7 @@
  * a live reading. The instant real stages run, the stopwatch's measured ETA takes over; this is only
  * the number shown at minute zero.
  *
- * PROVENANCE: the discovery pipeline scored 4,950 moments for ~$8.73 in ~15 min on the build
+ * PROVENANCE (historical, superseded by REFERENCE below): the discovery pipeline scored 4,950 moments for ~$8.73 in ~15 min on the build
  * machine's own archive (2026-07-21) — the one paid measurement we own. Everything here is arithmetic
  * on it. The single end-of-build confirmation run is what replaces these constants; when it lands,
  * update REFERENCE below and nothing else.
@@ -16,22 +16,33 @@
  * receipt in loop.ts — quoted, never hidden.
  */
 
-/** The one paid measurement — the 0.4.0 cost-pass run (2026-07-23): 5,210 moments scored for ~$13.27,
- *  on an archive of ~5,120 submitted messages (27 categories, 3 rounds, assign batched 400/call). Update
- *  all four here from a fresh confirmation run. NOTE: this pass halved the assign call count (52 -> 21) but
- *  cost fell only 23% ($17.31 -> $13.27) — 71% of every build is 1-hour cache-creation the harness writes
- *  and never reads back, and that tax scales with pile tokens, not call count. So this is near the floor of
- *  what batching can do; the real cut needs the direct-API / adapter path. `minutes` is carried forward —
- *  this run's wall-clock was sleep-interrupted (not cleanly measurable), and batching did not speed it up. */
+/**
+ * The one paid measurement — the v3 engine's first real cold build (2026-07-26): **5,647 moments for
+ * $0.25 in 3.7 minutes**, on an archive of ~5,550 submitted messages. Update all four here from a
+ * fresh confirmation run.
+ *
+ * WHAT CHANGED, and why the numbers moved by two orders of magnitude. The previous reference was
+ * $13.27 / 33 minutes, and 71% of it was cache-creation the borrowed CLI writes and never reads back
+ * — a tax that scaled with pile tokens and that batching could not touch. v3 removed the stage that
+ * paid it: `assign` asked a model "does this moment fit this category?" ~190,000 times per build, and
+ * a local embedding model now answers the same question with arithmetic, on this machine, for
+ * nothing. **The whole remaining bill is ONE naming call plus the profile write.**
+ *
+ * Measured breakdown of that run: build (shape + fingerprint + cluster + name) 192.8s, write 15.0s.
+ * The fingerprinting — the longest stretch — costs $0 and never leaves the machine.
+ *
+ * `messages` is carried at the previous run's moments-per-message ratio (~1.02) rather than
+ * re-measured: it describes how a transcript becomes a pile, which the engine change did not touch.
+ */
 export const REFERENCE = {
-  moments: 5210,
-  usd: 13.27,
-  minutes: 33,
-  messages: 5120,
+  moments: 5647,
+  usd: 0.25,
+  minutes: 3.7,
+  messages: 5550,
 } as const;
 
-const USD_PER_MOMENT = REFERENCE.usd / REFERENCE.moments; // ≈ $0.00255
-const MIN_PER_MOMENT = REFERENCE.minutes / REFERENCE.moments; // ≈ 0.0063 min
+const USD_PER_MOMENT = REFERENCE.usd / REFERENCE.moments; // ≈ $0.000044
+const MIN_PER_MOMENT = REFERENCE.minutes / REFERENCE.moments; // ≈ 0.00066 min
 /** The pile (moments) runs above submitted messages (~1.02× on the reference archive). The door can
  *  only cheaply count messages before the pile is built, so it scales UP to an estimated moment count:
  *  quoting from messages directly would UNDER-state the per-moment spend, the one direction a cost
@@ -48,9 +59,14 @@ export interface BuildEstimate {
 }
 
 /**
- * Quote a cold build of `pileCount` moments from the shipped rate card. Linear in the pile: assign is
- * the dominant cost and it is ~flat per moment (batched 400/call, thinking capped to 0). A negative
- * or fractional count is floored to a sane non-negative integer.
+ * Quote a cold build of `pileCount` moments from the shipped rate card.
+ *
+ * LINEAR IN THE PILE, and less exactly so than it used to be. The cost is now one naming call plus
+ * the profile write, and neither scales cleanly with pile size — the naming call scales with the
+ * NUMBER OF PILES (derived, 8-30) rather than the number of moments. Wall-clock does scale with the
+ * pile, because fingerprinting is per-moment. Linear stays the honest approximation for a door that
+ * must quote before anything has run, and it errs high on large piles, which is the safe direction.
+ * A negative or fractional count is floored to a sane non-negative integer.
  */
 export function estimateBuild(pileCount: number): BuildEstimate {
   const moments = Number.isFinite(pileCount) ? Math.max(0, Math.floor(pileCount)) : 0;
@@ -72,7 +88,7 @@ export function estimateFromMessages(messageCount: number): BuildEstimate {
 }
 
 /**
- * A one-line human quote: "~4,950 moments · ~$8.73 · ~15 min". A sub-cent build still reads as a
+ * A one-line human quote: "~5,647 moments · ~$0.25 · ~4 min". A sub-cent build still reads as a
  * spend ("< $0.01", never "$0.00"); a sub-minute build reads "< 1 min".
  */
 export function estimateLine(e: BuildEstimate): string {

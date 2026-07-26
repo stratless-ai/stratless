@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { samples } from '~/lib/samples'
 
 // The sea footer (SiteFooter inside the SeigaihaField wave band) is rendered by the LAYOUT, after
 // </main>, so it sits OUTSIDE the main landmark. A <footer> nested inside <main> is not a
@@ -9,12 +8,13 @@ definePageMeta({ footer: false, seaFooter: true })
 
 const GITHUB = 'https://github.com/stratless-ai/stratless'
 
-// The two person-layer file-cards open as real documents (rendered from web/content/samples).
-const openFile = ref<string | null>(null)
-const activeSample = computed(() => (openFile.value ? (samples[openFile.value] ?? null) : null))
-
 // The CLI version, read from cli/package.json at build (see nuxt.config.ts) so it never goes stale by hand.
 const version = useRuntimeConfig().public.version
+
+// THE ONE SAMPLE SOURCE: a real build, checked in verbatim (see AGENTS.md, "One sample profile").
+// Imported raw at build time and rendered in full below — the goods inline, never behind a click.
+import sampleRaw from '~/content/samples/HUMAN.md?raw'
+const sample = sampleRaw.trim()
 
 // Where HUMAN.md is headed. Claude Code is live; the rest are the roadmap. `logo` is a local monochrome
 // mark in /public/logos (from simple-icons, recolored via CSS mask); null = no clean official mark, so
@@ -57,7 +57,7 @@ useHead({
 
 // THE FRONT DOOR PERFORMS THE TRICK. It does not explain a philosophy.
 //
-// Everything below the fold is the REVEAL — there is no model, no cloud, no training; the
+// Everything below the fold is the REVEAL — no cloud, no training, no separate bill; the
 // conversation was on your disk the whole time, and Claude Code deletes it after 30 days.
 // Penn & Teller: transparent cups. Knowing how it works makes it better, not worse.
 //
@@ -92,19 +92,17 @@ useHead({
 
 <span class="t-d"># who you are working with, read from your own history</span>
 
-<span class="t-b">HOW THEY WORK</span>
-Muses openly about direction and invites free-form
-discussion rather than a single pointed question.
-<span class="t-d">876 times ·</span> <span class="t-you">"fast to sell and painkiller?"</span>
+<span class="t-b">WHAT TO OFFER ME BEFORE I ASK</span>
+- offer a quick sketch of the idea before building it
+  out, then ask them to validate it. <span class="t-d">(218×)</span>
 
-Gives a short signal (go, commit it) to authorize the
-next step without further discussion.
-<span class="t-d">727 times ·</span> <span class="t-you">"Go with A, fix the counts"</span>
+<span class="t-b">WHAT TO CATCH FOR ME</span>
+- catch completed work presented as done and expect a
+  double-check pass before it's accepted. <span class="t-d">(101×)</span>
 
-<span class="t-b">WHEN SOMETHING HAS GONE WRONG</span>
-Insists on a plan, and plan mode, before any code
-gets written.
-<span class="t-d">256 times ·</span> <span class="t-you">"wait. are you in plan mode?"</span>
+<span class="t-b">HOW TO TALK TO ME</span>
+- talk in short go-ahead bursts, they approve with a
+  brief word and expect you to keep moving. <span class="t-d">(159×, rising)</span>
 
 <span class="t-d">not loaded yet · load it into your assistant: stratless update</span>
 
@@ -127,45 +125,6 @@ gets written.
     </div>
   </section>
 
-  <!-- THE PERSON LAYER — what stratless is about: the file every repo is missing. -->
-  <section class="section layer">
-    <div class="container narrow">
-      <p class="eyebrow">The person layer</p>
-      <h2>Every repo has an AGENTS.md.<br />None has a HUMAN.md.</h2>
-      <p>
-        <code>AGENTS.md</code> tells your AI about your <strong>code</strong>: your stack, your
-        conventions, this repo. Everyone has one. Nothing tells it about <strong>you</strong>, what
-        you know, how you think, what you're really after. That file is empty.
-        <strong>stratless writes it</strong> (<code>HUMAN.md</code>), and your assistant loads it
-        every session.
-      </p>
-    </div>
-    <div class="container">
-      <div class="file-icons">
-        <button type="button" class="file-icon" aria-label="Open AGENTS.md" @click="openFile = 'AGENTS.md'">
-          <svg class="fi-glyph" viewBox="0 0 44 54" aria-hidden="true">
-            <path class="fi-doc" d="M11 4 H27 L37 14 V45 Q37 49 33 49 H11 Q7 49 7 45 V8 Q7 4 11 4 Z" />
-            <path class="fi-fold" d="M27 4 V14 H37" />
-            <path class="fi-mark" d="M18 27 l-4 5 l4 5 M26 27 l4 5 l-4 5 M25 25 l-6 14" />
-          </svg>
-          <span class="fi-name">AGENTS.md</span>
-          <span class="fi-tag">your code</span>
-        </button>
-        <button type="button" class="file-icon accent" aria-label="Open HUMAN.md" @click="openFile = 'HUMAN.md'">
-          <svg class="fi-glyph" viewBox="0 0 44 54" aria-hidden="true">
-            <path class="fi-doc" d="M11 4 H27 L37 14 V45 Q37 49 33 49 H11 Q7 49 7 45 V8 Q7 4 11 4 Z" />
-            <path class="fi-fold" d="M27 4 V14 H37" />
-            <circle class="fi-mark" cx="22" cy="30" r="4" />
-            <path class="fi-mark" d="M14 44 a8 8 0 0 1 16 0" />
-          </svg>
-          <span class="fi-name">HUMAN.md</span>
-          <span class="fi-tag">you</span>
-        </button>
-      </div>
-      <p class="quiet center files-note">Real files. Click to open. <code>HUMAN.md</code> is stratless's actual profile of its own maker.</p>
-    </div>
-  </section>
-
   <!-- INSTALL — one command. -->
   <section id="install" class="section install">
     <div class="container">
@@ -176,27 +135,18 @@ gets written.
         <p class="cmd-note">See what your AI already knows about you. Runs on your machine, changes nothing.</p>
       </div>
 
-      <!-- The KEEP is one inline line, NOT a second command card — a single boxed CTA above keeps the
-           free read the one hero; init's reaper/archive urgency stays, as the reason to keep. -->
+      <!-- The KEEP and the OFF-SWITCH are inline lines, NOT command cards — a single boxed CTA above
+           keeps the free read the one hero, and a first visit gets one command to run, one to keep,
+           one to leave. The full command list lives at /docs/commands, where reference belongs. -->
       <p class="keep-line">
         Like it? Keep it: <code>npx stratless init</code> stops Claude Code's 30-day reaper and archives
         your history. Whatever's already gone is gone.
       </p>
+      <p class="keep-line">
+        Turn it off anytime: <code>stratless stop</code>. Being able to shut it up is half of why you
+        can trust it.
+      </p>
       <p class="cmd-meta center">v{{ version }} · MIT · <a :href="`${GITHUB}/releases`" target="_blank" rel="noopener">changelog ↗</a></p>
-      <div class="three">
-        <div class="card">
-          <code class="k">stratless profile</code>
-          <p>The briefing <strong>your AI</strong> reads: how you work, where it tends to go wrong, and the shorthand you actually use. Loads at the start of every session.</p>
-        </div>
-        <div class="card">
-          <code class="k">stratless update</code>
-          <p>Reads what's new and rebuilds your profile when enough has changed, so it never spends on a rebuild that would say the same thing. Run it by hand and it rebuilds now.</p>
-        </div>
-        <div class="card">
-          <code class="k">stratless stop</code>
-          <p>Turn it off anytime. Nothing ever leaves your machine, and being able to shut it up is half of why you can trust it.</p>
-        </div>
-      </div>
     </div>
   </section>
 
@@ -206,30 +156,42 @@ gets written.
       <p class="eyebrow">There's no trick</p>
       <h2>The conversation was on your disk the whole time.</h2>
       <p>
-        There's no model. No cloud. No training. No separate bill. Every assistant that can resume
-        a chat has to store the chat, and Claude Code keeps yours in <code>~/.claude/projects</code>.
+        No cloud. No training. No separate bill. Every assistant that can resume a chat has to
+        store the chat, and Claude Code keeps yours in <code>~/.claude/projects</code>.
         <strong>Nobody reads it.</strong>
       </p>
       <p>
-        stratless reads it. It walks each session into moments, what you typed and what the
-        assistant was doing, and finds the kinds of thing you do again and again. Your
+        stratless reads it, and it reads what you did, not what it said. It walks each session into
+        moments and finds the kinds of thing you do again and again. Your
         <em>"wait, what does this mean"</em> is one. Your <em>"ok, next"</em> is another.
-        <strong>It reads what you did, not what it said.</strong>
-      </p>
-      <p>
-        The patterns that survive, each carrying the real count behind it, become your
-        <code>HUMAN.md</code>, written by the assistant you already have, on your own plan. If a
-        moment carries no honest signal, it records nothing.
-        <strong>A confident guess is the one thing that would end this.</strong>
       </p>
 
       <div class="pipeline">
         <div><code>moments</code><span>what you typed, and what the assistant was doing</span></div>
-        <div><code>discover</code><span>the recurring things you do, found in your own logs</span></div>
+        <div><code>cluster</code><span>the recurring things you do, found on your machine</span></div>
         <div><code>count</code><span>how often, over what span, rising or fading</span></div>
         <div><code>write</code><span>the patterns that survive become your HUMAN.md</span></div>
       </div>
-      <p class="quiet">Four steps, all on your machine. No scheme we shipped, no model of a generic person. <strong>Derived, not pre-matched.</strong></p>
+      <p class="quiet">Three of the four run entirely on your machine: the grouping runs on <strong>bge-small</strong>, an open MIT model (~34MB) fetched once at <code>init</code>, and only the naming borrows the assistant you already have. Weights come in, nothing goes out. If a moment carries no honest signal, it records nothing. <strong>Derived, not pre-matched.</strong></p>
+    </div>
+  </section>
+
+  <!-- THE FILE — the goods, inline. Everyone who lands sees exactly what they would be working
+       with: a real build, checked in verbatim, rendered in full. Never behind a click. -->
+  <section class="section thefile">
+    <div class="container narrow">
+      <p class="eyebrow">The file itself</p>
+      <h2>This is a real one.</h2>
+      <p class="file-lede">
+        The author's own <code>HUMAN.md</code>, unedited: 30 patterns found in 138 real
+        conversations, written as instructions his assistant loads every session. Yours will say
+        different things. That's the point.
+      </p>
+      <div class="filecard">
+        <div class="filebar" aria-hidden="true"><span class="fname">~/.claude/HUMAN.md</span></div>
+        <pre class="filebody" tabindex="0" role="region" aria-label="the full HUMAN.md file, a real example"><code>{{ sample }}</code></pre>
+      </div>
+      <p class="quiet file-note">Rebuilt as the history grows. Load it into any assistant that reads a file, or delete it: it's plain text, and it's yours.</p>
     </div>
   </section>
 
@@ -252,12 +214,6 @@ gets written.
     </div>
   </section>
 
-  <FileModal
-    :open="!!openFile"
-    :name="activeSample?.name"
-    :html="activeSample?.html"
-    @close="openFile = null"
-  />
 </template>
 
 <style scoped>
@@ -376,8 +332,10 @@ h1 {
 .term-body {
   margin: 0;
   padding: 1.15rem 1.25rem 1.4rem;
-  /* A fixed-height shell you scroll inside — the profile is longer than the window, like real output. */
-  max-height: 19rem;
+  /* A fixed-height shell you scroll inside — the profile is longer than the window, like real output.
+     Sized so the fold lands inside the third section: all three headings reachable, and the second
+     beat (`stratless update` → loaded) stays below the fold as the reward for scrolling. */
+  max-height: 24rem;
   overflow: auto;
   overscroll-behavior: contain;
   font-family: var(--font-mono);
@@ -430,7 +388,7 @@ h1 {
 
 /* ── install ── */
 .install {
-  padding-top: 1rem;
+  padding-top: 4rem;
   /* The hero CTA jumps here. The header is sticky at 58px, so without this the eyebrow lands
      UNDER it. DocsShell sets the same on its headings for exactly this reason. */
   scroll-margin-top: 80px;
@@ -458,33 +416,10 @@ h1 {
   background: none;
   padding: 0;
 }
-.three {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
-  gap: 1.1rem;
-}
-.card {
-  border: 1.5px solid var(--ink);
-  border-radius: 8px;
-  background: var(--paper-2);
-  padding: 1.2rem;
-}
-.card .k {
-  font-family: var(--font-mono);
-  font-weight: 700;
-  font-size: var(--fs-sm);
-  background: none;
-  padding: 0;
-}
-.card p {
-  margin: 0.6rem 0 0;
-  font-family: var(--font-read);
-  font-size: var(--fs-md);
-  line-height: 1.55;
-  color: var(--ink-2);
-}
 .cmd-meta {
-  margin: 0 auto 2.8rem;
+  /* the last element of the install band now — a little air above so it reads as the section's
+     footer, not the tail of the stop line */
+  margin: 2rem auto 0;
   font-family: var(--font-mono);
   font-size: var(--fs-sm);
   color: var(--mid);
@@ -511,8 +446,8 @@ h1 {
   max-width: 30rem;
   text-align: center;
 }
-/* the KEEP — one inline follow-up line, deliberately NOT a second command card, so there's a single
-   boxed CTA above it. The command sits inline as bold mono, not a box. */
+/* the KEEP and the OFF-SWITCH — inline follow-up lines, deliberately NOT command cards, so there's a
+   single boxed CTA above them. Each command sits inline as bold mono, not a box. */
 .keep-line {
   margin: 1.3rem auto 0;
   max-width: 34rem;
@@ -528,105 +463,51 @@ h1 {
   color: var(--ink);
 }
 
-/* ── the person layer ── */
-.layer .narrow {
-  text-align: center;
-}
-.layer h2 {
+/* ── the file itself ── */
+.thefile h2 {
   font-size: var(--fs-title);
   line-height: 1.25;
   margin: 0.4rem 0 1.2rem;
 }
-.layer p {
-  font-family: var(--font-read);
-  line-height: 1.7;
-  color: var(--ink-2);
-  margin: 0;
+.file-lede {
+  margin: 0 0 1.6rem;
 }
-.layer strong {
-  color: var(--ink);
+.filecard {
+  border: 1.5px solid var(--ink);
+  border-radius: 8px;
+  background: var(--paper-2);
+  overflow: hidden;
 }
-.layer code {
-  font-family: var(--font-mono);
-  font-size: var(--fs-code);
+.filebar {
+  padding: 0.55rem 1rem;
+  border-bottom: 1.5px solid var(--ink);
+  background: color-mix(in srgb, var(--ink) 6%, var(--paper-2));
 }
-.file-icons {
-  display: flex;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 2.6rem;
-  margin-top: 2.2rem;
-}
-.file-icon {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.45rem;
-  border: 0;
-  background: none;
-  cursor: pointer;
-  padding: 0.7rem 1rem 0.6rem;
-  border-radius: 12px;
-  transition: transform 0.13s ease, background 0.13s ease;
-  -webkit-tap-highlight-color: transparent;
-}
-.file-icon:hover {
-  transform: translateY(-3px);
-  background: color-mix(in srgb, var(--ink) 4%, transparent);
-}
-.file-icon:focus-visible {
-  outline: 2px solid var(--accent-deep);
-  outline-offset: 2px;
-}
-.fi-glyph {
-  width: 38px;
-  height: 47px;
-  filter: drop-shadow(0 4px 7px rgba(20, 18, 12, 0.14));
-}
-.fi-doc {
-  fill: var(--paper-2);
-  stroke: var(--ink);
-  stroke-width: 2;
-  stroke-linejoin: round;
-}
-.fi-fold {
-  fill: none;
-  stroke: var(--ink);
-  stroke-width: 2;
-  stroke-linejoin: round;
-}
-.fi-mark {
-  fill: none;
-  stroke: var(--ink);
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-.file-icon.accent .fi-doc,
-.file-icon.accent .fi-fold,
-.file-icon.accent .fi-mark {
-  stroke: var(--accent-deep);
-}
-.fi-name {
+.fname {
   font-family: var(--font-mono);
   font-size: var(--fs-sm);
   font-weight: 700;
   color: var(--ink);
 }
-.file-icon.accent .fi-name {
-  color: var(--accent-deep);
-}
-.fi-tag {
-  font-family: var(--font-read);
-  font-size: var(--fs-sm);
-  color: var(--mid);
-}
-.files-note {
-  margin-top: 1.9rem;
-}
-.files-note code {
+/* The whole file, in full — no inner scroll, no click. Long provenance lines soft-wrap. */
+.filebody {
+  margin: 0;
+  padding: 1.2rem 1.25rem 1.4rem;
   font-family: var(--font-mono);
-  font-size: var(--fs-code);
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.filebody code {
+  font-family: inherit;
+  font-size: inherit;
+  background: none;
+  padding: 0;
+}
+.file-note {
+  margin-top: 1.2rem;
 }
 
 /* ── the reveal ── */
@@ -646,7 +527,7 @@ h1 {
 .reveal strong {
   color: var(--ink);
 }
-/* the discovery pipeline steps under the reveal (moments · discover · count · write) */
+/* the pipeline steps under the reveal (moments · cluster · count · write) */
 .pipeline {
   display: flex;
   flex-direction: column;

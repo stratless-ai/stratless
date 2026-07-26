@@ -1,17 +1,22 @@
 # stratless
 
-**stratless builds your AI a living model of who you are, so it stops making you feel stupid.**
+**stratless writes your AI a brief on who you are, so it stops making you feel stupid.**
 
 Your coding assistant has no idea who it's talking to. So it only has two registers: silence, or a
 wall of jargon. stratless gives it the missing third thing, a picture of *you*, read from the
 conversations you've already had, and hands it over before you say a word.
 
 ```
-npx stratless init
+npx stratless
 ```
 
-No account. No API key. No cloud. It reads transcripts already on your disk and borrows the
-`claude` you already have to read them. **Nothing leaves your machine.**
+That's the free read — what your AI already knows about you, computed on your machine, changing
+nothing. When you want to keep it, `npx stratless init` archives your history and builds the full
+profile after asking once.
+
+No account. No API key. No cloud. The reading and the pattern-finding happen on your own disk; the
+only borrowed thing is your own `claude`, which names what the maths found. **Nothing leaves your
+machine.**
 
 You need three things, and you probably have all of them: **Claude Code** installed and signed in
 (the `claude` command), **Node 18+**, and a few sessions of history on this machine. That's it.
@@ -20,28 +25,36 @@ You need three things, and you probably have all of them: **Claude Code** instal
 
 ## What it builds
 
-Run `stratless profile` and it shows you the model it has built, the one `stratless update` hands to
-your assistant. Every line is observed and carries the count behind it:
+Run `stratless profile` and it shows you the brief it has built, the one `stratless update` hands to
+your assistant: your shorthand decoded, what to offer you before you ask, what to catch for you, and
+how to talk to you. Every line is an instruction to the AI, observed from your own history, with the
+real count behind it:
 
 ```
 Who you are working with              (stratless · read from your own history)
 
-## When something has gone wrong
+## In the moment
 
-Insists on a plan, and plan mode, before any code gets written.
-256 times · "wait. are you in plan mode?"
+- "yes plan" · "lets plan" → wants a plan before building
+- "what was" · "what happened" → wants a quick plain answer
 
-## How they work
+## What to offer me before I ask
 
-Muses openly about direction and invites free-form discussion
-rather than a single pointed question.
-876 times · "fast to sell and painkiller?"
+- offer a quick sketch of the idea before building it out,
+  then ask them to validate it. (218×)
 
-Gives a short signal (go, commit it) to authorize the next step.
-727 times · "Go with A, fix the counts"
+## What to catch for me
+
+- catch completed work presented as done and expect a
+  double-check pass before it's accepted. (101×)
+
+## How to talk to me
+
+- talk in short go-ahead bursts, they approve with a brief
+  word and expect you to keep moving. (159×, rising)
 ```
 
-Not a rules sheet you wrote. A model of a person, derived from your real history and nothing you
+Not a rules sheet you wrote. A brief on a person, derived from your real history and nothing you
 declared, and it sharpens as that history grows.
 
 ## The commands
@@ -65,7 +78,9 @@ with no setup and no archive, so bare `npx stratless` (no verb) runs it too. `st
 
 `init` is the one thing you can't do later. Claude Code **deletes your transcripts after 30 days**,
 per file, so your history rots from the back even in a project you use every day. `init` stops that
-and copies everything somewhere safe. Everything else reads from there.
+and copies everything somewhere safe. Everything else reads from there. Saying yes to the full build
+also fetches the local pattern-finding model, once (~34MB, named before you answer); after that,
+every build runs offline.
 
 ## How it works, there's no trick
 
@@ -73,12 +88,14 @@ No model of ours. No server. No training. No separate bill.
 
 1. **Read.** Every session Claude Code has is already on your disk, in `~/.claude/projects`.
    stratless walks each one into moments: what you typed, and what the assistant was doing.
-2. **Discover.** It reads your pile and finds the recurring kinds of thing you actually do, from
-   your own history and nothing it shipped. **Derived, not pre-matched**: there is no category list
-   to sort you into, because a list we wrote would be our model of a generic person, not a reading
-   of you.
-3. **Count.** Each moment is checked against those columns and counted: how often, over what span,
-   rising or fading. Every number is counted by code, so none of it in your profile is a guess.
+2. **Cluster.** A small open-weights model on your machine turns each moment into a fingerprint, and
+   the recurring kinds of thing you do fall out as groups — arithmetic, a few minutes, free, and it
+   reaches nothing. **Derived, not pre-matched**: there is no category list to sort you into,
+   because a list we wrote would be our model of a generic person, not a reading of you. Then your
+   own assistant is borrowed for the only judgments left: naming what the maths found, and wording
+   your profile — the two small calls that are all it ever spends.
+3. **Count.** Every count is plain arithmetic: how often, over what span, rising or fading. The model
+   names, the code counts, so no number in your profile is a guess.
 4. **Load.** `stratless update` writes the profile to `~/.claude/HUMAN.md` and points your
    assistant's config at it, so your next session starts already knowing you. The after-session
    refresh keeps it current; `stratless stop` turns that off and unloads it.
@@ -93,7 +110,10 @@ a guess.
 
 Everything runs on your machine. **Your conversations, the moments stratless derives, and your
 profile never leave it**, not for telemetry, not for "aggregate insight," not ever. There is no
-server, no account, nothing to sign up for. The only network call is to your own assistant, on your
+server, no account, nothing to sign up for. Three things touch the network and the direction matters:
+the model weights come **in** once at `init` (with your consent, then permanently offline), the
+version check comes **in**, and the only thing that goes **out** is the borrowed call to your own
+assistant, on your
 own plan, the same place your code was already going.
 
 The profile is a plain text file. It's yours: load it into any other assistant, read it, or delete

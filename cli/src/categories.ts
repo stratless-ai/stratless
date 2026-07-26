@@ -1,10 +1,10 @@
 /**
- * CATEGORIES — the columns of the discovery spreadsheet, persisted as an append-only EVENT LOG.
+ * CATEGORIES — the behaviours the engine derived, persisted as an append-only EVENT LOG.
  *
  * A category is one kind of thing the person does ("swears when lost"). The FILE ships the top few;
  * this store keeps them all, forever, because a column is mortal but its history is evidence: a
  * retired category leaves a tombstone in the log rather than vanishing, which is what makes the
- * profile auditable (see the discovery design, "THE FILE IS A PROJECTION").
+ * profile auditable — the file is a PROJECTION of this log, never the log itself.
  *
  * THREE PROPERTIES, all borrowed from moments.ts on purpose:
  *
@@ -21,7 +21,7 @@
  *      retired removes. Unknown event kinds are ignored, so a newer writer never breaks an older
  *      reader.
  *
- * WRITERS only ever emit `born` today (the seed script, and discovery at cold start). `revised` and
+ * WRITERS only ever emit `born` today (the seed script, and the engine at cold build). `revised` and
  * `retired` are recognised on read so the format is settled ahead of any writer — but nothing emits
  * them yet: cold start ships only the survivors, so a pruned category is never written, never a
  * tombstone. A writer arrives when steady-state revision does.
@@ -44,7 +44,8 @@ export interface CategoryEvent {
   name: string;
   description: string;
   at: string;
-  /** person | project — whose layer this belongs to. Set at discovery; stage 2 only carries it. */
+  /** person | project — whose layer this belongs to. Set by the naming call; everything downstream
+   *  only carries it. `write.ts` drops project-scoped rows, so this field is load-bearing. */
   scope?: string;
 }
 
@@ -101,8 +102,8 @@ export function loadCategories(file: string = storePath()): Category[] {
 
 /**
  * Append `born` events for a set of categories, all stamped with one birth date. The primary writer
- * is discover (stage 3), which mints categories from the person's own pile; the dev-only seed script
- * uses it too. A single write, so a crash tears at most the boundary. Returns how many were written.
+ * is the engine's cold build (`engine.ts`), which names the piles clustering derived from the
+ * person's own moments; the dev-only seed script uses it too. A single write, so a crash tears at most the boundary. Returns how many were written.
  */
 export function appendCategories(
   cats: { name: string; description: string; scope?: string }[],

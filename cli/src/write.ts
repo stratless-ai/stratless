@@ -1,16 +1,26 @@
 /**
  * WRITE — the file. Assembles HUMAN.md from the scored pile: the person, in their own counts and
- * quotes. Code-assembled — nothing here a model invents — save for ONE call, the quote picker,
- * because code-picked quotes demonstrated the WRONG thing 3 of 10 times (the prototype's finding):
- * the count and the claim are arithmetic and definitions, but which real line best SHOWS a behaviour
- * to a stranger is a judgement, and that is the one thing worth a model call.
+ * quotes. Code-assembled — nothing here a model invents — save for ONE call, which for each category
+ * picks the demonstrating quote AND re-voices it into a conductor's instruction (0.5.0). The counts and
+ * ordering are arithmetic; which real line best SHOWS a behaviour, which section it serves, and how to
+ * phrase the instruction, are judgements — and that is the one thing worth a model call.
  *
- * TWO LIFT SECTIONS — the one split the data supports ([[metrics-and-units]]): "When something has
- * gone wrong" (lift ≥ cut, distress) and "How they work" (below). Flat and count-ordered within each;
- * no topical grouping. Person-scoped only — project categories are the project layer's job.
+ * THE SECTIONS — the conductor's brief (positioning.md): "What to offer me before I ask" (Frame),
+ * "What to catch for me" (Judge), "How to talk to me" (Register). The model routes each category to
+ * its section; code assembles. This REPLACED the lift-split ("gone wrong" vs "how they work"): the
+ * sections are functional now, not distress-based — though lift still rides in as a routing HINT (a
+ * catch fires in the high-lift reactions). Count-ordered within each section. Person-scoped only —
+ * project categories are the project layer's job. The "In the moment" decode still opens the file.
+ *
+ * THE PROFILE CARRIES WHATEVER THE PERSON'S DATA EARNS (2026-07-26). The headings are instructions to
+ * the READER — how to use the list beneath them — not claims about the person, so a stable vocabulary
+ * is right. But no section is guaranteed: any of them may be empty and simply not print, a behaviour
+ * that fits none is routed to 'none' and left out, and only a file with nothing at all comes back
+ * null. Demanding that a person HAVE a section would be declaring, which is the one thing the whole
+ * pipeline exists to avoid.
  *
  * The text produced here starts at the provenance line: `injectProfile` (sink.ts) adds the
- * `# Who you are working with` header and the humanmd/v1 marker when it installs, so repeating the
+ * `# Who you are working with` header and the humanmd/v2 marker when it installs, so repeating the
  * header here would double it.
  */
 import { findAssistant, runClaude } from './claude.js';
@@ -20,13 +30,13 @@ import { loadMoments, type Moment } from './moments.js';
 import { join, tally, LIFT_CUT, type Labelled, type CategoryStat } from './count.js';
 import { signatures, type Signature } from './shorthand.js';
 
-/** The whole file targets this size; the distress section always ships in full, working-style fills
- *  the rest by count until the budget runs out. */
+/** The whole file targets this size; Frame + Judge always ship in full, Register fills the rest by
+ *  count until the budget runs out. */
 const CHAR_BUDGET = 5800;
 /** A quote long enough to carry meaning, short enough to read cold. */
 const QUOTE_MIN = 25;
 const QUOTE_MAX = 210;
-/** The quote pass can think for a while over every category at once. */
+/** The quote+voice pass can think for a while over every category at once. */
 const QUOTE_TIMEOUT_MS = 900_000;
 /** The anchor pile is built FROM interrupts, so a bare-interruption category re-derives our own
  *  labelling — it never belongs in the file (the prototype's CIRCULAR). */
@@ -37,10 +47,12 @@ export interface ProfileMeta {
   moments: number;
   from: string;
   to: string;
-  /** entries in "When something has gone wrong" */
-  signals: number;
-  /** entries shipped in "How they work" (after the char budget) */
-  working: number;
+  /** entries in "What to offer me before I ask" (Frame) */
+  frame: number;
+  /** entries in "What to catch for me" (Judge) */
+  judge: number;
+  /** entries shipped in "How to talk to me" (Register, after the char budget) */
+  register: number;
   /** lines in the "In the moment" decode key */
   shorthand: number;
 }
@@ -63,107 +75,190 @@ function candidatesFor(name: string, labelled: Labelled[]): Moment[] {
   return out;
 }
 
-const QUOTE_SCHEMA = JSON.stringify({
+const VOICE_SCHEMA = JSON.stringify({
   type: 'object',
   properties: {
     picks: {
       type: 'array',
       items: {
         type: 'object',
-        properties: { behaviour: { type: 'string' }, quote: { type: 'number' }, signal: { type: 'string' } },
-        required: ['behaviour', 'quote', 'signal'],
+        properties: {
+          name: { type: 'string' },
+          section: { type: 'string' },
+          line: { type: 'string' },
+          quote: { type: 'number' },
+          signal: { type: 'string' },
+        },
+        required: ['name', 'section', 'line', 'quote', 'signal'],
       },
     },
   },
   required: ['picks'],
 });
 
-export interface Picks {
-  /** name → the chosen demonstrating quote */
-  quotes: Map<string, string>;
-  /** name → a ≤6-word decode of what the person is signalling (for the "In the moment" key) */
-  signals: Map<string, string>;
+/** Where a behaviour belongs in the brief — or 'none' when it belongs in no section. The escape
+ *  hatch is deliberate: a forced three-way choice makes the router jam a behaviour that is not an
+ *  offer, a catch, or a register note into the least-bad fit, and a jammed entry is a declared one. */
+export type Section = 'frame' | 'judge' | 'register' | 'none';
+
+export interface Voiced {
+  /** which part of the brief this category belongs in */
+  section: Section;
+  /** the chosen demonstrating quote (empty = none clear; the entry then drops) */
+  quote: string;
+  /** the category re-voiced as an instruction to the assistant */
+  line: string;
+  /** a ≤6-word decode of what the person is signalling (for the "In the moment" key) */
+  signal: string;
 }
 
-/** The one model call, now doing double duty: for each behaviour, pick the candidate (1..N, or 0
- *  for none) that most clearly SHOWS it, AND write a short decode of what the person is signalling.
- *  A behaviour with no clear quote drops from the file rather than ship a quote that fails its claim. */
-export function pickQuotes(bin: string, work: { name: string; description: string; cands: Moment[] }[]): Picks {
+/** The one model call. For each category it: routes to a section (frame/judge/register), re-voices it
+ *  into an instruction to the assistant, picks the demonstrating quote (1..N, or 0 for none), and
+ *  writes a short decode for the "In the moment" key. A category with no clear quote drops from the
+ *  file rather than ship a line whose receipt fails. */
+export function pickAndVoice(
+  bin: string,
+  work: { name: string; description: string; lift: number; cands: Moment[] }[],
+): Map<string, Voiced> {
   const body = work
-    .map((w) => `BEHAVIOUR: ${w.name}\n  ${w.description}\n${w.cands.map((m, i) => `  ${i + 1}. "${m.reply}"`).join('\n')}`)
+    .map((w) => {
+      const fires = w.lift >= LIFT_CUT ? 'high' : 'ordinary';
+      return `CATEGORY: ${w.name}  (fires in: ${fires})\n  ${w.description}\n${w.cands.map((m, i) => `  ${i + 1}. "${m.reply}"`).join('\n')}`;
+    })
     .join('\n\n');
-  const prompt = `For each BEHAVIOUR below you are given real quotes from ONE person's conversations with an AI coding assistant. Every quote was already tagged as an instance of that behaviour.
+  const prompt = `For each CATEGORY below you are given real quotes from ONE person's conversations with an AI coding assistant. Every quote was already tagged as an instance of that category. You are assembling a "conductor's brief" the assistant reads BEFORE working with this person: what to OFFER, what to CATCH, how to TALK.
 
-Give two things per behaviour.
+Give FOUR things per category.
 
-QUOTE: pick the ONE quote (by number) that most clearly SHOWS the behaviour to someone who has never
-met this person: the quote you could read cold and see the behaviour happening.
-- Prefer a quote that demonstrates the behaviour over one that merely mentions the same topic.
-- Prefer short and unmistakable over long and meandering.
-- Avoid quotes that name a specific product, company or file, if a clearer alternative exists.
-- Answer 0 if none of them shows it.
+SECTION: which part of the brief it belongs in:
+- "frame" — something to OFFER before they ask (how they set work up: a plan first, a small probe, options laid out, one thing at a time, a review point). Proactive.
+- "judge" — something to CATCH for them (what they reliably challenge or refuse: an unverified number, a summary in place of raw output, a quick patch job, unsanctioned spend, a hedge when the answer is known). Reactive; these are usually marked "fires in: high".
+- "register" — how to TALK to them (bluntness, plain language, what their shorthand means, pacing).
+- "none" — it is genuinely none of the three. USE THIS rather than forcing a poor fit; a category
+  routed to "none" is simply left out of the brief, which is better than a section claiming something
+  the evidence does not support.
 
-SIGNAL: a plain decode, SIX WORDS OR FEWER, of what the person is ASKING FOR when they do this: what
-it MEANS, never what the assistant should do. E.g. "wants a plan before building", "wants it proven,
-not asserted", "thinking out loud, not deciding". Never an instruction ("do X"). Use commas or colons,
-never an em dash.
+LINE: one sentence written AS AN INSTRUCTION TO THE ASSISTANT (offer X, catch Y, talk like Z), never a
+description of the person. Plain language; where they reach for a recurring phrase, quote it. Use commas
+or colons, never an em dash. The line must still be true on this person's NEXT project: if a noun would
+name their current project, product, or a specific technology they are evaluating this month, write the
+kind of thing it is instead ("their product", "a named tool", "a concrete slice"); keep every other word
+as specific as the evidence.
+
+QUOTE: the ONE quote (by number) that most clearly SHOWS this to someone who never met them; 0 if none.
+- Prefer a quote that demonstrates it over one that merely mentions the topic; short over meandering.
+- Prefer a quote that does not disclose the person's plans, product decisions, or anything they would
+  not want read aloud to a stranger; when every candidate does, pick the least revealing.
+
+SIGNAL: a plain decode, SIX WORDS OR FEWER, of what the person is ASKING FOR when they do this: what it
+MEANS, never an instruction. E.g. "wants a plan before building", "wants it proven, not asserted".
 
 Reply with JSON only:
-{"picks":[{"behaviour":"<exact name>","quote":<number or 0>,"signal":"<six words or fewer>"}]}
+{"picks":[{"name":"<exact name>","section":"frame|judge|register|none","line":"<instruction>","quote":<number or 0>,"signal":"<six words or fewer>"}]}
 
 ${body}`;
-  const raw = runClaude(bin, prompt, 'sonnet', 'write', QUOTE_TIMEOUT_MS, QUOTE_SCHEMA, 0); // thinking capped
-  const quotes = new Map<string, string>();
-  const signals = new Map<string, string>();
-  if (!raw) return { quotes, signals };
+  const raw = runClaude(bin, prompt, 'sonnet', 'write', QUOTE_TIMEOUT_MS, VOICE_SCHEMA, 0); // thinking capped
+  const out = new Map<string, Voiced>();
+  if (!raw) return out;
   const m = raw.match(/\{[\s\S]*\}/);
-  if (!m) return { quotes, signals };
+  if (!m) return out;
   try {
-    const picks = (JSON.parse(m[0]).picks ?? []) as { behaviour?: unknown; quote?: unknown; signal?: unknown }[];
+    const picks = (JSON.parse(m[0]).picks ?? []) as { name?: unknown; section?: unknown; line?: unknown; quote?: unknown; signal?: unknown }[];
     const byName = new Map(work.map((w) => [w.name, w]));
     for (const p of picks) {
-      const name = typeof p.behaviour === 'string' ? p.behaviour : '';
+      const name = typeof p.name === 'string' ? p.name : '';
       const w = byName.get(name);
       if (!w) continue;
+      // 'none' is a REAL answer, not a parse failure: the router said this behaviour is not an offer,
+      // a catch, or a register note, so it is left out of the brief. It lands as undefined here and
+      // takes the same path as a malformed value — dropped — which is the correct outcome for both.
+      const section: Section | undefined =
+        p.section === 'judge' ? 'judge' : p.section === 'register' ? 'register' : p.section === 'frame' ? 'frame' : undefined;
+      const line = typeof p.line === 'string' ? p.line.replace(/\s+/g, ' ').trim() : '';
+      if (!section || !line) continue;
       const q = Number(p.quote);
-      if (Number.isInteger(q) && q >= 1 && q <= w.cands.length) quotes.set(name, w.cands[q - 1].reply);
-      if (typeof p.signal === 'string' && p.signal.trim()) signals.set(name, p.signal.trim());
+      const quote = Number.isInteger(q) && q >= 1 && q <= w.cands.length ? w.cands[q - 1].reply : '';
+      const signal = typeof p.signal === 'string' ? p.signal.trim() : '';
+      out.set(name, { section, quote, line, signal });
     }
   } catch {
-    /* unparseable — no quotes/signals; every entry needs a quote, so the file comes back empty */
+    /* unparseable — nothing voiced; every entry needs a quote, so the file comes back empty */
   }
-  return { quotes, signals };
-}
-
-/** One entry's three lines: claim · weight+direction · quote. */
-function block(stat: CategoryStat, quote: string): string {
-  const bits: string[] = [];
-  if (stat.direction === 'rising' || stat.direction === 'fading') bits.push(stat.direction);
-  if (stat.burst) bits.push('comes in bursts');
-  const note = bits.length ? ` · ${bits.join(' · ')}` : '';
-  const claim = stat.description.replace(/\s+/g, ' ').trim();
-  return `**${claim}**\n${stat.count} times across ${stat.sessions} conversations${note}\n> ${quote}\n\n`;
+  return out;
 }
 
 /**
- * THE PURE ASSEMBLER — given per-category stats, a chosen quote per category, and provenance, build
- * the file text. Pure and no model, so the whole shape is testable from fixtures. Returns null when
- * nothing earns a place (no person-scoped entry survived with a quote).
+ * One entry: one bullet, one receipt — the same shape in every section.
+ *
+ * NO QUOTE IS PRINTED, anywhere, and the reasons differ by section. Frame and Judge lines are
+ * complete instructions — an example adds nothing the assistant can act on, and measured 2026-07-26
+ * roughly ONE IN FIVE picked quotes did not demonstrate their line (a wrong quote teaches a wrong
+ * trigger, worse than silence). Register lost its printed quote later the same day, for the opposite
+ * reason: the conductor voicing EMBEDS the recurring phrase inside the instruction ("treat a short
+ * go-ahead like 'looks good, let's move on' as full permission…"), so the blockquote underneath had
+ * become a duplicate — 4 of 5 register rows on the real build repeated a phrase their line already
+ * carried. The quote still EXISTS for register rows — voice() must pick one or the row drops — it is
+ * the quality gate proving the line is demonstrable, not display.
+ */
+function block(claim: string, stat: CategoryStat): string {
+  // THE COMPACT RECEIPT (2026-07-26). The row is an instruction with a terse marker, not a claim
+  // followed by an evidence SENTENCE — "338 times across 77 conversations" on its own line was
+  // written for a human auditor, and the AI gains nothing from the prose. The count itself stays:
+  // it is what separates a profile from a prompt (an instruction backed by "(338×)" is observed
+  // fact, not author opinion), and the file's own preamble promises every line carries it. The
+  // conversation-spread moves to the auditor's surfaces; the trend rides in the same parenthesis.
+  const bits: string[] = [];
+  if (stat.direction === 'rising' || stat.direction === 'fading') bits.push(stat.direction);
+  if (stat.burst) bits.push('comes in bursts');
+  const c = claim.replace(/\s+/g, ' ').trim();
+  return `- ${c} (${stat.count}×${bits.length ? ', ' + bits.join(', ') : ''})\n`;
+}
+
+interface Entry {
+  stat: CategoryStat;
+  v: Voiced;
+}
+
+/**
+ * THE PURE ASSEMBLER — given per-category stats, a routing+quote+line per category, and provenance,
+ * build the file text. Pure and no model, so the whole shape is testable from fixtures.
+ *
+ * THE PROFILE CARRIES WHATEVER THE PERSON'S DATA EARNS (2026-07-26). The section HEADINGS are
+ * instructions to the reader — "here is how to use the list below" — not claims about the person;
+ * a stable vocabulary is what makes the file usable. But nothing may DEMAND that a person have a
+ * given section:
+ *
+ *   · an empty section simply does not print — including BOTH bookends;
+ *   · a profile with no "what to catch" entries is a valid profile. It says this person does not
+ *     systematically catch things, which is a finding, not a failure. An earlier rule returned null
+ *     unless a bookend survived, which quietly required everyone to be a conductor;
+ *   · a behaviour that is not an offer, a catch, or a register note is routed to NONE and left out,
+ *     rather than jammed into the least-bad of three. Forcing the fit is declaring.
+ *
+ * Returns null only when NOTHING earned a place at all.
  */
 export function assemble(
   stats: CategoryStat[],
-  quotes: Map<string, string>,
+  voiced: Map<string, Voiced>,
   prov: { sessions: number; moments: number; from: string; to: string },
   decode?: { sigs: Signature[]; signals: Map<string, string> },
 ): { text: string; meta: ProfileMeta } | null {
-  const entries = stats
+  const entries: Entry[] = stats
     .filter((s) => s.scope !== 'project' && s.count > 0)
-    .map((s) => ({ stat: s, quote: quotes.get(s.name) }))
-    .filter((e): e is { stat: CategoryStat; quote: string } => typeof e.quote === 'string' && e.quote.length > 0);
-  if (!entries.length) return null;
+    .map((s) => ({ stat: s, v: voiced.get(s.name) }))
+    // A quote is REQUIRED only where it is the content — Register. Frame and Judge ship on their
+    // instruction plus their count, so a category with no clean quote no longer loses its place in
+    // the brief for a receipt the section does not print.
+    .filter((e): e is Entry => !!e.v && (e.v.section !== 'register' || (typeof e.v.quote === 'string' && e.v.quote.length > 0)));
 
-  const repair = entries.filter((e) => e.stat.lift >= LIFT_CUT).sort((a, b) => b.stat.count - a.stat.count);
-  const working = entries.filter((e) => e.stat.lift < LIFT_CUT).sort((a, b) => b.stat.count - a.stat.count);
+  const inSection = (sec: Section): Entry[] =>
+    entries.filter((e) => e.v.section === sec).sort((a, b) => b.stat.count - a.stat.count);
+  const frame = inSection('frame');
+  const judge = inSection('judge');
+  const register = inSection('register');
+  // Nothing at all earned a place — not "no bookend earned a place". A person with only register
+  // notes still has a profile worth loading.
+  if (!frame.length && !judge.length && !register.length) return null;
 
   const decodeLines = decode ? decodeKey(decode) : [];
   const head: string[] = [
@@ -175,24 +270,48 @@ export function assemble(
   if (decodeLines.length) {
     head.push('## In the moment', '', 'Their shorthand. Recognise these live; the detail is in the sections below.', '', ...decodeLines, '');
   }
-  head.push(
-    '## When something has gone wrong',
-    '',
-    'These cluster around moments the assistant got it wrong. Treat them as signals to stop and re-read the request, not as ordinary conversation. **If this file is working, these should get rarer.**',
-    '',
-  );
+  // One more blank so the first section HEADING gets its own blank line above it. Every later
+  // heading gets one for free (block() ends with '\n\n'); the head is the only seam without one,
+  // and without this the shorthand list runs straight into `## What to offer me before I ask`.
+  head.push('');
   let text = head.join('\n');
-  for (const e of repair) text += block(e.stat, e.quote);
 
-  text += ['## How they work', '', 'This is not friction and none of it should go away. It is how this person thinks and directs work. Expect it, and read it correctly rather than trying to reduce it.', '', ''].join('\n');
-  let shipped = 0;
-  for (const e of working) {
-    if (text.length + block(e.stat, e.quote).length > CHAR_BUDGET) break;
-    text += block(e.stat, e.quote);
-    shipped++;
+  // Frame + Judge are the bookends — always shipped in full. Register fills the remaining budget.
+  // Rows are single-line bullets now, so each section closes with one blank line ('\n') to keep the
+  // next heading separated — block() no longer carries trailing spacing of its own.
+  if (frame.length) {
+    text += ['## What to offer me before I ask', '', 'Set these up or hand them over before I ask. Offering them unprompted is the point, not overstepping.', '', ''].join('\n');
+    for (const e of frame) text += block(e.v.line, e.stat);
+    text += '\n';
+  }
+  if (judge.length) {
+    text += ['## What to catch for me', '', 'What I reliably challenge or refuse. Pre-empt these, so I do not have to catch them myself.', '', ''].join('\n');
+    for (const e of judge) text += block(e.v.line, e.stat);
+    text += '\n';
+  }
+  let shippedReg = 0;
+  if (register.length) {
+    text += ['## How to talk to me', '', 'The register I work in. Match it rather than smoothing it over.', '', ''].join('\n');
+    for (const e of register) {
+      if (text.length + block(e.v.line, e.stat).length > CHAR_BUDGET) break;
+      text += block(e.v.line, e.stat);
+      shippedReg++;
+    }
   }
 
-  return { text, meta: { sessions: prov.sessions, moments: prov.moments, from: prov.from, to: prov.to, signals: repair.length, working: shipped, shorthand: decodeLines.length } };
+  return {
+    text,
+    meta: {
+      sessions: prov.sessions,
+      moments: prov.moments,
+      from: prov.from,
+      to: prov.to,
+      frame: frame.length,
+      judge: judge.length,
+      register: shippedReg,
+      shorthand: decodeLines.length,
+    },
+  };
 }
 
 /** The decode-key lines: code-extracted phrases → the model's short signal, for categories that
@@ -204,16 +323,16 @@ function decodeKey(decode: { sigs: Signature[]; signals: Map<string, string> }):
     .map(({ s, signal }) => `- ${s.phrases.map((p) => (p.includes('(') ? p : `"${p}"`)).join(' · ')} → ${signal.trim()}`);
 }
 
-/** The artifact-shape lint: does this read like a profile, not chatter? Guards against the 2026-07-18
- *  incident where a plain reply was loaded as HUMAN.md. Cheap, and the last line of defence. */
+/** The artifact-shape lint: does this read like a conductor's brief, not chatter? Guards against the
+ *  2026-07-18 incident where a plain reply was loaded as HUMAN.md. Cheap, the last line of defence. */
 export function looksLikeProfile(text: string): boolean {
-  return text.includes('Read this as a prior, not a law') && /^\*\*.+\*\*$/m.test(text);
+  return text.includes('Read this as a prior, not a law') && /^## What to (offer|catch)/m.test(text);
 }
 
 /**
- * Build the whole profile from the live stores: tally the scores, pick a demonstrating quote per
- * person-scoped category (the one model call), assemble the two sections. Null when there is nothing
- * worth shipping. `injectProfile` (sink.ts) installs the returned text.
+ * Build the whole profile from the live stores: tally the scores, then in one model call route each
+ * person-scoped category to its section, re-voice it, and pick a demonstrating quote; assemble the
+ * three sections. Null when there is nothing worth shipping. `injectProfile` (sink.ts) installs the text.
  */
 export function buildProfile(): { text: string; meta: ProfileMeta } | null {
   const cats = loadCategories().filter((c) => !CIRCULAR.has(c.name));
@@ -225,16 +344,18 @@ export function buildProfile(): { text: string; meta: ProfileMeta } | null {
 
   const work = stats
     .filter((s) => s.scope !== 'project' && s.count > 0)
-    .map((s) => ({ name: s.name, description: s.description, cands: candidatesFor(s.name, labelled) }))
+    .map((s) => ({ name: s.name, description: s.description, lift: s.lift, cands: candidatesFor(s.name, labelled) }))
     .filter((w) => w.cands.length);
   const bin = findAssistant();
-  const { quotes, signals } = bin && work.length ? pickQuotes(bin, work) : { quotes: new Map<string, string>(), signals: new Map<string, string>() };
+  const voiced = bin && work.length ? pickAndVoice(bin, work) : new Map<string, Voiced>();
+  const signals = new Map<string, string>();
+  for (const [name, v] of voiced) if (v.signal) signals.set(name, v.signal);
   const sigs = signatures(labelled, cats);
 
   const times = moments.map((m) => m.ts).filter(Boolean).sort();
   return assemble(
     stats,
-    quotes,
+    voiced,
     {
       sessions: new Set(moments.map((m) => m.session)).size,
       moments: moments.length,

@@ -1,7 +1,9 @@
 # Who you are working with
-_Managed by stratless, refreshed by `stratless update`. Not edited by hand._
+# (managed by stratless: do not edit by hand; refreshed by `stratless update`)
+# built 2026-07-26 12:57 UTC
+<!-- humanmd/v2 -->
 
-Derived from 129 of this person's own conversations with an AI assistant, 2026-06-09 to 2026-07-23. Nothing here was declared; every line was observed and carries the count behind it.
+Derived from 138 of this person's own conversations with an AI assistant, 2026-06-09 to 2026-07-26. Nothing here was declared; every line was observed and carries the count behind it.
 
 **Read this as a prior, not a law.** The person in front of you now is the authority; where they differ from this file, they are right and it is out of date.
 
@@ -9,49 +11,53 @@ Derived from 129 of this person's own conversations with an AI assistant, 2026-0
 
 Their shorthand. Recognise these live; the detail is in the sections below.
 
-- "the only" · "so before" → wants open brainstorming on direction
-- "so does" · "so meaning we" → wants own read confirmed
-- "yes run" · "yes go" → wants quick authorization to proceed
-- "stop here" · "lets fix" → wants work limited to one part
-- "double check" · "are you sure" → wants extra diligence before trusting
-- "wait" · "ok wait" → wants immediate pause and explanation
+- "where can" · "explain to me" → wants purpose explained, not assumed
+- a numbered reply (1. … 2. …) · "1 go" → wants explicit tool tradeoffs
+- "why are" · "it seems" → wants a specific comparison, not drift
+- "start phase" · "lets start" → wants a small first slice
+- "yes lets talk" · "i want to talk" → wants a named-topic discussion
+- "what was" · "what happened" → wants a quick plain answer
+- "i have" · "walk me" → wants understanding confirmed first
+- "yes plan" · "lets plan" → wants a plan before action
+- "how do" · "do we need" → wants the idea sketched fast
 
-## When something has gone wrong
+## What to offer me before I ask
 
-These cluster around moments the assistant got it wrong. Treat them as signals to stop and re-read the request, not as ordinary conversation. **If this file is working, these should get rarer.**
+Set these up or hand them over before I ask. Offering them unprompted is the point, not overstepping.
 
-**Stops forward motion to ask whether a plan or todolist exists yet, and insists on entering plan mode before any code gets written.**
-256 times across 66 conversations
-> wait. are you in plan mode?
+- offer specific tool or model options up front when scoping research work. (279×, fading)
+- let them think out loud toward a pivot, then reflect the new direction back before building. (260×, rising)
+- offer a narrow starting slice to try first before expanding scope. (256×, rising)
+- offer to discuss a named tool or category directly when they bring one up. (246×)
+- offer a quick sketch of the idea before building it out, then ask them to validate it. (218×)
+- offer to read the relevant doc or file first before walking through the project. (193×)
+- after a checkpoint lands, expect a stacked numbered list of new small tweaks right away. (188×, fading)
+- offer a clear explicit next step rather than waiting for them to ask what to do. (186×)
+- offer to investigate an operational concern immediately when they flag something odd. (185×, fading)
+- offer a clear one-sentence differentiation whenever the venture's identity comes up against a competitor. (185×, rising)
+- offer to show the actual drafted artifact directly rather than describing it. (151×)
+- offer to commit and batch the current work as a discrete checkpoint before moving on. (123×)
+- offer a direct comparison against the named competitor tool they raise, not just a generic answer. (57×, rising, comes in bursts)
 
-**Cuts in with 'wait' (often repeated) to halt the assistant partway through an action, tool call, or explanation before it continues.**
-142 times across 45 conversations
-> wait. what are you doing?
+## What to catch for me
 
-## How they work
+What I reliably challenge or refuse. Pre-empt these, so I do not have to catch them myself.
 
-This is not friction and none of it should go away. It is how this person thinks and directs work. Expect it, and read it correctly rather than trying to reduce it.
+- catch outputs presented without the underlying business logic and expect them to ask what it's actually for. (338×)
+- catch open-ended research spirals and ask why a specific alternative wasn't studied instead. (278×)
+- catch a proposed approach they haven't fully bought into and expect them to question or redirect it. (226×)
+- catch any jump into building without a plan, they want plan mode confirmed first. (225×, fading)
+- catch any claim about how a number or name was derived and be ready to show the actual mechanism. (210×)
+- catch the urge to patch symptoms, they want the actual bug found and fixed first. (156×)
+- catch unverified claims of publishing or shipping, they expect it verified right after. (144×)
+- catch completed work presented as done and expect a double-check pass before it's accepted. (101×)
+- catch a vague cost estimate and expect a real number when they ask what something costs. (97×, fading)
 
-**Muses openly about direction or strategy and invites the assistant into free-form discussion rather than asking a single pointed question.**
-876 times across 81 conversations
-> fast to sell and painkiller?
+## How to talk to me
 
-**States their own tentative read of a situation or approach and asks the assistant to confirm whether it's sound ('does this make sense?', 'am I right?').**
-737 times across 91 conversations
-> is that something meaningful?
+The register I work in. Match it rather than smoothing it over.
 
-**Gives a short one- or two-word signal (continue, go ahead, commit it) to authorize the next step without further discussion.**
-727 times across 92 conversations
-> Go with A, fix the counts
-
-**Tells the assistant to skip, hold, or restrict work to only one specific piece rather than the broader scope it was pursuing.**
-282 times across 84 conversations · rising
-> use the worktree for phase 1
-
-**Asks the assistant to re-explain a term, mechanism, or design decision in simple, layman's terms because the prior explanation didn't land.**
-247 times across 66 conversations · rising
-> what does Fix B do actually?
-
-**Asks the assistant to double-check or 'be diligent' about a finding before trusting or acting on it.**
-172 times across 55 conversations
-> double check the work first
+- talk in short plain terms, they'll fire back a blunt one-line question if something is unclear. (241×, rising)
+- talk in short imperative terms, they issue terse commands and expect direct execution. (178×)
+- talk in short go-ahead bursts, they approve with a brief word and expect you to keep moving. (159×, rising)
+- talk with quick 'yes' plus the specific action, they approve by naming exactly what to fold in. (76×)

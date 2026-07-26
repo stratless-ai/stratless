@@ -42,14 +42,25 @@ useSeo({
 
         <h2>Network calls, the tiered truth</h2>
         <p>
-          To read your history and write your profile, stratless borrows
-          <strong>the coding assistant you already have installed</strong>. It shells out to it
-          (<code>claude -p</code>), on your own subscription or key, and that request goes to your
-          assistant's provider exactly as it does when you use it normally. That is the whole
-          default story: your own claude, doing the reading.
+          <strong>Three things ever touch the network.</strong> That is the complete list.
         </p>
         <p>
-          Two things can add one more call. <code>stratless status --check</code> asks the npm
+          <strong>1. Your own assistant.</strong> Most of the work happens here with no model at
+          all: reading your history, finding the patterns in it, and every count in your profile are
+          plain arithmetic. One step needs judgment, so stratless borrows
+          <strong>the coding assistant you already have installed</strong> and shells out to it
+          (<code>claude -p</code>), on your own subscription or key. That request goes to your
+          assistant's provider exactly as it does when you use it normally.
+        </p>
+        <p>
+          <strong>2. A one-time model download, at <code>init</code>, with your consent.</strong>
+          The pattern-finding runs on a small open-weights model (~34MB) that lives on your machine.
+          It has to arrive once. <code>init</code> tells you before it happens and asks; nothing
+          downloads in the background, and the after-session refresh never fetches anything. After
+          it lands, that step is permanently offline.
+        </p>
+        <p>
+          <strong>3. The version check.</strong> <code>stratless status --check</code> asks the npm
           registry whether a newer version exists, when you run it, on screen. And the after-session
           refresh, which <code>init</code> turns on, is itself your consent to background activity:
           while it is on, a cached once-daily version check rides along during a refresh, so you
@@ -57,7 +68,9 @@ useSeo({
           nothing ambient at all.
         </p>
         <p>
-          <strong>None of it touches us.</strong> We ship no model, hold no key, and run no proxy;
+          <strong>Notice the direction.</strong> Two of those three are things coming
+          <em>in</em> — software arriving once, like any install. The only thing that ever goes
+          <em>out</em> is the borrowed call to your own assistant. We hold no key and run no proxy;
           the version check carries no payload. And when stratless cannot read your history
           honestly, it refuses and writes nothing: silence beats a wrong profile.
         </p>

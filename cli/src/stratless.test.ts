@@ -11,21 +11,18 @@ import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { test, before, after } from 'node:test';
 
-import { parseSession, isRealPrompt } from './transcript.js';
-import { runStreamBatch, SENTINEL_PREFIX } from './stream.js';
+import { runStreamBatch } from './stream.js';
 import { makePalette } from './palette.js';
 import { shouldCheck, newerThan, dailyCheck, readNotify, writeNotify } from './notify.js';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parseExchanges, loadRecentExchanges, findExchange, markFirstOfDay, projectOf, type Exchange } from './exchange.js';
-import { atOf, didOf, ranOf, ranLine, contextLine, humanGap } from './facts.js';
 import { injectProfile, removeProfile, ensureLoaded } from './sink.js';
 import { readState, writeState, synthesisDue, readRenders, writeRender, readBuildCorpus, writeBuildCorpus } from './state.js';
 import { readUsage, recordUsage } from './usage.js';
 import { CorruptStoreError } from './atomic.js';
 import { parseJsonResult } from './claude.js';
 import { installStopHook, readSettings } from './init.js';
-import { shuffleDeterministic, distractorsFor, buildTruthSet, renderSheet, renderSheetJson, scoreSheet, type Judgment } from './truth.js';
 
 let dir: string;
 
@@ -35,77 +32,11 @@ before(() => {
 });
 after(() => rmSync(dir, { recursive: true, force: true }));
 
-const turn = (prompt: string, said: string, tool: object) =>
-  [
-    JSON.stringify({ type: 'user', message: { content: prompt }, timestamp: '2026-07-01T10:00:00Z' }),
-    JSON.stringify({
-      type: 'assistant',
-      timestamp: '2026-07-01T10:00:05Z',
-      message: { content: [{ type: 'text', text: said }, tool] },
-    }),
-  ].join('\n');
-
 const writeTranscript = (name: string, body: string): string => {
   const p = join(dir, name);
   writeFileSync(p, `${body}\n`);
   return p;
 };
-
-// ── transcript ────────────────────────────────────────────────────────────────────────────
-
-test('MultiEdit is parsed — dropping it makes `why` claim "you wrote this"', () => {
-  const p = writeTranscript(
-    'multi.jsonl',
-    turn('refactor the limits', 'Applying both changes.', {
-      type: 'tool_use',
-      name: 'MultiEdit',
-      input: {
-        file_path: '/x/limits.ts',
-        edits: [
-          { old_string: 'const A = 1;', new_string: 'const MAX_UPLOAD_BYTES = 10485760;' },
-          { old_string: 'const B = 2;', new_string: 'const MAX_RETRIES = 3;' },
-        ],
-      },
-    }),
-  );
-  const edits = parseSession(p);
-  assert.equal(edits.length, 2, 'both halves of a MultiEdit must survive');
-  assert.ok(edits.some((e) => e.body.includes('MAX_UPLOAD_BYTES')));
-  assert.ok(edits.some((e) => e.body.includes('MAX_RETRIES')));
-  assert.equal(edits[0].prompt, 'refactor the limits', 'the human turn must ride along');
-});
-
-test('Edit and Write are both read', () => {
-  const p = writeTranscript(
-    'ew.jsonl',
-    `${turn('a', 'x', {
-      type: 'tool_use',
-      name: 'Edit',
-      input: { file_path: '/x/a.ts', new_string: 'const A = 1;' },
-    })}\n${turn('b', 'y', {
-      type: 'tool_use',
-      name: 'Write',
-      input: { file_path: '/x/b.ts', content: 'const B = 2;' },
-    })}`,
-  );
-  assert.equal(parseSession(p).length, 2);
-});
-
-test('subagent turns are not the human conversation', () => {
-  const p = join(dir, 'side.jsonl');
-  writeFileSync(
-    p,
-    `${JSON.stringify({
-      type: 'assistant',
-      isSidechain: true,
-      timestamp: '2026-07-01T10:00:00Z',
-      message: {
-        content: [{ type: 'tool_use', name: 'Edit', input: { file_path: '/x/a.ts', new_string: 'nope' } }],
-      },
-    })}\n`,
-  );
-  assert.equal(parseSession(p).length, 0);
-});
 
 // ── exchanges: the profiler's evidence ──────────────────────────────────────────────────────
 //
@@ -245,43 +176,6 @@ test('markFirstOfDay marks exactly one exchange per working day', () => {
   assert.deepEqual(list.map((e) => e.firstOfDay), [true, undefined, true]);
 });
 
-test('the fact the judge dropped 19 times in 20 now travels as data, not prose', () => {
-  const ex = parseExchanges(
-    writeTranscript('fact.jsonl', [u('run the deploy'), a('starting'), interruptRec(), u('no, stop')].join('\n')),
-  );
-  assert.equal(didOf(ex[1])?.interrupted, 'plain', 'a field the model cannot decline to mention');
-});
-
-// ── SHOWING the facts to the judge (Block 2 piece 1) ────────────────────────────────────────────
-//
-// Recording a fact makes it unlosable; showing it makes the sentence better informed. Because the
-// recording no longer depends on the model, this is purely additive — the tests below pin that an
-// exchange which knows nothing renders EXACTLY as it always did, so nothing can regress.
-
-test('the context line frames the moment: position, pause, project', () => {
-  const ex = {
-    ts: '2026-07-01T10:00:00Z',
-    index: 39,
-    ofSession: 118,
-    gapSec: 264,
-    project: 'stratless-mono/cli',
-    branch: 'judge-v2',
-  } as Exchange;
-  assert.equal(contextLine(ex), 'exchange 40 of 118 · 4 min later · stratless-mono/cli (judge-v2)');
-});
-
-test('the start of a session says so instead of reporting a gap it does not have', () => {
-  const ex = { ts: '2026-07-01T10:00:00Z', index: 0, ofSession: 12, firstOfDay: true } as Exchange;
-  assert.equal(contextLine(ex), 'exchange 1 of 12 · start of the session · first of the day');
-});
-
-test('gaps are rounded to rhythm, not reported as false precision', () => {
-  assert.equal(humanGap(45), '45s later');
-  assert.equal(humanGap(264), '4 min later');
-  assert.equal(humanGap(1982), '33 min later');
-  assert.equal(humanGap(7200), '2 h later');
-});
-
 // ── THE ASSISTANT'S HANDS — the largest fact the judge was never given (57% of exchanges) ───────
 
 const toolAsst = (text: string, tools: string[], ts = '2026-07-01T10:00:05Z') =>
@@ -300,13 +194,6 @@ test('tools the assistant ran are carried, and do not change the hash', () => {
   assert.equal(withTools[1].hash, bare[1].hash, 'the facts never touch the cache key');
   assert.deepEqual(withTools[1].tools, ['Edit', 'Bash', 'Edit'], 'duplicates kept — they are the SIZE of the work');
   assert.equal(bare[1].tools, undefined);
-  assert.deepEqual(ranOf(withTools[1]), { tools: ['Edit', 'Bash'], calls: 3 }, 'names deduped, calls counted');
-  assert.equal(ranOf(bare[1]), undefined, 'a turn that only talked has no `ran` at all');
-});
-
-test('the assistant work line is neutral, and states size only when it adds something', () => {
-  assert.equal(ranLine({ tools: ['Edit', 'Bash'], calls: 3 }), 'Edit · Bash (3 calls)');
-  assert.equal(ranLine({ tools: ['Read'], calls: 1 }), 'Read', 'one call, one name — a count would be noise');
 });
 
 test('tools do not leak into the next exchange', () => {
@@ -319,12 +206,6 @@ test('tools do not leak into the next exchange', () => {
   assert.equal(ex.length, 3, 'the opener plus two closed turns');
   assert.deepEqual(ex[1].tools, ['Edit']);
   assert.equal(ex[2].tools, undefined, 'reset with `said`, like every other per-turn fact');
-});
-
-test('empty facts are absent, never empty objects', () => {
-  const bare = { prompt: 'p', said: 's', reaction: 'r', ts: '2026-07-01T10:00:00Z', session: 's', hash: 'h' } as Exchange;
-  assert.equal(atOf(bare), undefined);
-  assert.equal(didOf(bare), undefined, 'roughly 97% of exchanges carry no control action at all');
 });
 
 test('each real human message is the reaction to one turn AND the prompt for the next', () => {
@@ -570,12 +451,6 @@ test('a piped `status` run emits zero escape bytes (the audit gap, closed for re
 
 // ── the streaming Brain (0.3.1): one harness, many verdicts — and never its own exhaust ────────
 
-test('the exhaust sentinel: streamed prompts are invisible to the exchange parser', () => {
-  assert.equal(isRealPrompt(`${SENTINEL_PREFIX}judge>\nPERSON ASKED: x`), false, 'a streamed judge turn is not the human');
-  assert.equal(isRealPrompt(`${SENTINEL_PREFIX}audit>\nSTATEMENT: y`), false, 'a streamed audit turn is not the human');
-  assert.equal(isRealPrompt('why do we need a queue?'), true, 'real prompts still pass');
-});
-
 /** A fake `claude` that speaks the stream-json protocol — executable, shebang'd, argv-ignoring. */
 const mockBrain = (name: string, dieAfter = -1): string => {
   const p = join(dir, name);
@@ -666,11 +541,11 @@ test('runStreamBatch: a dying session hands the remainder to the fallback ladder
 
 // ── the grader (0.3.2): every pattern is a dated prediction; misses are the best signal ────────
 
-test('HUMAN.md carries the person-layer schema marker (0.3.1: the sectioned protocol)', () => {
+test('HUMAN.md carries the person-layer schema marker (0.5.0: the conductor brief)', () => {
   const humanMd = join(dir, 'HUMAN-schema.md');
   const claudeMd = join(dir, 'CLAUDE-schema.md');
   injectProfile('WHAT THEY KNOW\nbackend architecture', humanMd, claudeMd);
-  assert.ok(readFileSync(humanMd, 'utf8').includes('<!-- humanmd/v1 -->'), 'the protocol version is declared in the artifact');
+  assert.ok(readFileSync(humanMd, 'utf8').includes('<!-- humanmd/v2 -->'), 'the protocol version is declared in the artifact');
 });
 
 // ── the promise layer: a wrong frequency is a lie wearing precision ───────────────────────────
@@ -986,106 +861,6 @@ test('readSettings: a valid settings.json comes back parsed, untouched', () => {
   assert.equal(read.settings.cleanupPeriodDays, 30);
 });
 
-
-// ── THE TRUTH TEST — the first instrument that asks whether a judgment is RIGHT ─────────────────
-//
-// Everything else measures whether the machinery works. These pin the properties that make a SCORE
-// mean something: a rigged sheet, an unreproducible shuffle, or a decoy from the same conversation
-// would each produce a number that looks like evidence and is not.
-
-const jm = (o: Partial<Judgment> & { hash: string }): Judgment =>
-  ({ ts: '2026-07-01T10:00:00Z', session: 's1', behavior: `did thing ${o.hash}`, ...o }) as Judgment;
-
-test('the shuffle is reproducible, and differs between items', () => {
-  const items = ['a', 'b', 'c', 'd', 'e'];
-  assert.deepEqual(shuffleDeterministic(items, 'seed-1'), shuffleDeterministic(items, 'seed-1'), 'same seed = same sheet, so a score can be re-checked');
-  assert.notDeepEqual(shuffleDeterministic(items, 'seed-1'), shuffleDeterministic(items, 'seed-2'), 'different items must not share an ordering');
-  assert.deepEqual([...shuffleDeterministic(items, 'x')].sort(), items, 'nothing is lost or invented');
-});
-
-test('DECOYS NEVER COME FROM THE TARGET\'S OWN SESSION', () => {
-  const target = jm({ hash: 't', session: 'same', at: { project: 'p' } });
-  const pool = [
-    target,
-    jm({ hash: 'x1', session: 'same', at: { project: 'p' } }),
-    jm({ hash: 'x2', session: 'same', at: { project: 'p' } }),
-    jm({ hash: 'ok1', session: 'other', at: { project: 'p' } }),
-    jm({ hash: 'ok2', session: 'other2', at: { project: 'p' } }),
-  ];
-  const d = distractorsFor(target, pool);
-  assert.equal(d.length, 2);
-  assert.ok(d.every((j) => j.session !== 'same'), 'a judgment from the same conversation may describe the SAME act — a wrong answer could be right');
-  assert.ok(d.every((j) => j.hash !== 't'), 'and never the target itself');
-});
-
-test('decoys prefer the same project, so subject matter cannot give the answer away', () => {
-  const target = jm({ hash: 't', session: 's1', at: { project: 'stratless-mono/cli' } });
-  const pool = [
-    target,
-    jm({ hash: 'near1', session: 's2', at: { project: 'stratless-mono/cli' } }),
-    jm({ hash: 'near2', session: 's3', at: { project: 'stratless-mono/cli' } }),
-    jm({ hash: 'far1', session: 's4', at: { project: 'some-other-repo' } }),
-  ];
-  assert.deepEqual(distractorsFor(target, pool).map((j) => j.hash).sort(), ['near1', 'near2']);
-});
-
-test('a question that cannot get two decoys is DROPPED, not shipped with a different baseline', () => {
-  const ex = () => ({ prompt: 'p', said: 's', reaction: 'r' });
-  const thin = [jm({ hash: 'a', session: 's1' }), jm({ hash: 'b', session: 's1' })]; // same session: no legal decoys
-  assert.equal(buildTruthSet(thin, ex, { n: 2 }).length, 0, 'a 2-way question has a 50% baseline and would corrupt the arithmetic');
-});
-
-test('THE SHEET NEVER LEAKS THE ANSWER', () => {
-  const pool = Array.from({ length: 9 }, (_, i) => jm({ hash: `h${i}`, session: `s${i}`, at: { project: 'p' }, behavior: `behavior number ${i}` }));
-  const items = buildTruthSet(pool, () => ({ prompt: 'what about X', said: 'a long answer', reaction: 'go' }), { n: 3 });
-  assert.ok(items.length >= 1);
-  const sheet = renderSheet(items);
-  for (const it of items) {
-    assert.ok(!sheet.includes(it.hash), 'no hash in the sheet');
-    assert.ok(sheet.includes(it.candidates[it.answer]), 'the true sentence is present…');
-    assert.equal(sheet.includes(`**${'ABC'[it.answer]}.** ${it.candidates[it.answer]}\n\n**Answer:** ${'ABC'[it.answer]}`), false, '…but never pre-filled');
-  }
-  assert.ok(!/answer[^:]*:\s*[ABC]\b/i.test(sheet.replace(/\*\*Answer:\*\* $/gm, '')), 'no answer key anywhere in the rendered sheet');
-});
-
-test('QUOTES ARE MASKED IN EVERY CANDIDATE — the first dry run was solvable by string matching', () => {
-  const pool = [
-    jm({ hash: 't', session: 's1', at: { project: 'p' }, behavior: `said 'yes go check the container limits' and escalated` }),
-    jm({ hash: 'd1', session: 's2', at: { project: 'p' }, behavior: `asked "what about the schema" first` }),
-    jm({ hash: 'd2', session: 's3', at: { project: 'p' }, behavior: 'redirected to the parser without quoting anything' }),
-  ];
-  const [item] = buildTruthSet(pool, () => ({ prompt: 'containers for ffmpeg?', said: 'yes', reaction: 'yes go check the container limits' }), { n: 1 });
-  assert.ok(item, 'a question was built');
-  assert.ok(!item.candidates.some((c) => c.includes('yes go check the container limits')), 'the reaction is never repeated back inside a candidate');
-  assert.ok(item.candidates.some((c) => c.includes("'…'")), 'the leaky quote is masked…');
-  assert.ok(item.candidates.some((c) => c.includes('"…"')), '…and so is a DECOY\'s quote, so the mask is not itself a tell');
-});
-
-test('the fillable JSON carries no key and ships the answer field EMPTY', () => {
-  const pool = Array.from({ length: 9 }, (_, i) => jm({ hash: `j${i}`, session: `s${i}`, at: { project: 'p' }, behavior: `behavior ${i}` }));
-  const items = buildTruthSet(pool, () => ({ prompt: 'q', said: 'a', reaction: 'r' }), { n: 3 });
-  const parsed = JSON.parse(renderSheetJson(items)) as { questions: Record<string, string>[] };
-  assert.equal(parsed.questions.length, items.length);
-  for (const q of parsed.questions) assert.equal(q.answer, '', 'a pre-filled answer would be an invitation to agree');
-  for (const it of items) assert.ok(!renderSheetJson(items).includes(it.hash), 'no hash, so the key cannot be re-derived from the sheet');
-  assert.equal(JSON.stringify(parsed).includes('"answerIndex"') || JSON.stringify(parsed).includes('"distractorHashes"'), false, 'no key fields leak into the fillable shape');
-});
-
-test('scoring: accuracy is against ANSWERED items, and "none of these" is counted apart', () => {
-  const items = [
-    { hash: 'a', prompt: '', said: '', reaction: '', candidates: ['x', 'y', 'z'], answer: 0, distractorHashes: [] },
-    { hash: 'b', prompt: '', said: '', reaction: '', candidates: ['x', 'y', 'z'], answer: 1, distractorHashes: [] },
-    { hash: 'c', prompt: '', said: '', reaction: '', candidates: ['x', 'y', 'z'], answer: 2, distractorHashes: [] },
-    { hash: 'd', prompt: '', said: '', reaction: '', candidates: ['x', 'y', 'z'], answer: 0, distractorHashes: [] },
-  ];
-  const s = scoreSheet(items, ['A', 'B', 'A', '-']);
-  assert.equal(s.correct, 2, 'A and B land; the third picked A where C was right');
-  assert.equal(s.none, 1, '"none of these fit" is a MISCHARACTERISATION signal, not a wrong guess');
-  assert.equal(s.answered, 3, 'and it is excluded from the denominator');
-  assert.ok(Math.abs(s.accuracy - 2 / 3) < 1e-9);
-  assert.ok(Math.abs(s.chance - 1 / 3) < 1e-9, 'the baseline the score must beat to mean anything');
-});
-
 // ── SHAPE + lastOfSession: the fact the truth test asked for ────────────────────────────────────
 //
 // Sun, 2026-07-20, on why he asks for a double-check: "(1) im lazy to review the code because the
@@ -1127,7 +902,6 @@ test('lastOfSession marks the closing act, and only it', () => {
   assert.equal(ex[0].lastOfSession, undefined);
   assert.equal(ex[1].lastOfSession, undefined);
   assert.equal(ex[2].lastOfSession, true, '"ended it here" was invisible before this');
-  assert.equal(atOf(ex[2])?.lastOfSession, true, 'and it reaches the judgment');
 });
 
 test('shape and lastOfSession do not change the hash', () => {

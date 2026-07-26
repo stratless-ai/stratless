@@ -8,7 +8,7 @@ import { test } from 'node:test';
 
 import type { Labelled } from './count.js';
 import type { Category } from './categories.js';
-import { signatures, phrasesOf, NUMBERED } from './shorthand.js';
+import { signatures, phrasesOf, isMachineArtifact, NUMBERED } from './shorthand.js';
 
 let seq = 0;
 const lab = (session: string, kinds: string[], reply: string): Labelled => ({
@@ -101,4 +101,14 @@ test('signatures: a phrase ending on a dangling word yields to its content-beari
   const plan = signatures(labelled, [cat('plan'), cat('other')]).find((s) => s.name === 'plan')!;
   assert.ok(plan.phrases.includes('make a plan'), 'kept the content-bearing form');
   assert.ok(!plan.phrases.includes('make a'), 'dropped the dangling short form');
+});
+
+test('the machine\'s own name is an artifact of pasting, not speech', () => {
+  const machine = { text: ' jxs macbook air local jx ', leads: new Set(['jxs', 'jx']) };
+  assert.equal(isMachineArtifact('jxs macbook', machine), true, 'a hostname fragment is filtered');
+  assert.equal(isMachineArtifact('jxs macbook air web', machine), true, 'hostname + the prompt cwd is still a paste — the lead word convicts it');
+  assert.equal(isMachineArtifact('jx', machine), true, 'the bare username is filtered');
+  assert.equal(isMachineArtifact('double check', machine), false, 'real speech passes');
+  assert.equal(isMachineArtifact('macbook air is slow', machine), false, 'talking ABOUT the machine is speech — only prompt-lead openings are pastes');
+  assert.equal(isMachineArtifact(NUMBERED, machine), false, 'the structural marker is never an artifact');
 });

@@ -53,7 +53,7 @@ export const DEFAULT_ROOTS = [join(homedir(), '.claude', 'projects'), join(homed
  * nothing there at all. mtime only approximates a file's newest exchange, but it is the cheap
  * ordering that lets a caller wanting the recent window stop early instead of walking gigabytes.
  */
-function transcriptFiles(roots: string[]): string[] {
+export function transcriptFiles(roots: string[]): string[] {
   const found: { path: string; mtime: number }[] = [];
   const walk = (dir: string): void => {
     let entries: Dirent[];
@@ -167,7 +167,7 @@ interface RawRecord {
 
 /** Is this whole file machine traffic? `entrypoint` never mixes within a file, so one hit decides
  *  it — and deciding at the file level skips 748 files of our own footprints without parsing them. */
-function isMachineFile(lines: string[]): boolean {
+export function isMachineFile(lines: string[]): boolean {
   for (const line of lines) {
     if (!line) continue;
     let d: RawRecord;
@@ -313,6 +313,81 @@ export function* readTurns(roots: string[] = DEFAULT_ROOTS): Generator<Turn> {
 /** A message the person actually submitted: typed prose, not an interrupt, not machine traffic. */
 export function isTypedMessage(t: Turn): boolean {
   return t.role === 'user' && !t.interrupted && t.text.length > 0;
+}
+
+/** Below this, the person's OWN transcripts are too slight to tell drift from a fresh start: a
+ *  single real session clears it many times over, a new machine never does. */
+export const DRIFT_MIN_BYTES = 500_000;
+
+export interface DriftReport {
+  ok: boolean;
+  /** the person's own (non-machine) transcript files on disk */
+  files: number;
+  /** their total bytes */
+  bytes: number;
+  /** typed human turns the reader extracted (0, or 1 as soon as one is found) */
+  typed: number;
+  /** set only when ok === false: what to tell the person, and why stratless refuses */
+  reason?: string;
+}
+
+/**
+ * THE CANARY (v3) — the alarm for the one failure that would end this product silently.
+ *
+ * Claude Code owns the transcript format and will change it — not if, when. When it does, the reader
+ * can quietly yield nothing, and a profile built from an empty read would describe a person it never
+ * saw. The edit-era canary keyed on write tools; this one keys on what the v3 engine actually reads:
+ * the person's typed turns.
+ *
+ * CONSERVATIVE BY DESIGN, like its predecessor — it refuses only on the one unambiguous signal: the
+ * person's OWN transcripts hold real content (>= `minBytes`, our borrowed calls excluded) yet the
+ * reader extracts NOT ONE typed turn. A fresh machine (too little content) and a talk-only history
+ * (content that DOES read) both pass. You cannot accumulate half a megabyte of your own sessions
+ * with zero readable messages unless the format moved under us. Meant to run only when a build
+ * produced zero moments, so it never costs a healthy run.
+ */
+export function driftCheck(roots: string[] = DEFAULT_ROOTS, opts: { minBytes?: number } = {}): DriftReport {
+  const minBytes = opts.minBytes ?? DRIFT_MIN_BYTES;
+
+  let files = 0;
+  let bytes = 0;
+  for (const path of transcriptFiles(roots)) {
+    let size: number;
+    let lines: string[];
+    try {
+      size = statSync(path).size;
+      if (size === 0 || size > FILE_CAP_BYTES) continue;
+      lines = readFileSync(path, 'utf8').split('\n');
+    } catch {
+      continue; // vanished or unreadable — not evidence either way
+    }
+    if (isMachineFile(lines)) continue; // our own borrowed calls are not the person, and never parse
+    files++;
+    bytes += size;
+  }
+
+  // Too little of the person's own history to tell "the format moved" from "nothing here yet".
+  if (bytes < minBytes) return { ok: true, files, bytes, typed: 0 };
+
+  // Substantial history exists — did we read ANY of it? One typed turn means the reader still works.
+  for (const t of readTurns(roots)) {
+    if (isTypedMessage(t)) return { ok: true, files, bytes, typed: 1 };
+  }
+
+  // Real transcripts, not one typed turn read: the single signal we refuse on.
+  return {
+    ok: false,
+    files,
+    bytes,
+    typed: 0,
+    reason:
+      `Found ${(bytes / 1e6).toFixed(1)}MB of your own conversations across ${files} transcript${files === 1 ? '' : 's'}, but read NONE of them.\n` +
+      `Claude Code's log format has almost certainly changed under stratless.\n` +
+      `\n` +
+      `stratless will NOT guess — a profile built from an empty read would describe a person it never saw.\n` +
+      `\n` +
+      `Please open an issue (no code needed): https://github.com/stratless-ai/stratless/issues/new?title=format+drift`,
+  };
 }
 
 /**
