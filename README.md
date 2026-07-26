@@ -76,7 +76,7 @@ pnpm test        # the CLI's tests
 pnpm dev:web     # stratless.com, locally
 ```
 
-The `cli/` is published standalone and carries exactly one runtime dependency — the local embedding model, which is what makes a build cost cents instead of dollars. The bar for a second is very high. Never auto-commit. The tree is left green and uncommitted for a human to review.
+The `cli/` is published standalone and carries exactly one runtime dependency: the local embedding model that does the pattern-finding. The bar for a second is very high. Never auto-commit. The tree is left green and uncommitted for a human to review.
 
 ---
 

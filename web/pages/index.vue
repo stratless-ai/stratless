@@ -57,7 +57,7 @@ useHead({
 
 // THE FRONT DOOR PERFORMS THE TRICK. It does not explain a philosophy.
 //
-// Everything below the fold is the REVEAL — there is no model, no cloud, no training; the
+// Everything below the fold is the REVEAL — no cloud, no training, no separate bill; the
 // conversation was on your disk the whole time, and Claude Code deletes it after 30 days.
 // Penn & Teller: transparent cups. Knowing how it works makes it better, not worse.
 //
@@ -206,8 +206,8 @@ gets written.
       <p class="eyebrow">There's no trick</p>
       <h2>The conversation was on your disk the whole time.</h2>
       <p>
-        There's no model. No cloud. No training. No separate bill. Every assistant that can resume
-        a chat has to store the chat, and Claude Code keeps yours in <code>~/.claude/projects</code>.
+        No cloud. No training. No separate bill. Every assistant that can resume a chat has to
+        store the chat, and Claude Code keeps yours in <code>~/.claude/projects</code>.
         <strong>Nobody reads it.</strong>
       </p>
       <p>
@@ -217,19 +217,20 @@ gets written.
         <strong>It reads what you did, not what it said.</strong>
       </p>
       <p>
-        The patterns that survive, each carrying the real count behind it, become your
-        <code>HUMAN.md</code>, written by the assistant you already have, on your own plan. If a
-        moment carries no honest signal, it records nothing.
+        The finding happens here, on your machine: a small model reads your moments and the things
+        you do again and again fall out as groups. Naming them is one short call to the assistant
+        you already have. The patterns that survive, each carrying the real count behind it, become
+        your <code>HUMAN.md</code>. If a moment carries no honest signal, it records nothing.
         <strong>A confident guess is the one thing that would end this.</strong>
       </p>
 
       <div class="pipeline">
         <div><code>moments</code><span>what you typed, and what the assistant was doing</span></div>
-        <div><code>discover</code><span>the recurring things you do, found in your own logs</span></div>
+        <div><code>cluster</code><span>the recurring things you do, found on your machine</span></div>
         <div><code>count</code><span>how often, over what span, rising or fading</span></div>
         <div><code>write</code><span>the patterns that survive become your HUMAN.md</span></div>
       </div>
-      <p class="quiet">Four steps, all on your machine. No scheme we shipped, no model of a generic person. <strong>Derived, not pre-matched.</strong></p>
+      <p class="quiet">Four steps. Three run entirely on your machine; only the naming borrows the assistant you already have. No scheme we shipped, no model of a generic person. <strong>Derived, not pre-matched.</strong></p>
     </div>
   </section>
 
@@ -646,7 +647,7 @@ h1 {
 .reveal strong {
   color: var(--ink);
 }
-/* the discovery pipeline steps under the reveal (moments · discover · count · write) */
+/* the pipeline steps under the reveal (moments · cluster · count · write) */
 .pipeline {
   display: flex;
   flex-direction: column;
