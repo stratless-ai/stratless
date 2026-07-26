@@ -1,11 +1,5 @@
 <script setup lang="ts">
 
-// The sea footer (SiteFooter inside the SeigaihaField wave band) is rendered by the LAYOUT, after
-// </main>, so it sits OUTSIDE the main landmark. A <footer> nested inside <main> is not a
-// `contentinfo` landmark, so on a page that put it there the footer landmark silently vanished.
-// `seaFooter` tells the layout to use the wave variant here instead of the plain footer.
-definePageMeta({ footer: false, seaFooter: true })
-
 const GITHUB = 'https://github.com/stratless-ai/stratless'
 
 // The CLI version, read from cli/package.json at build (see nuxt.config.ts) so it never goes stale by hand.
