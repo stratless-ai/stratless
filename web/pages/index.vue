@@ -6,9 +6,22 @@ const GITHUB = 'https://github.com/stratless-ai/stratless'
 const version = useRuntimeConfig().public.version
 
 // THE ONE SAMPLE SOURCE: a real build, checked in verbatim (see AGENTS.md, "One sample profile").
-// Imported raw at build time and rendered in full below — the goods inline, never behind a click.
+// Imported raw at build time and shown in full — behind the file icon in the install band, as a modal.
 import sampleRaw from '~/content/samples/HUMAN.md?raw'
 const sample = sampleRaw.trim()
+
+// The brief modal: scroll-locks the page while open, focuses the close button (so Esc lands on the
+// dialog), and restores everything on close. All client-side; the prerendered page ships it closed.
+const briefOpen = ref(false)
+const briefClose = ref<HTMLButtonElement | null>(null)
+watch(briefOpen, async (open) => {
+  if (typeof document === 'undefined') return
+  document.body.style.overflow = open ? 'hidden' : ''
+  if (open) {
+    await nextTick()
+    briefClose.value?.focus()
+  }
+})
 
 // Where HUMAN.md is headed. Claude Code is live; the rest are the roadmap. `logo` is a local monochrome
 // mark in /public/logos (from simple-icons, recolored via CSS mask); null = no clean official mark, so
@@ -119,30 +132,52 @@ useHead({
     </div>
   </section>
 
-  <!-- INSTALL — one command. -->
+  <!-- INSTALL — two columns: the commands, and the receipt. Left: one command to run, one to keep,
+       one to leave (never command cards; reference lives at /docs/commands). Right: the author's
+       real HUMAN.md behind a file icon — click it and the full, unedited brief opens in a modal. -->
   <section id="install" class="section install">
     <div class="container">
       <h2 class="sr-only">Install</h2>
-      <p class="eyebrow center">Try it free</p>
-      <div class="install-lead">
-        <div class="cmd"><code>npx stratless</code></div>
-        <p class="cmd-note">See what your AI already knows about you. Runs on your machine, changes nothing.</p>
+      <p class="eyebrow center">See it for yourself</p>
+      <div class="install-cols">
+        <div class="install-col">
+          <div class="install-lead">
+            <div class="cmd"><code>npx stratless</code></div>
+            <p class="cmd-note">See what your AI already knows about you. Runs on your machine, changes nothing.</p>
+          </div>
+          <p class="keep-line">
+            Like it? Keep it: <code>npx stratless init</code> stops Claude Code's 30-day reaper and archives
+            your history. Whatever's already gone is gone.
+          </p>
+          <p class="keep-line">
+            Turn it off anytime: <code>stratless stop</code>. Being able to shut it up is half of why you
+            can trust it.
+          </p>
+        </div>
+        <div class="install-col brief-col">
+          <button type="button" class="brief-icon" aria-haspopup="dialog" @click="briefOpen = true">
+            <span class="bi-doc" aria-hidden="true"><span class="bi-fold" /><span class="bi-line" /><span class="bi-line" /><span class="bi-line" /></span>
+            <span class="bi-name">HUMAN.md</span>
+          </button>
+          <p class="brief-sub">View my own brief to the AI: the author's real <code>HUMAN.md</code>, unedited. Yours will say different things. That's the point.</p>
+        </div>
       </div>
-
-      <!-- The KEEP and the OFF-SWITCH are inline lines, NOT command cards — a single boxed CTA above
-           keeps the free read the one hero, and a first visit gets one command to run, one to keep,
-           one to leave. The full command list lives at /docs/commands, where reference belongs. -->
-      <p class="keep-line">
-        Like it? Keep it: <code>npx stratless init</code> stops Claude Code's 30-day reaper and archives
-        your history. Whatever's already gone is gone.
-      </p>
-      <p class="keep-line">
-        Turn it off anytime: <code>stratless stop</code>. Being able to shut it up is half of why you
-        can trust it.
-      </p>
       <p class="cmd-meta center">v{{ version }} · MIT · <a :href="`${GITHUB}/releases`" target="_blank" rel="noopener">changelog ↗</a></p>
     </div>
   </section>
+
+  <!-- THE BRIEF MODAL — the one sample source (content/samples/HUMAN.md), summoned. -->
+  <Teleport to="body">
+    <div v-if="briefOpen" class="brief-overlay" @click.self="briefOpen = false">
+      <div class="brief-dialog" role="dialog" aria-modal="true" aria-label="the author's full HUMAN.md, a real example" @keydown.esc="briefOpen = false">
+        <div class="filebar">
+          <span class="fname">~/.claude/HUMAN.md</span>
+          <button ref="briefClose" type="button" class="brief-x" aria-label="close" @click="briefOpen = false">×</button>
+        </div>
+        <pre class="filebody"><code>{{ sample }}</code></pre>
+      </div>
+    </div>
+  </Teleport>
 
   <!-- THE REVEAL — knowing how it works makes it better, not worse. -->
   <section class="section reveal">
@@ -167,25 +202,6 @@ useHead({
         <div><code>write</code><span>the patterns that survive become your HUMAN.md</span></div>
       </div>
       <p class="quiet">Three of the four run entirely on your machine: the grouping runs on <strong>bge-small</strong>, an open MIT model (~34MB) fetched once at <code>init</code>, and only the naming borrows the assistant you already have. Weights come in, nothing goes out. If a moment carries no honest signal, it records nothing. <strong>Derived, not pre-matched.</strong></p>
-    </div>
-  </section>
-
-  <!-- THE FILE — the goods, inline. Everyone who lands sees exactly what they would be working
-       with: a real build, checked in verbatim, rendered in full. Never behind a click. -->
-  <section class="section thefile">
-    <div class="container narrow">
-      <p class="eyebrow">The file itself</p>
-      <h2>This is a real one.</h2>
-      <p class="file-lede">
-        The author's own <code>HUMAN.md</code>, unedited: 30 patterns found in 138 real
-        conversations, written as instructions his assistant loads every session. Yours will say
-        different things. That's the point.
-      </p>
-      <div class="filecard">
-        <div class="filebar" aria-hidden="true"><span class="fname">~/.claude/HUMAN.md</span></div>
-        <pre class="filebody" tabindex="0" role="region" aria-label="the full HUMAN.md file, a real example"><code>{{ sample }}</code></pre>
-      </div>
-      <p class="quiet file-note">Rebuilt as the history grows. Load it into any assistant that reads a file, or delete it: it's plain text, and it's yours.</p>
     </div>
   </section>
 
@@ -457,22 +473,123 @@ h1 {
   color: var(--ink);
 }
 
-/* ── the file itself ── */
-.thefile h2 {
-  font-size: var(--fs-title);
-  line-height: 1.25;
-  margin: 0.4rem 0 1.2rem;
+/* ── the install columns + the brief showcase ── */
+.install-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2.5rem;
+  align-items: center;
+  max-width: 52rem;
+  margin: 0 auto;
 }
-.file-lede {
-  margin: 0 0 1.6rem;
+@media (max-width: 760px) {
+  .install-cols {
+    grid-template-columns: 1fr;
+    gap: 2rem;
+  }
 }
-.filecard {
+.brief-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.9rem;
+}
+/* The file icon: a paper sheet with a folded corner and faint rule lines. A BUTTON — it opens the brief. */
+.brief-icon {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+  background: none;
+  border: none;
+  padding: 0.4rem;
+  cursor: pointer;
+}
+.bi-doc {
+  position: relative;
+  width: 64px;
+  height: 80px;
+  background: var(--paper-2);
+  border: 1.5px solid var(--ink);
+  border-radius: 6px 14px 6px 6px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 7px;
+  padding: 0 12px 14px;
+  transition: transform 0.15s ease;
+}
+.brief-icon:hover .bi-doc,
+.brief-icon:focus-visible .bi-doc {
+  transform: translateY(-2px);
+}
+.bi-fold {
+  position: absolute;
+  top: -1.5px;
+  right: -1.5px;
+  width: 16px;
+  height: 16px;
+  background: var(--paper);
+  border-left: 1.5px solid var(--ink);
+  border-bottom: 1.5px solid var(--ink);
+  border-radius: 0 0 0 6px;
+}
+.bi-line {
+  height: 2px;
+  background: var(--mid);
+  border-radius: 1px;
+}
+.bi-line:nth-child(3) {
+  width: 75%;
+}
+.bi-name {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--ink);
+}
+.brief-sub {
+  margin: 0;
+  max-width: 20rem;
+  text-align: center;
+  font-family: var(--font-read);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  color: var(--mid);
+}
+.brief-sub code {
+  font-size: var(--fs-code);
+  font-weight: 700;
+  color: var(--ink);
+}
+
+/* ── the brief modal ── */
+.brief-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: color-mix(in srgb, var(--ink) 45%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4vh 1rem;
+}
+.brief-dialog {
+  width: min(46rem, 100%);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
   border: 1.5px solid var(--ink);
   border-radius: 8px;
   background: var(--paper-2);
   overflow: hidden;
+  box-shadow: 0 18px 50px color-mix(in srgb, var(--ink) 35%, transparent);
 }
 .filebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 0.55rem 1rem;
   border-bottom: 1.5px solid var(--ink);
   background: color-mix(in srgb, var(--ink) 6%, var(--paper-2));
@@ -483,10 +600,21 @@ h1 {
   font-weight: 700;
   color: var(--ink);
 }
-/* The whole file, in full — no inner scroll, no click. Long provenance lines soft-wrap. */
+.brief-x {
+  font-family: var(--font-mono);
+  font-size: 1.2rem;
+  line-height: 1;
+  color: var(--ink);
+  background: none;
+  border: none;
+  padding: 0.1rem 0.3rem;
+  cursor: pointer;
+}
+/* The whole file scrolls inside the dialog. Long provenance lines soft-wrap. */
 .filebody {
   margin: 0;
   padding: 1.2rem 1.25rem 1.4rem;
+  overflow-y: auto;
   font-family: var(--font-mono);
   font-size: 0.8rem;
   line-height: 1.6;
@@ -499,9 +627,6 @@ h1 {
   font-size: inherit;
   background: none;
   padding: 0;
-}
-.file-note {
-  margin-top: 1.2rem;
 }
 
 /* ── the reveal ── */
