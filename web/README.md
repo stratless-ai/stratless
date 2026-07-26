@@ -5,8 +5,8 @@
 **stratless.com** — the front door.
 
 The site for [stratless](https://github.com/stratless-ai/stratless), a local tool that reads your
-AI coding assistant's own history and builds it a living model of who you are — so it stops talking
-over your head, or under it.
+AI coding assistant's own history and writes it a brief on who you are — so it stops talking over
+your head, or under it.
 
 ## Run it
 

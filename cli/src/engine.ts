@@ -130,15 +130,17 @@ export async function coldBuild(bin: string, opts: {
   return freeze(moments, piles, named, vocab);
 }
 
-/** Write the three stores and the frozen model, together, once. */
+/** Write the three stores and the frozen model, together, once. No scope is stamped — the naming
+ *  call no longer rules on person-vs-project (the verdict wobbled; see name.ts). `write.ts` keeps
+ *  its project-filter as a dead-man switch that nothing trips. */
 function freeze(moments: Moment[], piles: Pile[], named: Named[], vocab: Set<string>): BuildResult {
   const at = new Date().toISOString();
-  appendCategories(named.map((n) => ({ name: n.name, description: n.description, scope: n.scope })), { at });
+  appendCategories(named.map((n) => ({ name: n.name, description: n.description })), { at });
 
   // A pile that no behaviour claimed contributes nothing — its moments get an empty `kinds`, which is
   // a real answer ("looked, matched nothing"), not an absence.
   const labelOf = new Map<number, string>();
-  for (const n of named) for (const id of n.piles) labelOf.set(id, n.name);
+  for (const n of named) labelOf.set(n.pile, n.name);
 
   const records: Assignment[] = [];
   const memberOf = new Map<number, number>(); // moment index -> pile id

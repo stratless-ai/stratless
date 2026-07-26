@@ -57,21 +57,20 @@ test('assemble: three sections, count-ordered, project held back, no-quote dropp
   assert.ok(t.includes('catch nothing'), 'a bookend with no quote still ships — the count is its receipt');
   assert.ok(!t.includes('talk nothing'), 'a Register entry with no quote drops — there the quote IS the content');
 
-  // Frame and Judge print the instruction and its count, and NOTHING else. A wrong quote teaches the
-  // assistant a wrong trigger, which is worse than no quote at all (measured ~1 in 5 wrong, 2026-07-26).
+  // Every section prints the instruction and its receipt, and NOTHING else. Frame/Judge quotes were
+  // measured wrong ~1 in 5 (2026-07-26); Register's printed quote became a duplicate once the voicer
+  // embedded the phrase in the line. The quote survives only as Register's admission gate.
   assert.ok(!t.includes('> lets make a plan'), 'frame prints no quote');
   assert.ok(!t.includes('> whats the sample size'), 'judge prints no quote');
-  assert.ok(t.includes('> sure'), 'register still prints its quote');
+  assert.ok(!t.includes('> sure'), 'register prints no quote either — the phrase lives in the line');
 
   assert.equal(built!.meta.frame, 2);
   assert.equal(built!.meta.judge, 2);
   assert.equal(built!.meta.register, 1);
-  assert.ok(t.includes('**offer a plan first**\n300 times across 5 conversations\n\n'), 'block format: claim, count, no quote');
+  assert.ok(t.includes('- offer a plan first (300×)\n'), 'block format: one bullet, compact receipt, no quote');
 });
 
-test('assemble: a multi-line quote collapses onto one blockquote line', () => {
-  // Most stored replies carry newlines; a picked multi-line quote must not break out of the `> ` block.
-  // Register is the only section that prints a quote, so it is the only one that can be broken this way.
+test('assemble: no blockquote appears anywhere — the quote is a gate, not display', () => {
   const stats: CategoryStat[] = [
     stat({ name: 'plan', lift: 1, count: 200, scope: 'person' }),
     stat({ name: 'terse', lift: 1, count: 100, scope: 'person' }),
@@ -81,11 +80,11 @@ test('assemble: a multi-line quote collapses onto one blockquote line', () => {
     ['terse', v('register', 'open the file\n\nand show me', 'talk plainly')],
   ]);
   const t = assemble(stats, voiced, prov)!.text;
-  assert.ok(t.includes('> open the file and show me'), 'newlines collapse into a single blockquote line');
-  assert.ok(!t.includes('\nand show me'), 'no unprefixed line escapes the blockquote');
+  assert.ok(t.includes('- talk plainly (100×)'), 'the register row ships — its quote satisfied the gate');
+  assert.ok(!t.includes('> '), 'and nothing is printed as a blockquote');
 });
 
-test('assemble: rising/fading and bursts show in the weight line', () => {
+test('assemble: rising/fading and bursts ride in the receipt', () => {
   const stats = [
     stat({ name: 'rise', lift: 1, count: 10, scope: 'person', direction: 'rising' }),
     stat({ name: 'burst', lift: 1, count: 10, scope: 'person', burst: true }),
@@ -95,8 +94,8 @@ test('assemble: rising/fading and bursts show in the weight line', () => {
     ['burst', v('frame', 'q2', 'offer burst')],
   ]);
   const built = assemble(stats, voiced, prov)!;
-  assert.ok(built.text.includes('10 times across 5 conversations · rising'), 'rising note');
-  assert.ok(built.text.includes('10 times across 5 conversations · comes in bursts'), 'burst note');
+  assert.ok(built.text.includes('- offer rise (10×, rising)'), 'rising rides in the receipt');
+  assert.ok(built.text.includes('- offer burst (10×, comes in bursts)'), 'burst rides in the receipt');
 });
 
 test('assemble: register fills only to the char budget', () => {
@@ -105,7 +104,8 @@ test('assemble: register fills only to the char budget', () => {
   for (let i = 0; i < 40; i++) {
     const name = `r${i}`;
     stats.push(stat({ name, lift: 1, count: 100 - i, scope: 'person' }));
-    voiced.set(name, v('register', 'x'.repeat(150), `register trait number ${i} that is fairly wordy`));
+    // the LINE carries the bulk — quotes are no longer printed, so only the line can hit the budget
+    voiced.set(name, v('register', 'q', `register trait number ${i} that is fairly wordy ${'x'.repeat(150)}`));
   }
   const built = assemble(stats, voiced, prov)!;
   assert.equal(built.meta.judge, 1, 'the judge entry always ships');
@@ -184,6 +184,10 @@ test('assemble: the decode key renders (phrases → signal), before the sections
   assert.ok(built.text.includes('"make a plan" · "lets make a" → wants a plan before building'), 'phrases → decode');
   assert.equal(built.meta.shorthand, 1);
   assert.ok(built.text.indexOf('## In the moment') < built.text.indexOf('## What to offer me'), 'sits above the detail');
+  // The head is the only seam without a blank line for free (every later heading gets one from
+  // block()'s trailing '\n\n'). Without it the shorthand list runs straight into the first heading
+  // and markdown swallows the break.
+  assert.ok(built.text.includes('\n\n## What to offer me'), 'the first heading gets a blank line above it');
 });
 
 test('assemble: no decode → no shorthand section, meta.shorthand 0', () => {

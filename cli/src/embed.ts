@@ -22,7 +22,7 @@
  *
  * LAZY BY CONSTRUCTION. The model is loaded on first use, never at import. `mirror` — the free read
  * that `npx stratless` runs, and the surface the launch points at — does pure arithmetic over logs
- * and must never touch a model. If importing this module downloaded 50MB, that would be broken.
+ * and must never touch a model. If importing this module downloaded 34MB, that would be broken.
  */
 import { existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -74,7 +74,7 @@ export function modelPresent(): boolean {
 
 /**
  * Fetch the weights if they are not here yet. Called by `init`, in the FOREGROUND, after consent —
- * never from the background Stop hook, which must stay silent and free. A ~50MB download that
+ * never from the background Stop hook, which must stay silent and free. A ~34MB download that
  * happens invisibly while someone is working is a surprise, and surprises are how trust goes.
  */
 export async function ensureModel(): Promise<void> {

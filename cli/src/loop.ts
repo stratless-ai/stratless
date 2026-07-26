@@ -29,6 +29,7 @@ import { fileURLToPath } from 'node:url';
 import { atomicWriteFileSync, CorruptStoreError } from './atomic.js';
 import { findAssistant } from './claude.js';
 import { buildMoments, loadMoments } from './moments.js';
+import { driftCheck } from './reader.js';
 import { loadCategories } from './categories.js';
 import { loadAssignments, pendingMoments } from './assign.js';
 import { join as joinLabelled, scoreboard } from './count.js';
@@ -160,6 +161,11 @@ export async function runWorker(): Promise<number> {
     const built = buildMoments();
 
     if (!built.total) {
+      // Zero moments is usually a fresh start — but if the person's own transcripts are substantial
+      // and the reader still got nothing, the log format moved under us. Refuse loudly rather than
+      // quietly reporting "no conversations" over a profile we cannot honestly build. (v3 canary.)
+      const drift = driftCheck();
+      if (!drift.ok) return fail(drift.reason!.split('\n'));
       summary.push('no conversations found yet — talk to your assistant a few times, then run `stratless update`');
     } else {
       let cats = loadCategories();

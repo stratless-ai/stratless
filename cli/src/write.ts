@@ -140,10 +140,15 @@ SECTION: which part of the brief it belongs in:
 
 LINE: one sentence written AS AN INSTRUCTION TO THE ASSISTANT (offer X, catch Y, talk like Z), never a
 description of the person. Plain language; where they reach for a recurring phrase, quote it. Use commas
-or colons, never an em dash.
+or colons, never an em dash. The line must still be true on this person's NEXT project: if a noun would
+name their current project, product, or a specific technology they are evaluating this month, write the
+kind of thing it is instead ("their product", "a named tool", "a concrete slice"); keep every other word
+as specific as the evidence.
 
 QUOTE: the ONE quote (by number) that most clearly SHOWS this to someone who never met them; 0 if none.
 - Prefer a quote that demonstrates it over one that merely mentions the topic; short over meandering.
+- Prefer a quote that does not disclose the person's plans, product decisions, or anything they would
+  not want read aloud to a stranger; when every candidate does, pick the least revealing.
 
 SIGNAL: a plain decode, SIX WORDS OR FEWER, of what the person is ASKING FOR when they do this: what it
 MEANS, never an instruction. E.g. "wants a plan before building", "wants it proven, not asserted".
@@ -182,31 +187,31 @@ ${body}`;
   return out;
 }
 
-/** One entry's three lines: the re-voiced instruction · weight+direction · quote. */
 /**
- * One entry. The quote is OPTIONAL, and deliberately so.
+ * One entry: one bullet, one receipt — the same shape in every section.
  *
- * A Frame or Judge line is already a complete instruction — "offer a plan before building" tells the
- * assistant everything it needs, and an example adds nothing it can act on. Measured 2026-07-26 on a
- * real build: roughly ONE IN FIVE picked quotes did not demonstrate their line at all (an "offer
- * scoped research" entry carrying "midjourney is $10 to start"; a "catch the impulse to keep going
- * when they halt you" entry carrying "ship it"). A missing quote costs nothing; a wrong one teaches
- * the assistant the wrong trigger, so it is worse than silence. The COUNT is the receipt that the
- * line was measured, and the "In the moment" key already carries recognisable phrasing.
- *
- * Register keeps its quote, because there the quote IS the instruction — no description of bluntness
- * beats hearing "which is the fucking file?".
+ * NO QUOTE IS PRINTED, anywhere, and the reasons differ by section. Frame and Judge lines are
+ * complete instructions — an example adds nothing the assistant can act on, and measured 2026-07-26
+ * roughly ONE IN FIVE picked quotes did not demonstrate their line (a wrong quote teaches a wrong
+ * trigger, worse than silence). Register lost its printed quote later the same day, for the opposite
+ * reason: the conductor voicing EMBEDS the recurring phrase inside the instruction ("treat a short
+ * go-ahead like 'looks good, let's move on' as full permission…"), so the blockquote underneath had
+ * become a duplicate — 4 of 5 register rows on the real build repeated a phrase their line already
+ * carried. The quote still EXISTS for register rows — voice() must pick one or the row drops — it is
+ * the quality gate proving the line is demonstrable, not display.
  */
-function block(claim: string, stat: CategoryStat, quote?: string): string {
+function block(claim: string, stat: CategoryStat): string {
+  // THE COMPACT RECEIPT (2026-07-26). The row is an instruction with a terse marker, not a claim
+  // followed by an evidence SENTENCE — "338 times across 77 conversations" on its own line was
+  // written for a human auditor, and the AI gains nothing from the prose. The count itself stays:
+  // it is what separates a profile from a prompt (an instruction backed by "(338×)" is observed
+  // fact, not author opinion), and the file's own preamble promises every line carries it. The
+  // conversation-spread moves to the auditor's surfaces; the trend rides in the same parenthesis.
   const bits: string[] = [];
   if (stat.direction === 'rising' || stat.direction === 'fading') bits.push(stat.direction);
   if (stat.burst) bits.push('comes in bursts');
-  const note = bits.length ? ` · ${bits.join(' · ')}` : '';
   const c = claim.replace(/\s+/g, ' ').trim();
-  // Collapse the quote to one line, exactly as the claim above is. A raw reply carries newlines (most
-  // do), and only its first line would get the `> ` prefix — the rest would break out of the blockquote.
-  const q = quote?.replace(/\s+/g, ' ').trim();
-  return `**${c}**\n${stat.count} times across ${stat.sessions} conversations${note}\n${q ? `> ${q}\n` : ''}\n`;
+  return `- ${c} (${stat.count}×${bits.length ? ', ' + bits.join(', ') : ''})\n`;
 }
 
 interface Entry {
@@ -265,23 +270,31 @@ export function assemble(
   if (decodeLines.length) {
     head.push('## In the moment', '', 'Their shorthand. Recognise these live; the detail is in the sections below.', '', ...decodeLines, '');
   }
+  // One more blank so the first section HEADING gets its own blank line above it. Every later
+  // heading gets one for free (block() ends with '\n\n'); the head is the only seam without one,
+  // and without this the shorthand list runs straight into `## What to offer me before I ask`.
+  head.push('');
   let text = head.join('\n');
 
   // Frame + Judge are the bookends — always shipped in full. Register fills the remaining budget.
+  // Rows are single-line bullets now, so each section closes with one blank line ('\n') to keep the
+  // next heading separated — block() no longer carries trailing spacing of its own.
   if (frame.length) {
     text += ['## What to offer me before I ask', '', 'Set these up or hand them over before I ask. Offering them unprompted is the point, not overstepping.', '', ''].join('\n');
     for (const e of frame) text += block(e.v.line, e.stat);
+    text += '\n';
   }
   if (judge.length) {
     text += ['## What to catch for me', '', 'What I reliably challenge or refuse. Pre-empt these, so I do not have to catch them myself.', '', ''].join('\n');
     for (const e of judge) text += block(e.v.line, e.stat);
+    text += '\n';
   }
   let shippedReg = 0;
   if (register.length) {
     text += ['## How to talk to me', '', 'The register I work in. Match it rather than smoothing it over.', '', ''].join('\n');
     for (const e of register) {
-      if (text.length + block(e.v.line, e.stat, e.v.quote).length > CHAR_BUDGET) break;
-      text += block(e.v.line, e.stat, e.v.quote);
+      if (text.length + block(e.v.line, e.stat).length > CHAR_BUDGET) break;
+      text += block(e.v.line, e.stat);
       shippedReg++;
     }
   }

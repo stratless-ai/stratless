@@ -17,7 +17,7 @@ import { findAssistant, onPath } from './claude.js';
 import { init as doInit, ARCHIVE, PROJECTS, stopRefresh, refreshArmed, type InitResult } from './init.js';
 import { ensureModel, modelPresent, modelDir } from './embed.js';
 import { dailyCheck, fetchLatest, newerThan } from './notify.js';
-import { loadRecentExchanges, sessionCount, findExchange } from './exchange.js';
+import { loadRecentExchanges } from './exchange.js';
 import { removeProfile, humanMdPath, claudeMdPath } from './sink.js';
 import { readRenders, requestColdBuild, coldBuildRequested, readState, setFlushCadence, type FlushCadence, type RenderMeta } from './state.js';
 import { readUsage } from './usage.js';
@@ -301,10 +301,10 @@ async function tailWorker(spawnedAtMs: number, prevStamp: string): Promise<numbe
     }
     const p = readProgress();
     if (alive && p && p.pid === holder!.pid && !TERMINAL_PHASES.has(p.phase)) {
-      // Prefer the worker's latest live line — the discovery pipeline narrates "scoring N/total · ~M
-      // min left" here; fall back to the phase when there is no line yet.
+      // Prefer the worker's latest live line — the engine narrates ("fingerprinting 1280/5697",
+      // "naming 30 patterns") here; fall back to the phase when there is no line yet.
       const latest = p.summary?.length ? p.summary[p.summary.length - 1] : undefined;
-      const line = latest ?? (p.phase === 'judging' && p.total ? `judging ${p.done ?? 0}/${p.total} new` : p.phase);
+      const line = latest ?? p.phase;
       // The rotating cursor carries the "in progress" signal now, so the trailing "…" is gone. TTY only —
       // a pipe (the hook worker, CI) gets the plain line, never a stream of cursor frames.
       const spin = process.stderr.isTTY ? `${CE.ok(SPINNER_FRAMES[frame])} ` : '';
@@ -483,7 +483,7 @@ async function stop(): Promise<void> {
   if (unloaded) console.log(`  ${C.dim('· profile unloaded from your CLAUDE.md')}`);
   console.log(`  ${C.dim('Your ~/.claude/HUMAN.md is left as-is — delete it yourself if you want it gone.')}`);
   if (existsSync(modelDir())) {
-    console.log(`  ${C.dim(`The local model (~50MB) is still at ${modelDir()} — remove it if you want the disk back.`)}`);
+    console.log(`  ${C.dim(`The local model (~34MB) is still at ${modelDir()} — remove it if you want the disk back.`)}`);
   }
   console.log(`  ${C.dim(`Run \`${hint('stratless update')}\` to load it again, \`${hint('stratless init')}\` to turn the refresh back on.`)}\n`);
 }
@@ -573,9 +573,7 @@ async function status(rest: string[] = []): Promise<void> {
     const holder = readLock();
     const wp = readProgress();
     if (holder && !lockIsStale(holder)) {
-      const ph = wp && wp.pid === holder.pid
-        ? (wp.phase === 'judging' && wp.total ? `judging ${wp.done ?? 0}/${wp.total}` : wp.phase)
-        : 'working';
+      const ph = wp && wp.pid === holder.pid ? wp.phase : 'working';
       console.log(`    running now             ${C.ok('yes')}  ${C.dim(`${ph} · pid ${holder.pid} · stop: ${hint('stratless stop')}`)}`);
     } else {
       if (wp && wp.phase === 'stopped') {
@@ -739,11 +737,11 @@ async function main(): Promise<void> {
     const est = pile > 0 ? estimateBuild(pile) : estimateFromMessages(mirror!.scale.messages);
     console.log(`\n  ${C.dim('Full profile:')}    ${C.b(estimateLine(est))}   ${C.dim('built on your own claude, nothing leaves.')}`);
     // THE DOWNLOAD IS PART OF THE ASK. Most of the build now runs on a small local model, which is
-    // why it costs cents instead of dollars — but it is ~50MB and it has to arrive once. Consenting
-    // to a build must mean consenting to that, said out loud, before the yes. Silently pulling 50MB
+    // why it costs cents instead of dollars — but it is ~34MB and it has to arrive once. Consenting
+    // to a build must mean consenting to that, said out loud, before the yes. Silently pulling 34MB
     // because someone agreed to a price is the kind of surprise the whole door exists to prevent.
     if (!modelPresent()) {
-      console.log(`  ${C.dim('One-time:')}         ${C.b('~50MB local model')}   ${C.dim('downloaded once, then every build runs offline.')}`);
+      console.log(`  ${C.dim('One-time:')}         ${C.b('~34MB local model')}   ${C.dim('downloaded once, then every build runs offline.')}`);
     }
 
     // 4. the one consent. Only a real terminal can say yes; a pipe or a missing assistant points to
@@ -759,10 +757,10 @@ async function main(): Promise<void> {
       }
       if (yes) {
         // FOREGROUND, on the consented path only. The background Stop hook must never do this: a
-        // 50MB fetch that happens invisibly while someone is working is exactly the surprise the
+        // 34MB fetch that happens invisibly while someone is working is exactly the surprise the
         // door exists to prevent. If it fails, say so and stop — the build would only fail later.
         if (!modelPresent()) {
-          const stopFetch = startSpinner('fetching the local model (one time, ~50MB)…', process.stdout);
+          const stopFetch = startSpinner('fetching the local model (one time, ~34MB)…', process.stdout);
           try {
             await ensureModel();
           } catch (err) {

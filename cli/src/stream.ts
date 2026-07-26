@@ -12,8 +12,8 @@
  * THE EXHAUST SENTINEL: a streamed session is a real multi-turn transcript in ~/.claude/projects —
  * unlike one-shot calls (whose lone turn never closes a pair), it WOULD parse as exchanges: judge
  * prompt → verdict → next judge prompt is (prompt → said → reaction) to the parser. Every streamed
- * prompt therefore begins with a `<stratless-…>` sentinel, and isRealPrompt (transcript.ts) drops
- * `<`-prefixed messages. The pipeline must never eat its own exhaust.
+ * prompt therefore begins with a `<stratless-…>` sentinel, and the shared reader (reader.ts) drops
+ * `<stratless-…>`-prefixed turns before they can parse as exchanges. The pipeline must never eat its own exhaust.
  *
  * TOOL-LESS BY CONSTRUCTION (C9): every streamed session runs with `--tools ""` — the borrow asks a
  * question, it never gets hands. Phase 0's B1 found the borrowed claude taking the writer prompt
@@ -33,7 +33,7 @@ import { spawn } from 'node:child_process';
 import { recordUsage, type CallCost } from './usage.js';
 import { CLEAN_ARGS, TOOLLESS_ARGS } from './claude.js';
 
-/** Streamed prompts start with this — isRealPrompt drops `<`-prefixed messages (pinned by test). */
+/** Streamed prompts start with this — the shared reader (reader.ts) drops `<stratless-…>`-prefixed turns so the pipeline never re-ingests its own exhaust. */
 export const SENTINEL_PREFIX = '<stratless-';
 
 /** Does a failure smell TRANSIENT — worth a pause and another try, rather than a downgrade?

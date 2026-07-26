@@ -5,8 +5,8 @@
  * itself on top of them. Nothing here talks to a model.
  *
  * THE LOCK (C4): one stratless doing real work at a time, ever. The after-session Stop hook and a
- * hand-run `update` can fire together today and race read-modify-write over judgments.json — the
- * last writer silently discards the other's paid-for judgments. Acquisition is by hard-LINKING a
+ * hand-run `update` can fire together today and race read-modify-write over the moment and
+ * assignment stores — the last writer silently discards the other's work. Acquisition is by hard-LINKING a
  * fully-written temp file into place: link(2) fails with EEXIST if the lock exists, and — unlike
  * an O_EXCL create-then-write — the lock can never be observed half-written, so no contender can
  * mistake a just-born lock for a corpse. A dead holder's lock is stolen; a live one is respected.
@@ -226,7 +226,7 @@ export async function stopWorker(graceMs = 3000): Promise<{ killed: boolean; pid
   // was recycled by the person's dev server must never get that server killed by `stop`.
   if (!verifiedWorker(holder)) return { killed: false, pid: holder.pid, unverified: true };
   // A detached worker leads its own process GROUP, and its borrowed claude children (including
-  // the SYNCHRONOUS mine/synthesis calls that block its signal handler) live in that group — kill
+  // the SYNCHRONOUS naming/write calls that block its signal handler) live in that group — kill
   // the group, so 'stopped' means the SPENDING stopped, not just the bookkeeper.
   const group = leadsOwnGroup(holder.pid);
   const signalTarget = group ? -holder.pid : holder.pid;
@@ -261,7 +261,7 @@ export async function stopWorker(graceMs = 3000): Promise<{ killed: boolean; pid
       phase: 'stopped',
       ok: false,
       startedAt: p?.pid === holder.pid ? p.startedAt : new Date().toISOString(),
-      summary: ['stopped by you — everything already judged is banked; the next run re-reads at most one chunk'],
+      summary: ['stopped by you — everything collected so far is banked; the next run picks up where this one stopped'],
     });
   }
   return { killed: true, pid: holder.pid };

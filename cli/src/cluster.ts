@@ -3,7 +3,7 @@
  * dollars: this stage replaces `assign`, which asked a model "does this moment fit this category?"
  * roughly 190,000 times. It is arithmetic. Cost is zero.
  *
- * THREE JOBS:
+ * FOUR JOBS:
  *
  *   1. DERIVE K — how many piles this person's pile supports. Never a fixed number: someone with 500
  *      moments genuinely has fewer distinct behaviours than someone with 50,000, and hardcoding a K
@@ -12,6 +12,18 @@
  *      never moves for reasons that are not the person.
  *   3. JOIN — the growth path. New moments attach to FROZEN centres; nothing re-clusters. This is
  *      what makes "rising" and "fading" mean anything, because they track the SAME crowd over time.
+ *
+ * ⚠️ THERE IS DELIBERATELY NO MERGE. It was the naming call's job once, and the model's verdict
+ * wobbled 1 → 14 → 2 → 0 folds across four builds of the same data (2026-07-26) — a per-pile LLM
+ * judgement in the data path is `assign` in miniature, so it was removed. The arithmetic replacement
+ * was then MEASURED and both simple criteria failed on the real geometry: member spread runs
+ * 0.14–0.26 (1−cos) while centres of genuinely DIFFERENT moves sit only 0.06–0.09 apart, so
+ * "gap < spread" chains all 30 piles into one (249/435 pairs fold), and "gap < standard error"
+ * folds nothing — not even a true duplicate pair at 0.044. A correct rule needs relative structure
+ * (mutual-nearest-neighbour pairs that are outliers against the gap distribution) and evidence from
+ * more than one corpus. Until then the engine does not guess: the measured cost of no-merge is one
+ * visible duplicate pair in 30 — two similar rows a reader can SEE — while a wrong fold fuses
+ * behaviours invisibly and nothing downstream can recover them.
  *
  * THE ADMISSION FLOOR and the CIRCULAR GUARD both moved here from the deleted `discover.ts`; they
  * were the harness that kept its output honest and they still apply.
@@ -111,11 +123,16 @@ export function kmeans(X: Float32Array[], k: number, seed = 12345): { assign: In
  * too few piles (everything jammed together) and too many (arbitrary splits), which is why it is the
  * criterion rather than raw tightness — tightness rises forever as K grows and would pick K = n.
  *
- * ⚠️ KNOWN DEBT. Measured on the real pile, silhouette spans only ~0.03 across K=8..30 and the best K
- * beat a rival by 0.0005. That is noise. Taking the argmax fits sampling error and picks a needlessly
- * large K every time, so the rule takes the SMALLEST K already at the plateau — cheaper to name, and
- * it loses nothing to the char budget. But when the criterion cannot discriminate at all, "smallest
- * at the plateau" degrades to returning the band floor. It is a weak derivation, not a strong one.
+ * ⚠️ KNOWN DEBT, half paid. Measured on the real pile, silhouette spans only ~0.03 across K=8..30 and
+ * the best K beat a rival by 0.0005 — noise. The rule therefore takes a K AT the plateau rather than
+ * the argmax; the open question was which end. "Smallest" shipped first and was measured unstable
+ * (2026-07-26): five new moments in ~5,700 tipped the derived K from 28 to 16, because on a flat
+ * curve WHICH k first clears `peak - eps` is decided by noise. It now takes the LARGEST K at the
+ * plateau, for a structural reason, not a statistical one: the pipeline HEALS over-splitting (the
+ * naming call merges same-move piles, the admission floor prunes thin ones, the char budget caps the
+ * file) but nothing downstream can recover two behaviours fused into one pile. When the criterion
+ * cannot discriminate, err on the side the pipeline can repair. The silhouette still excludes any K
+ * markedly below the peak; it just no longer bets the profile's granularity on a 0.0005 difference.
  */
 export function deriveK(X: Float32Array[], lo = K_MIN, hi = K_MAX, eps = 0.01): number {
   const scores: { k: number; sil: number }[] = [];
@@ -137,7 +154,9 @@ export function deriveK(X: Float32Array[], lo = K_MIN, hi = K_MAX, eps = 0.01): 
     scores.push({ k, sil: sil / X.length });
   }
   const peak = Math.max(...scores.map((s) => s.sil));
-  return (scores.find((s) => s.sil >= peak - eps) ?? scores[0]).k;
+  // LARGEST at the plateau — err toward granularity, which the pipeline can heal (see header).
+  const atPlateau = scores.filter((s) => s.sil >= peak - eps);
+  return (atPlateau[atPlateau.length - 1] ?? scores[0]).k;
 }
 
 /**
@@ -168,7 +187,8 @@ export function buildPiles(X: Float32Array[], moments: Moment[]): Pile[] {
   for (let i = 0; i < assign.length; i++) members[assign[i]].push(i);
   return members
     .map((ms, id) => ({ id, members: ms, centroid: centroids[id] }))
-    .filter((p) => admits(p, moments));
+    .filter((p) => admits(p, moments))
+    .map((p, id) => ({ ...p, id }));
 }
 
 /**

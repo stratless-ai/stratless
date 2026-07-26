@@ -5,11 +5,11 @@
 
 <br><br>
 
-**stratless builds your AI a living model of who you are (what you know, how you think, what you're building), so it stops talking over your head, or under it.**
+**stratless turns your own AI conversations into a brief your assistant reads — what to offer you, what to catch for you, how to talk to you — so it stops talking over your head, or under it.**
 
 [![npm](https://img.shields.io/npm/v/stratless?color=cb3837&logo=npm&logoColor=white)](https://www.npmjs.com/package/stratless)
 [![tests](https://img.shields.io/github/actions/workflow/status/stratless-ai/stratless/cli.yml?branch=main&label=tests)](https://github.com/stratless-ai/stratless/actions/workflows/cli.yml)
-[![runtime deps](https://img.shields.io/badge/runtime%20deps-0-3fb950)](cli/package.json)
+[![runtime deps](https://img.shields.io/badge/runtime%20deps-1%2C%20the%20local%20model-3fb950)](cli/package.json)
 [![license](https://img.shields.io/npm/l/stratless?color=3fb950)](LICENSE)
 
 [stratless.com](https://stratless.com) &nbsp;·&nbsp; [npm](https://www.npmjs.com/package/stratless) &nbsp;·&nbsp; [How it works](#how-it-works-theres-no-trick) &nbsp;·&nbsp; [Privacy](#privacy)
@@ -21,18 +21,20 @@
 Your coding assistant has no idea who it's talking to. So it only has two registers: silence, or a wall of jargon. stratless gives it the missing third thing, a picture of *you*, read from the conversations you've already had.
 
 ```
-npx stratless init
+npx stratless
 ```
 
-No account. No API key. No cloud. It reads transcripts already on your disk and borrows the `claude` you already have to read them. **Nothing leaves your machine.** All you need: Claude Code installed and signed in, Node 18+, and a few sessions of history.
+That's the free read: what your AI already knows about you, computed on your machine, changing nothing. Like it? `npx stratless init` keeps it — it stops Claude Code's 30-day transcript reaper, archives your history, and builds the full profile after asking you once.
+
+No account. No API key. No cloud. The reading and the pattern-finding happen on your disk; the only borrowed thing is your own `claude`, which names what the maths found. **Nothing leaves your machine.** All you need: Claude Code installed and signed in, Node 18+, and a few sessions of history.
 
 ## What it builds
 
 <p align="center">
-  <img src="assets/profile-hero.svg?v=2" alt="A sample stratless profile printed in a terminal, in sections When something has gone wrong and How they work, each line carrying its real count and a quote: insists on a plan before any code (256 times); muses openly about direction (876 times); gives a short signal to authorize the next step (727 times). Then stratless update loads it and the assistant talks to a person, not a blank." width="620">
+  <img src="assets/profile-hero.svg?v=4" alt="A sample stratless profile printed in a terminal, one instruction per line with its real count. What to offer me before I ask: offer a quick sketch of the idea before building it out, then ask them to validate it, 218 times. What to catch for me: catch completed work presented as done and expect a double-check pass before it's accepted, 101 times. How to talk to me: talk in short go-ahead bursts, they approve with a brief word and expect you to keep moving, 159 times, rising. Then stratless update loads it and the assistant talks to a person, not a blank." width="620">
 </p>
 
-Run `stratless profile` and it shows you the picture above, the one `stratless update` hands to your assistant. Not a rules sheet you wrote. A model of a person, reasoned from your real history, and it sharpens as that history grows.
+Run `stratless profile` and it shows you the picture above, the one `stratless update` hands to your assistant. Not a rules sheet you wrote, and not a description of you either — a working brief for the AI: what to offer you before you ask, what to catch for you, how to talk to you, and what your shorthand means. Every line carries the real count behind it, and it sharpens as your history grows.
 
 Install and the full command list live in **[cli/README.md](cli/README.md)**.
 
@@ -43,7 +45,7 @@ No server. No training. No inference bill. Four steps, all on your machine — t
 | Step | What happens |
 | :--- | :--- |
 | **1 · Read** | Every session is already on your disk in `~/.claude/projects`. stratless walks each one into moments: what you typed, and what the assistant was doing. |
-| **2 · Cluster** | A small open-weights model on your machine turns each moment into a fingerprint, and the recurring kinds of thing you do fall out as groups. Free, offline, ~90 seconds. Derived, not pre-matched: there is no category list to sort you into. One short call to your own assistant names what the maths found. |
+| **2 · Cluster** | A small open-weights model on your machine turns each moment into a fingerprint, and the recurring kinds of thing you do fall out as groups. Free, offline, a few minutes. Derived, not pre-matched: there is no category list to sort you into. One short call to your own assistant names what the maths found. |
 | **3 · Count** | Each moment is counted: how often, over what span, rising or fading. Every number is counted by code, never guessed. |
 | **4 · Load** | It writes `~/.claude/HUMAN.md` and points your assistant's config at it, so your next session starts already knowing you. `stratless update` refreshes it; `stratless stop` unloads it. |
 

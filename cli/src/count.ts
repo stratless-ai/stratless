@@ -5,7 +5,8 @@
  * Once the labels exist, everything the profile needs is counting:
  *
  *   · lift      — how much more a behaviour fires when something went wrong (distress vs ordinary).
- *                 THE cut that splits the file: above 2.0 is a distress signal, below is how they work.
+ *                 It used to split the file in two; the conductor sections replaced that (see
+ *                 write.ts). It now feeds the scoreboard, ranks shorthand, and hints the voicer.
  *   · direction — rising or fading, read ONLY from the moments a category actually carries (frozen-once
  *                 guarantees those never predate its birth, so there is no birth-boundary to police).
  *   · misfit    — the share of recent moments that matched nothing. Read by `status` as coverage;
@@ -18,7 +19,8 @@ import type { Category } from './categories.js';
 import type { Assignment } from './assign.js';
 import type { Moment } from './moments.js';
 
-/** The lift cut. Above: a distress signal (fires when something went wrong). Below: working style. */
+/** The lift cut. Above: a distress signal (fires when something went wrong). Below: working style.
+ *  It no longer decides which section a behaviour lands in — write.ts does that. */
 export const LIFT_CUT = 2.0;
 
 /** A behaviour must appear in this many DIFFERENT conversations before it can count on the

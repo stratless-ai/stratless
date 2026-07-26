@@ -144,7 +144,7 @@ const input = args.find((a) => a.includes('PILE ')) || '';
 try { const n = Number(fs.readFileSync(process.env.FAKE_COUNTER, 'utf8')) || 0; fs.writeFileSync(process.env.FAKE_COUNTER, String(n + 1)); } catch {}
 if (${delayMs}) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${delayMs});
 const ids = [...input.matchAll(/### PILE (\\d+)/g)].map((m) => Number(m[1]));
-const groups = ids.map((id) => ({ name: 'pattern-' + id, description: 'does thing ' + id, scope: 'person', quote: 'go', piles: [id] }));
+const groups = ids.map((id) => ({ name: 'pattern-' + id, description: 'does thing ' + id, quote: 'go', pile: id }));
 process.stdout.write(JSON.stringify({ result: JSON.stringify({ groups }), is_error: false, total_cost_usd: 0.0001, usage: { input_tokens: 1, output_tokens: 1 } }));
 `,
   );
@@ -463,7 +463,7 @@ const args = process.argv.slice(2);
 const input = args.find((a) => a.includes('PILE ')) || '';
 const ids = [...input.matchAll(/### PILE (\\d+)/g)].map((m) => Number(m[1]));
 const groups = ids.length
-  ? ids.map((id) => ({ name: 'pattern-' + id, description: 'does thing ' + id, scope: 'person', quote: 'go', piles: [id] }))
+  ? ids.map((id) => ({ name: 'pattern-' + id, description: 'does thing ' + id, quote: 'go', pile: id }))
   : [];
 process.stdout.write(JSON.stringify({ result: JSON.stringify({ groups }), is_error: false, total_cost_usd: 0.0001, usage: { input_tokens: 1, output_tokens: 1 } }));
 `,
