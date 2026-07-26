@@ -1,8 +1,3 @@
-<script setup lang="ts">
-// Pages can take over the footer (the homepage renders it inside its seigaiha band).
-const route = useRoute()
-</script>
-
 <template>
   <div class="site">
     <!-- header markup, the skip link and the scroll behaviour live in SiteHeader.vue, shared with
@@ -13,12 +8,10 @@ const route = useRoute()
       <slot />
     </main>
 
-    <!-- Footer lives OUTSIDE <main> so it is a real `contentinfo` landmark. The homepage uses the
-         sea variant (SiteFooter inside the SeigaihaField wave band); other pages get the plain one. -->
-    <SeigaihaField v-if="route.meta.seaFooter">
-      <SiteFooter bare />
-    </SeigaihaField>
-    <SiteFooter v-else-if="route.meta.footer !== false" />
+    <!-- Footer lives OUTSIDE <main> so it is a real `contentinfo` landmark — a <footer> nested
+         inside <main> is not one, and on a page that put it there the landmark silently vanished.
+         SiteFooter brings its own seigaiha wave band; every page closes with the same sea. -->
+    <SiteFooter />
   </div>
 </template>
 
@@ -31,5 +24,5 @@ const route = useRoute()
 main {
   flex: 1;
 }
-/* footer markup + styles live in SiteFooter.vue (shared with the homepage's sea variant) */
+/* footer markup + styles live in SiteFooter.vue (the wave band included) */
 </style>
