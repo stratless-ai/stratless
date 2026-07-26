@@ -72,7 +72,8 @@ useHead({
     <FogFlowField />
     <div class="container hero-inner">
       <p class="eyebrow">Open source · runs on your machine</p>
-      <h1>Your AI knows your code.<br />It doesn't know you.</h1>
+      <!-- The signature IS the hero headline; the lede below gives it its context. -->
+      <h1>Made for your AI.<br />Meant for you.</h1>
       <p class="lede">
         stratless reads your chats and teaches your AI who you are, <br />so it stops talking over your
         head or under it.
@@ -169,11 +170,18 @@ gets written.
   <section id="install" class="section install">
     <div class="container">
       <h2 class="sr-only">Install</h2>
-      <p class="eyebrow center">One command</p>
+      <p class="eyebrow center">Try it free</p>
       <div class="install-lead">
-        <div class="cmd"><code>npx stratless init</code></div>
-        <p class="cmd-note"><code>init</code> stops Claude Code's 30-day reaper and archives your history first. Whatever's already gone is gone.</p>
+        <div class="cmd"><code>npx stratless</code></div>
+        <p class="cmd-note">See what your AI already knows about you. Runs on your machine, changes nothing.</p>
       </div>
+
+      <!-- The KEEP is one inline line, NOT a second command card — a single boxed CTA above keeps the
+           free read the one hero; init's reaper/archive urgency stays, as the reason to keep. -->
+      <p class="keep-line">
+        Like it? Keep it: <code>npx stratless init</code> stops Claude Code's 30-day reaper and archives
+        your history. Whatever's already gone is gone.
+      </p>
       <p class="cmd-meta center">v{{ version }} · MIT · <a :href="`${GITHUB}/releases`" target="_blank" rel="noopener">changelog ↗</a></p>
       <div class="three">
         <div class="card">
@@ -429,10 +437,9 @@ h1 {
 }
 .install-lead {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 1.4rem;
-  flex-wrap: wrap;
+  gap: 0.7rem;
   margin: 0 auto 0.9rem;
   max-width: 42rem;
 }
@@ -497,6 +504,28 @@ h1 {
   font-size: var(--fs-xs);
   line-height: 1.5;
   color: var(--mid);
+}
+/* the note stacks centered under the single command box (not the left-aligned side note the old
+   single-command row used). Descendant selector so it wins over .cmd-note's default left-align. */
+.install-lead .cmd-note {
+  max-width: 30rem;
+  text-align: center;
+}
+/* the KEEP — one inline follow-up line, deliberately NOT a second command card, so there's a single
+   boxed CTA above it. The command sits inline as bold mono, not a box. */
+.keep-line {
+  margin: 1.3rem auto 0;
+  max-width: 34rem;
+  text-align: center;
+  font-family: var(--font-read);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  color: var(--mid);
+}
+.keep-line code {
+  font-size: var(--fs-code);
+  font-weight: 700;
+  color: var(--ink);
 }
 
 /* ── the person layer ── */

@@ -1,9 +1,10 @@
 # stratless — agent guide
 
 Monorepo for **stratless**: a local, private person-layer profiler. It reads your AI coding
-assistant's own transcripts, judges each exchange with a borrowed `claude -p` (*did understanding
-transfer, about what?*), synthesizes a profile of the person, and loads it into the assistant so it
-stops talking over your head or under it. No server, no API key, nothing leaves the machine.
+assistant's own transcripts, breaks each session into moments, discovers the recurring things you do
+from your own history, counts them, and writes a profile of the person (`HUMAN.md`) that loads into
+the assistant so it stops talking over your head or under it. No server, no API key, nothing leaves
+the machine. (Pipeline: `moments → discover → assign → count → write`.)
 
 This is the **project layer** (this codebase). Don't confuse it with `HUMAN.md`, which is the
 product's *output*: a profile of a person.
