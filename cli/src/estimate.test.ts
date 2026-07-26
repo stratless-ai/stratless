@@ -27,7 +27,10 @@ test('estimateLine reads as a human quote (derived from REFERENCE, never hard-co
   const line = estimateLine(estimateBuild(REFERENCE.moments));
   assert.ok(line.includes(`~${REFERENCE.moments.toLocaleString()} moments`), line);
   assert.ok(line.includes(`~$${REFERENCE.usd.toFixed(2)}`), line);
-  assert.ok(line.includes(`~${REFERENCE.minutes} min`), line);
+  // ROUNDED, not verbatim: the reference now carries a measured fraction (3.7 min), and the line is
+  // for a human — `Math.round` is the formatter's job. Asserting the raw value only ever passed
+  // because the previous reference happened to be a whole number.
+  assert.ok(line.includes(`~${Math.round(REFERENCE.minutes)} min`), line);
 });
 
 test('a real sub-cent build never prints a free-looking zero', () => {

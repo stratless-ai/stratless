@@ -27,7 +27,8 @@ test('assemble: three sections, count-ordered, project held back, no-quote dropp
     stat({ name: 'number', lift: 5, count: 200, scope: 'person' }), // judge
     stat({ name: 'terse', lift: 1, count: 250, scope: 'person' }), // register
     stat({ name: 'ui-tuning', lift: 4, count: 500, scope: 'project' }), // project → excluded despite the numbers
-    stat({ name: 'noquote', lift: 6, count: 400, scope: 'person' }), // no quote → dropped
+    stat({ name: 'noquote', lift: 6, count: 400, scope: 'person' }), // judge, no quote → still ships
+    stat({ name: 'regnoquote', lift: 6, count: 380, scope: 'person' }), // register, no quote → dropped
   ];
   const voiced = new Map<string, Voiced>([
     ['plan', v('frame', 'lets make a plan', 'offer a plan first')],
@@ -35,7 +36,8 @@ test('assemble: three sections, count-ordered, project held back, no-quote dropp
     ['number', v('judge', 'whats the sample size', 'catch unverified numbers')],
     ['terse', v('register', 'sure', 'ship it means go')],
     ['ui-tuning', v('judge', 'make it 14px', 'catch ui drift')], // has a quote but is project
-    ['noquote', v('judge', '', 'catch nothing')], // no quote
+    ['noquote', v('judge', '', 'catch nothing')], // no quote — a bookend does not need one
+    ['regnoquote', v('register', '', 'talk nothing')], // no quote — Register DOES need one
   ]);
   const built = assemble(stats, voiced, prov);
   assert.ok(built, 'a file was built');
@@ -52,18 +54,32 @@ test('assemble: three sections, count-ordered, project held back, no-quote dropp
   assert.ok(t.indexOf('ship it means go') > talk, 'terse sits in register');
 
   assert.ok(!t.includes('make it 14px'), 'project category held back');
-  assert.ok(!t.includes('catch nothing'), 'entry with no quote dropped');
+  assert.ok(t.includes('catch nothing'), 'a bookend with no quote still ships — the count is its receipt');
+  assert.ok(!t.includes('talk nothing'), 'a Register entry with no quote drops — there the quote IS the content');
+
+  // Frame and Judge print the instruction and its count, and NOTHING else. A wrong quote teaches the
+  // assistant a wrong trigger, which is worse than no quote at all (measured ~1 in 5 wrong, 2026-07-26).
+  assert.ok(!t.includes('> lets make a plan'), 'frame prints no quote');
+  assert.ok(!t.includes('> whats the sample size'), 'judge prints no quote');
+  assert.ok(t.includes('> sure'), 'register still prints its quote');
 
   assert.equal(built!.meta.frame, 2);
-  assert.equal(built!.meta.judge, 1);
+  assert.equal(built!.meta.judge, 2);
   assert.equal(built!.meta.register, 1);
-  assert.ok(t.includes('**offer a plan first**\n300 times across 5 conversations\n> lets make a plan'), 'block format');
+  assert.ok(t.includes('**offer a plan first**\n300 times across 5 conversations\n\n'), 'block format: claim, count, no quote');
 });
 
 test('assemble: a multi-line quote collapses onto one blockquote line', () => {
   // Most stored replies carry newlines; a picked multi-line quote must not break out of the `> ` block.
-  const stats: CategoryStat[] = [stat({ name: 'plan', lift: 1, count: 200, scope: 'person' })];
-  const voiced = new Map<string, Voiced>([['plan', v('frame', 'open the file\n\nand show me', 'offer a plan first')]]);
+  // Register is the only section that prints a quote, so it is the only one that can be broken this way.
+  const stats: CategoryStat[] = [
+    stat({ name: 'plan', lift: 1, count: 200, scope: 'person' }),
+    stat({ name: 'terse', lift: 1, count: 100, scope: 'person' }),
+  ];
+  const voiced = new Map<string, Voiced>([
+    ['plan', v('frame', 'q', 'offer a plan first')],
+    ['terse', v('register', 'open the file\n\nand show me', 'talk plainly')],
+  ]);
   const t = assemble(stats, voiced, prov)!.text;
   assert.ok(t.includes('> open the file and show me'), 'newlines collapse into a single blockquote line');
   assert.ok(!t.includes('\nand show me'), 'no unprefixed line escapes the blockquote');
@@ -97,18 +113,48 @@ test('assemble: register fills only to the char budget', () => {
   assert.ok(built.text.length <= 5800, 'stays within the char budget');
 });
 
-test('assemble: null when no Frame or Judge entry earns a quote', () => {
+test('assemble: null only when NOTHING earns a place', () => {
+  // The profile carries whatever the data earns (2026-07-26). Requiring a bookend would demand that
+  // every person be a conductor, which is declaring. Null is reserved for an empty file.
   const stats = [
-    stat({ name: 'proj', lift: 3, count: 100, scope: 'project' }), // project, has a quote but excluded
-    stat({ name: 'noq', lift: 1, count: 50, scope: 'person' }), // person frame, no quote
-    stat({ name: 'reg', lift: 1, count: 40, scope: 'person' }), // register only — not a bookend
+    stat({ name: 'proj', lift: 3, count: 100, scope: 'project' }), // project → always excluded
+    stat({ name: 'nowhere', lift: 1, count: 60, scope: 'person' }), // routed to 'none' → left out
   ];
   const voiced = new Map<string, Voiced>([
     ['proj', v('judge', 'q', 'catch proj')],
-    ['noq', v('frame', '', 'offer noq')],
-    ['reg', v('register', 'q', 'talk reg')],
+    ['nowhere', v('none', 'q', 'fits no section')],
   ]);
-  assert.equal(assemble(stats, voiced, prov), null);
+  assert.equal(assemble(stats, voiced, prov), null, 'nothing left → null');
+});
+
+test('assemble: a register-only profile is valid — no section is guaranteed', () => {
+  // A person with no "what to catch" entries still has a profile. That says they do not
+  // systematically catch things, which is a finding rather than a failure.
+  const stats = [stat({ name: 'reg', lift: 1, count: 40, scope: 'person' })];
+  const voiced = new Map<string, Voiced>([['reg', v('register', 'sure', 'talk plainly')]]);
+  const built = assemble(stats, voiced, prov);
+  assert.ok(built, 'register alone still builds a file');
+  assert.equal(built!.meta.frame, 0);
+  assert.equal(built!.meta.judge, 0);
+  assert.equal(built!.meta.register, 1);
+  assert.ok(!built!.text.includes('## What to offer me'), 'an empty section does not print');
+  assert.ok(!built!.text.includes('## What to catch for me'), 'an empty section does not print');
+  assert.ok(built!.text.includes('## How to talk to me'), 'the earned section prints');
+});
+
+test("assemble: a behaviour routed to 'none' is left out, not jammed into a section", () => {
+  const stats = [
+    stat({ name: 'plan', lift: 1, count: 300, scope: 'person' }),
+    stat({ name: 'nowhere', lift: 1, count: 900, scope: 'person' }), // biggest count, but fits nothing
+  ];
+  const voiced = new Map<string, Voiced>([
+    ['plan', v('frame', 'q', 'offer a plan first')],
+    ['nowhere', v('none', 'q', 'fits no section')],
+  ]);
+  const built = assemble(stats, voiced, prov)!;
+  assert.ok(built.text.includes('offer a plan first'), 'the routed one ships');
+  assert.ok(!built.text.includes('fits no section'), "'none' is left out despite the larger count");
+  assert.equal(built.meta.frame, 1);
 });
 
 test('looksLikeProfile: yes for a real profile, no for chatter', () => {

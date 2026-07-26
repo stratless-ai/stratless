@@ -128,19 +128,24 @@ if (args.includes('stream-json')) {
 /** A fake `claude` for the ASSIGN path (one-shot JSON, not streaming): counts every call, optionally
  *  sync-delays to keep the worker busy, and returns an empty-kinds assignment for every moment it was
  *  shown — enough to exercise the store's kill-safety without asserting on labels. */
-function writeAssignBin(name: string, delayMs: number): string {
+/**
+ * A fake `claude` that answers the ONE call the engine makes: naming the piles. v2 called a model
+ * once per batch of moments; v3 calls it once per build, so the delay here is the whole paid stage
+ * and is what makes a run long enough to interrupt.
+ */
+function writeNameBin(name: string, delayMs: number): string {
   const p = join(dir, name);
   writeFileSync(
     p,
     `#!/usr/bin/env node
 const fs = require('fs');
 const args = process.argv.slice(2);
-const input = args.find((a) => a.includes('MOMENTS:')) || '';
+const input = args.find((a) => a.includes('PILE ')) || '';
 try { const n = Number(fs.readFileSync(process.env.FAKE_COUNTER, 'utf8')) || 0; fs.writeFileSync(process.env.FAKE_COUNTER, String(n + 1)); } catch {}
 if (${delayMs}) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${delayMs});
-const ids = [...input.matchAll(/(?:^|\\n)#(\\d+)/g)].map((m) => Number(m[1]));
-const assignments = ids.map((id) => ({ id, kinds: [] }));
-process.stdout.write(JSON.stringify({ result: JSON.stringify({ assignments }), is_error: false, total_cost_usd: 0.0001, usage: { input_tokens: 1, output_tokens: 1 } }));
+const ids = [...input.matchAll(/### PILE (\\d+)/g)].map((m) => Number(m[1]));
+const groups = ids.map((id) => ({ name: 'pattern-' + id, description: 'does thing ' + id, scope: 'person', quote: 'go', piles: [id] }));
+process.stdout.write(JSON.stringify({ result: JSON.stringify({ groups }), is_error: false, total_cost_usd: 0.0001, usage: { input_tokens: 1, output_tokens: 1 } }));
 `,
   );
   chmodSync(p, 0o755);
@@ -198,42 +203,50 @@ test('C1: the newest-first walk holds one file at a time — RSS flat over a 10k
 
 // ── C3 — kill-safe progress: two SIGKILLs, then completion, with bounded re-spend ─────────────
 
-test('C3: kill the worker twice mid-run — every moment assigned exactly once, cleanly resumed', async () => {
-  const { env } = makeHome('c3-home', [{ exchanges: 36 }]); // 37 moments (36 reactions + the opener)
-  const bin = writeAssignBin('assign-claude-c3', 40); // 40ms/batch keeps a run long enough to interrupt
+test('C3: kill the worker twice mid-build — nothing half-written, and the next run completes', async () => {
+  // v2 assigned in batches, so kill-safety meant "re-spend at most one batch". v3 makes ONE call and
+  // `freeze()` writes categories, assignments and the frozen model TOGETHER at the end — so the
+  // guarantee is stronger and simpler: an interrupted build leaves the stores untouched, and the
+  // next run starts clean rather than reading a half-built model as if it were whole.
+  // SIX conversations: a pattern must span three, so a single-session fixture can never build.
+  const { env } = makeHome('c3-home', Array.from({ length: 6 }, () => ({ exchanges: 8 })));
+  const bin = writeNameBin('name-claude-c3', 400); // the naming call is the whole paid stage
   const counter = join(dir, 'counter-c3');
   writeFileSync(counter, '0');
-  appendCategories([{ name: 'drift', description: 'flags drift' }], { file: env.STRATLESS_CATEGORIES });
-  const childEnv = { ...process.env, ...env, STRATLESS_CLAUDE_BIN: bin, FAKE_COUNTER: counter, STRATLESS_ASSIGN_BATCH: '2' };
+  const childEnv = {
+    ...process.env, ...env, STRATLESS_CLAUDE_BIN: bin, FAKE_COUNTER: counter,
+    STRATLESS_FAKE_EMBED: '1', STRATLESS_FLUSH: '1',
+  };
 
   for (let round = 0; round < 2; round++) {
     const w = spawn(process.execPath, [cli, '__worker'], { env: childEnv, stdio: 'ignore' });
+    const closed = new Promise((r) => w.on('close', r)); // armed BEFORE the kill — a fast exit races otherwise
     await sleep(250 + round * 200); // land the kill at different depths
     w.kill('SIGKILL');
-    await new Promise((r) => w.on('close', r));
+    await closed;
   }
   const done = spawn(process.execPath, [cli, '__worker'], { env: childEnv, stdio: 'ignore' });
   await new Promise((r) => done.on('close', r));
-  assert.equal(await waitTerminal(env, 3000), 'done', 'the final run completes');
+  assert.equal(await waitTerminal(env, 8000), 'done', 'the final run completes');
 
   const moments = loadMoments(env.STRATLESS_MOMENTS);
   const rows = loadAssignments(env.STRATLESS_ASSIGNMENTS);
-  assert.ok(moments.length > 0, 'the pile got built');
-  assert.equal(rows.length, moments.length, 'every moment carries exactly one assignment record');
-  assert.equal(new Set(rows.map((r) => r.key)).size, rows.length, 'no moment assigned twice — the seen-set makes resume clean');
+  assert.ok(moments.length > 0, 'the pile got built — collecting is free and survives every kill');
+  assert.equal(rows.length, moments.length, 'every moment carries exactly one record');
+  assert.equal(new Set(rows.map((r) => r.key)).size, rows.length, 'no moment written twice');
 });
 
 // ── C7 — stop is total: a busy worker dies within grace, labeled, nothing respawns ─────────────
 
 test('C7: stopWorker stops a busy worker within grace, cleans the lock, labels the run', async () => {
-  const { env } = makeHome('c7-home', [{ exchanges: 40 }]); // 41 moments
-  const bin = writeAssignBin('assign-claude-c7', 300); // 300ms/batch → a busy multi-second run
+  const { env } = makeHome('c7-home', Array.from({ length: 6 }, () => ({ exchanges: 8 })));
+  const bin = writeNameBin('name-claude-c7', 3000); // the naming call holds the worker busy
   const counter = join(dir, 'counter-c7');
   writeFileSync(counter, '0');
-  appendCategories([{ name: 'drift', description: 'flags drift' }], { file: env.STRATLESS_CATEGORIES });
-  const childEnv = { ...process.env, ...env, STRATLESS_CLAUDE_BIN: bin, FAKE_COUNTER: counter, STRATLESS_ASSIGN_BATCH: '4' };
+  // NO seeded categories: we want the COLD path, which is the one that spends and can be interrupted.
+  const childEnv = { ...process.env, ...env, STRATLESS_CLAUDE_BIN: bin, FAKE_COUNTER: counter, STRATLESS_FAKE_EMBED: '1', STRATLESS_FLUSH: '1' };
   const w = spawn(process.execPath, [cli, '__worker'], { env: childEnv, stdio: 'ignore' });
-  // wait for the worker to take the lock, then let it get well into the assign loop
+  // wait for the worker to take the lock, then let it get well into the build
   const lockDeadline = Date.now() + 5000;
   while (Date.now() < lockDeadline && !readLock(env.STRATLESS_LOCK)) await sleep(50);
   assert.ok(readLock(env.STRATLESS_LOCK), 'the worker took the lock');
@@ -434,7 +447,12 @@ test('receipt: a finished run carries its spend line; status can read it after t
 
 /** A fake `claude` that answers the discover + assign + write calls (so a consented build completes)
  *  AND records every invocation to FAKE_COUNTER — so a test can assert it was NEVER called. */
-function writeDiscoverCounterBin(name: string): string {
+/**
+ * A fake `claude` for the consent-gate tests: it counts every invocation, and answers the naming call
+ * the engine makes. The gate under test is "did the assistant get called at all", so the counter is
+ * the assertion and the payload only has to be well-formed.
+ */
+function writeNameCounterBin(name: string): string {
   const p = join(dir, name);
   writeFileSync(
     p,
@@ -442,24 +460,12 @@ function writeDiscoverCounterBin(name: string): string {
 const fs = require('fs');
 try { const n = Number(fs.readFileSync(process.env.FAKE_COUNTER, 'utf8')) || 0; fs.writeFileSync(process.env.FAKE_COUNTER, String(n + 1)); } catch { fs.writeFileSync(process.env.FAKE_COUNTER, '1'); }
 const args = process.argv.slice(2);
-if (args.includes('stream-json')) {
-  const chunks = [];
-  process.stdin.on('data', (d) => chunks.push(d));
-  process.stdin.on('end', () => {
-    process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'WHAT THEY KNOW\\nplaceholder profile.', usage: { input_tokens: 1, output_tokens: 1 }, total_cost_usd: 0.0001 }) + '\\n');
-    process.exit(0);
-  });
-} else {
-  const input = args.find((a) => a.includes('MOMENTS:')) || '';
-  let result;
-  if (input.includes('recurring KINDS')) {
-    result = JSON.stringify({ categories: [{ name: 'planning', description: 'wants a plan first', scope: 'person' }] });
-  } else {
-    const ids = [...input.matchAll(/(?:^|\\n)#(\\d+)/g)].map((m) => Number(m[1]));
-    result = JSON.stringify({ assignments: ids.map((id) => ({ id, kinds: ['planning'] })) });
-  }
-  process.stdout.write(JSON.stringify({ result, is_error: false, total_cost_usd: 0.001, usage: { input_tokens: 1, output_tokens: 1 } }));
-}
+const input = args.find((a) => a.includes('PILE ')) || '';
+const ids = [...input.matchAll(/### PILE (\\d+)/g)].map((m) => Number(m[1]));
+const groups = ids.length
+  ? ids.map((id) => ({ name: 'pattern-' + id, description: 'does thing ' + id, scope: 'person', quote: 'go', piles: [id] }))
+  : [];
+process.stdout.write(JSON.stringify({ result: JSON.stringify({ groups }), is_error: false, total_cost_usd: 0.0001, usage: { input_tokens: 1, output_tokens: 1 } }));
 `,
   );
   chmodSync(p, 0o755);
@@ -469,7 +475,7 @@ if (args.includes('stream-json')) {
 test('cold start is spend-gated: a background hook collects the pile but never builds', async () => {
   const { home, env } = makeHome('coldgate-hook', [{ exchanges: 4 }, { exchanges: 4 }, { exchanges: 4 }, { exchanges: 4 }]);
   const counter = join(home, 'calls');
-  const bin = writeDiscoverCounterBin('fake-cold-hook');
+  const bin = writeNameCounterBin('fake-cold-hook');
   // No STRATLESS_FLUSH — this is exactly how the after-session hook runs (non-TTY).
   const childEnv = { ...process.env, ...env, STRATLESS_CLAUDE_BIN: bin, FAKE_COUNTER: counter };
   const w = spawn(process.execPath, [cli, '__worker'], { env: childEnv, stdio: 'ignore' });
@@ -488,10 +494,10 @@ test('cold start is spend-gated: a background hook collects the pile but never b
 });
 
 test('cold start builds when consented: a TTY invocation (STRATLESS_FLUSH) mints categories', async () => {
-  const { home, env } = makeHome('coldgate-consent', [{ exchanges: 4 }, { exchanges: 4 }, { exchanges: 4 }, { exchanges: 4 }]);
+  const { home, env } = makeHome('coldgate-consent', Array.from({ length: 6 }, () => ({ exchanges: 6 })));
   const counter = join(home, 'calls');
-  const bin = writeDiscoverCounterBin('fake-cold-consent');
-  const childEnv = { ...process.env, ...env, STRATLESS_CLAUDE_BIN: bin, FAKE_COUNTER: counter, STRATLESS_FLUSH: '1' };
+  const bin = writeNameCounterBin('fake-cold-consent');
+  const childEnv = { ...process.env, ...env, STRATLESS_CLAUDE_BIN: bin, FAKE_COUNTER: counter, STRATLESS_FAKE_EMBED: '1', STRATLESS_FLUSH: '1' };
   const w = spawn(process.execPath, [cli, '__worker'], { env: childEnv, stdio: 'ignore' });
   await new Promise((r) => w.on('close', r));
 
@@ -500,13 +506,13 @@ test('cold start builds when consented: a TTY invocation (STRATLESS_FLUSH) mints
 });
 
 test('a DURABLE consent flag makes even a non-TTY worker build — consent survives a lock race', async () => {
-  const { home, env } = makeHome('coldgate-durable', [{ exchanges: 4 }, { exchanges: 4 }, { exchanges: 4 }, { exchanges: 4 }]);
+  const { home, env } = makeHome('coldgate-durable', Array.from({ length: 6 }, () => ({ exchanges: 6 })));
   const counter = join(home, 'calls');
-  const bin = writeDiscoverCounterBin('fake-cold-durable');
+  const bin = writeNameCounterBin('fake-cold-durable');
   // Consent recorded on disk (as the door / a typed `update` does), but NO STRATLESS_FLUSH in this
   // worker's env — exactly the case where a background hook worker won the lock after the user's yes.
   requestColdBuild(env.STRATLESS_STATE);
-  const childEnv = { ...process.env, ...env, STRATLESS_CLAUDE_BIN: bin, FAKE_COUNTER: counter }; // no STRATLESS_FLUSH
+  const childEnv = { ...process.env, ...env, STRATLESS_CLAUDE_BIN: bin, FAKE_COUNTER: counter, STRATLESS_FAKE_EMBED: '1' }; // no STRATLESS_FLUSH
   const w = spawn(process.execPath, [cli, '__worker'], { env: childEnv, stdio: 'ignore' });
   await new Promise((r) => w.on('close', r));
 

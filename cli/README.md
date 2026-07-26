@@ -73,12 +73,14 @@ No model of ours. No server. No training. No separate bill.
 
 1. **Read.** Every session Claude Code has is already on your disk, in `~/.claude/projects`.
    stratless walks each one into moments: what you typed, and what the assistant was doing.
-2. **Discover.** It reads your pile and finds the recurring kinds of thing you actually do, from
-   your own history and nothing it shipped. **Derived, not pre-matched**: there is no category list
-   to sort you into, because a list we wrote would be our model of a generic person, not a reading
-   of you.
-3. **Count.** Each moment is checked against those columns and counted: how often, over what span,
-   rising or fading. Every number is counted by code, so none of it in your profile is a guess.
+2. **Cluster.** A small open-weights model on your machine turns each moment into a fingerprint, and
+   the recurring kinds of thing you do fall out as groups — arithmetic, about ninety seconds, free,
+   and it reaches nothing. **Derived, not pre-matched**: there is no category list to sort you into,
+   because a list we wrote would be our model of a generic person, not a reading of you. Then one
+   short call to your own assistant names what the maths found — the only judgment in the pipeline,
+   and the only thing that costs anything.
+3. **Count.** Every count is plain arithmetic: how often, over what span, rising or fading. The model
+   names, the code counts, so no number in your profile is a guess.
 4. **Load.** `stratless update` writes the profile to `~/.claude/HUMAN.md` and points your
    assistant's config at it, so your next session starts already knowing you. The after-session
    refresh keeps it current; `stratless stop` turns that off and unloads it.
@@ -93,7 +95,10 @@ a guess.
 
 Everything runs on your machine. **Your conversations, the moments stratless derives, and your
 profile never leave it**, not for telemetry, not for "aggregate insight," not ever. There is no
-server, no account, nothing to sign up for. The only network call is to your own assistant, on your
+server, no account, nothing to sign up for. Three things touch the network and the direction matters:
+the model weights come **in** once at `init` (with your consent, then permanently offline), the
+version check comes **in**, and the only thing that goes **out** is the borrowed call to your own
+assistant, on your
 own plan, the same place your code was already going.
 
 The profile is a plain text file. It's yours: load it into any other assistant, read it, or delete

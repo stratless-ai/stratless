@@ -66,8 +66,6 @@ export interface SynthState {
    *  one user-facing friction number is the mirror's course-corrections rate (`mirror` + the door), so
    *  two near-identical "per 100" figures never collide on screen. Kept for the record / later use. */
   scoreboard?: { rate: number; at: string };
-  /** when discover last ran — the re-discovery cooldown reads it so a high misfit can't re-mint every run */
-  lastDiscoverAt?: string;
   /** when the worker last flushed (tagged + rebuilt) — the flush ceiling ([[flushDue]]) measures from here */
   lastFlushAt?: string;
   /** a CONSENTED cold-start build is pending. Set only by a consented interactive invocation (the
@@ -106,7 +104,6 @@ export function readState(file: string = statePath()): SynthState {
     if (sb && typeof sb === 'object' && Number.isFinite(Number(sb.rate)) && typeof sb.at === 'string') {
       out.scoreboard = { rate: Number(sb.rate), at: sb.at };
     }
-    if (typeof raw.lastDiscoverAt === 'string') out.lastDiscoverAt = raw.lastDiscoverAt;
     if (typeof raw.lastFlushAt === 'string') out.lastFlushAt = raw.lastFlushAt;
     if (typeof raw.buildRequestedAt === 'string') out.buildRequestedAt = raw.buildRequestedAt;
     if (raw.flushCadence === 'daily' || raw.flushCadence === 'weekly') out.flushCadence = raw.flushCadence;

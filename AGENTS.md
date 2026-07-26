@@ -10,7 +10,7 @@ product's *output*: a profile of a person.
 
 ## Layout
 
-- `cli/` — the tool. TypeScript, zero runtime deps, published standalone to npm. Has its own `cli/AGENTS.md`.
+- `cli/` — the tool. TypeScript, **one** runtime dep (the local embedding model — see `cli/AGENTS.md`), published standalone to npm.
 - `web/` — stratless.com. Nuxt 3, no modules, prerendered to static HTML.
 
 ## Commands (from the repo root)

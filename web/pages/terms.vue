@@ -43,9 +43,31 @@ useSeo({
           with <code>stratless stop</code>.
         </p>
 
+        <h2>Third-party software it downloads</h2>
+        <p>
+          Finding the patterns in your history runs on a small open-weights model that stratless
+          downloads to your machine once, at <code>init</code>, after asking you. Two pieces of
+          third-party software are involved, each under its own licence, and neither is ours:
+        </p>
+        <ul>
+          <li>
+            <strong>bge-small-en-v1.5</strong> (BAAI) — the model weights, ~34MB, MIT licence.
+          </li>
+          <li>
+            <strong>transformers.js</strong> (Xenova) — the runtime that executes them, Apache-2.0.
+          </li>
+        </ul>
+        <p>
+          The download is fetched from the third-party host that distributes them, and that request
+          is subject to that host's own terms. {{ legal.operator }} does not host, modify, or
+          warrant either one. Both are provided by their authors <strong>“as is”</strong>, and the
+          limitation of liability below applies to them exactly as it does to stratless itself.
+          Once they are on your machine, that step runs offline and reaches nothing further.
+        </p>
+
         <h2>Your own assistant, your own bill</h2>
         <p>
-          The reading and the writing are done by the coding assistant already installed on your
+          Naming what the model found is done by the coding assistant already installed on your
           machine, on your own subscription or key. Any cost, rate limit, or term attached to that
           is between you and that provider. {{ legal.operator }} is not a party to it.
         </p>

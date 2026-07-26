@@ -8,7 +8,8 @@
  *                 THE cut that splits the file: above 2.0 is a distress signal, below is how they work.
  *   · direction — rising or fading, read ONLY from the moments a category actually carries (frozen-once
  *                 guarantees those never predate its birth, so there is no birth-boundary to police).
- *   · misfit    — the share of recent moments that matched nothing. Stage 3's re-discovery trigger.
+ *   · misfit    — the share of recent moments that matched nothing. Read by `status` as coverage;
+ *                 it no longer triggers anything (re-discovery went with the discover stage).
  *   · scoreboard— the one number the person sees: how much of what they typed was correcting the AI.
  *
  * Every function is pure and takes its inputs — trivially testable offline, like moments before it.
@@ -149,8 +150,8 @@ export function tally(labelled: Labelled[], categories: Category[]): CategorySta
 }
 
 /**
- * The misfit rate — the share of assigned moments that matched NOTHING. Stage 3's re-discovery
- * trigger: ~10% is healthy, a sustained rise means the columns no longer cover the person. `since`
+ * The misfit rate — the share of assigned moments that matched NOTHING. Reported by `status` as
+ * coverage: ~10% is healthy, a sustained rise means the behaviours no longer cover the person. `since`
  * bounds it to recent conversation time (by the moment's own timestamp, not when it was assigned —
  * at cold start everything is assigned at once).
  */

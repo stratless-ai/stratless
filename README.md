@@ -38,12 +38,12 @@ Install and the full command list live in **[cli/README.md](cli/README.md)**.
 
 ## How it works, there's no trick
 
-No model of ours. No server. No training. No inference bill. Four steps, all on your machine:
+No server. No training. No inference bill. Four steps, all on your machine — three of them free maths, and only the naming borrows the assistant you already have:
 
 | Step | What happens |
 | :--- | :--- |
 | **1 · Read** | Every session is already on your disk in `~/.claude/projects`. stratless walks each one into moments: what you typed, and what the assistant was doing. |
-| **2 · Discover** | It finds the recurring kinds of thing you actually do, from your own history and nothing it shipped. Derived, not pre-matched: there is no category list to sort you into. |
+| **2 · Cluster** | A small open-weights model on your machine turns each moment into a fingerprint, and the recurring kinds of thing you do fall out as groups. Free, offline, ~90 seconds. Derived, not pre-matched: there is no category list to sort you into. One short call to your own assistant names what the maths found. |
 | **3 · Count** | Each moment is counted: how often, over what span, rising or fading. Every number is counted by code, never guessed. |
 | **4 · Load** | It writes `~/.claude/HUMAN.md` and points your assistant's config at it, so your next session starts already knowing you. `stratless update` refreshes it; `stratless stop` unloads it. |
 
@@ -51,18 +51,20 @@ If the assistant can't answer honestly, it writes nothing: a confidently-wrong p
 
 ## Read the source, that's the point
 
-This thing reads your entire conversation history, so the first question any sensible person asks is *"is it phoning home?"* The whole tool is in `cli/`, open source under MIT, so you don't have to take that on trust: you can read exactly what it does and confirm the only network call is to your own assistant. *"trust me"* is the one thing we're not allowed to say.
+This thing reads your entire conversation history, so the first question any sensible person asks is *"is it phoning home?"* The whole tool is in `cli/`, open source under MIT, so you don't have to take that on trust: you can read exactly what it does and confirm the only three things that touch the network: your own assistant on your own plan, a one-time model download at `init` that you're asked about first, and the opt-in version check. *"trust me"* is the one thing we're not allowed to say.
 
 ## Privacy
 
-Everything runs on your machine. **Your conversations, the moments stratless derives, and your profile never leave it**, not for telemetry, not for "aggregate insight," not ever. There is no server, no account, nothing to sign up for. The only network call is to your own assistant, on your own plan, the same place your code was already going.
+Everything runs on your machine. **Your conversations, the moments stratless derives, and your profile never leave it**, not for telemetry, not for "aggregate insight," not ever. There is no server, no account, nothing to sign up for.
+
+Three things touch the network, and the direction matters: the model weights come **in** once at `init` (with your consent, then permanently offline), the version check comes **in**, and the only thing that goes **out** is the borrowed call to your own assistant, on your own plan, the same place your code was already going.
 
 The profile is a plain text file. It's yours: load it into any other assistant, read it, or delete it.
 
 ## What's in here
 
 ```
-cli/    the tool. TypeScript, no runtime dependencies. npm: stratless
+cli/    the tool. TypeScript, one runtime dep (the local model). npm: stratless
 web/    stratless.com. Nuxt, no modules, prerendered to static HTML
 ```
 
@@ -74,7 +76,7 @@ pnpm test        # the CLI's tests
 pnpm dev:web     # stratless.com, locally
 ```
 
-The `cli/` is published standalone and must stay dependency-free. Never auto-commit. The tree is left green and uncommitted for a human to review.
+The `cli/` is published standalone and carries exactly one runtime dependency — the local embedding model, which is what makes a build cost cents instead of dollars. The bar for a second is very high. Never auto-commit. The tree is left green and uncommitted for a human to review.
 
 ---
 

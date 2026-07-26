@@ -5,12 +5,19 @@
  * ordering are arithmetic; which real line best SHOWS a behaviour, which section it serves, and how to
  * phrase the instruction, are judgements — and that is the one thing worth a model call.
  *
- * THREE SECTIONS — the conductor's brief (positioning.md): "What to offer me before I ask" (Frame),
- * "What to catch for me" (Judge), "How to talk to me" (Register). The model routes each category to its
- * section; code assembles. This REPLACED the lift-split ("gone wrong" vs "how they work"): the sections
- * are functional now, not distress-based — though lift still rides in as a routing HINT (a catch fires
- * in the high-lift reactions). Count-ordered within each section. Person-scoped only — project
- * categories are the project layer's job. The "In the moment" shorthand decode still opens the file.
+ * THE SECTIONS — the conductor's brief (positioning.md): "What to offer me before I ask" (Frame),
+ * "What to catch for me" (Judge), "How to talk to me" (Register). The model routes each category to
+ * its section; code assembles. This REPLACED the lift-split ("gone wrong" vs "how they work"): the
+ * sections are functional now, not distress-based — though lift still rides in as a routing HINT (a
+ * catch fires in the high-lift reactions). Count-ordered within each section. Person-scoped only —
+ * project categories are the project layer's job. The "In the moment" decode still opens the file.
+ *
+ * THE PROFILE CARRIES WHATEVER THE PERSON'S DATA EARNS (2026-07-26). The headings are instructions to
+ * the READER — how to use the list beneath them — not claims about the person, so a stable vocabulary
+ * is right. But no section is guaranteed: any of them may be empty and simply not print, a behaviour
+ * that fits none is routed to 'none' and left out, and only a file with nothing at all comes back
+ * null. Demanding that a person HAVE a section would be declaring, which is the one thing the whole
+ * pipeline exists to avoid.
  *
  * The text produced here starts at the provenance line: `injectProfile` (sink.ts) adds the
  * `# Who you are working with` header and the humanmd/v2 marker when it installs, so repeating the
@@ -89,7 +96,10 @@ const VOICE_SCHEMA = JSON.stringify({
   required: ['picks'],
 });
 
-export type Section = 'frame' | 'judge' | 'register';
+/** Where a behaviour belongs in the brief — or 'none' when it belongs in no section. The escape
+ *  hatch is deliberate: a forced three-way choice makes the router jam a behaviour that is not an
+ *  offer, a catch, or a register note into the least-bad fit, and a jammed entry is a declared one. */
+export type Section = 'frame' | 'judge' | 'register' | 'none';
 
 export interface Voiced {
   /** which part of the brief this category belongs in */
@@ -124,6 +134,9 @@ SECTION: which part of the brief it belongs in:
 - "frame" — something to OFFER before they ask (how they set work up: a plan first, a small probe, options laid out, one thing at a time, a review point). Proactive.
 - "judge" — something to CATCH for them (what they reliably challenge or refuse: an unverified number, a summary in place of raw output, a quick patch job, unsanctioned spend, a hedge when the answer is known). Reactive; these are usually marked "fires in: high".
 - "register" — how to TALK to them (bluntness, plain language, what their shorthand means, pacing).
+- "none" — it is genuinely none of the three. USE THIS rather than forcing a poor fit; a category
+  routed to "none" is simply left out of the brief, which is better than a section claiming something
+  the evidence does not support.
 
 LINE: one sentence written AS AN INSTRUCTION TO THE ASSISTANT (offer X, catch Y, talk like Z), never a
 description of the person. Plain language; where they reach for a recurring phrase, quote it. Use commas
@@ -136,7 +149,7 @@ SIGNAL: a plain decode, SIX WORDS OR FEWER, of what the person is ASKING FOR whe
 MEANS, never an instruction. E.g. "wants a plan before building", "wants it proven, not asserted".
 
 Reply with JSON only:
-{"picks":[{"name":"<exact name>","section":"frame|judge|register","line":"<instruction>","quote":<number or 0>,"signal":"<six words or fewer>"}]}
+{"picks":[{"name":"<exact name>","section":"frame|judge|register|none","line":"<instruction>","quote":<number or 0>,"signal":"<six words or fewer>"}]}
 
 ${body}`;
   const raw = runClaude(bin, prompt, 'sonnet', 'write', QUOTE_TIMEOUT_MS, VOICE_SCHEMA, 0); // thinking capped
@@ -151,6 +164,9 @@ ${body}`;
       const name = typeof p.name === 'string' ? p.name : '';
       const w = byName.get(name);
       if (!w) continue;
+      // 'none' is a REAL answer, not a parse failure: the router said this behaviour is not an offer,
+      // a catch, or a register note, so it is left out of the brief. It lands as undefined here and
+      // takes the same path as a malformed value — dropped — which is the correct outcome for both.
       const section: Section | undefined =
         p.section === 'judge' ? 'judge' : p.section === 'register' ? 'register' : p.section === 'frame' ? 'frame' : undefined;
       const line = typeof p.line === 'string' ? p.line.replace(/\s+/g, ' ').trim() : '';
@@ -167,7 +183,21 @@ ${body}`;
 }
 
 /** One entry's three lines: the re-voiced instruction · weight+direction · quote. */
-function block(claim: string, stat: CategoryStat, quote: string): string {
+/**
+ * One entry. The quote is OPTIONAL, and deliberately so.
+ *
+ * A Frame or Judge line is already a complete instruction — "offer a plan before building" tells the
+ * assistant everything it needs, and an example adds nothing it can act on. Measured 2026-07-26 on a
+ * real build: roughly ONE IN FIVE picked quotes did not demonstrate their line at all (an "offer
+ * scoped research" entry carrying "midjourney is $10 to start"; a "catch the impulse to keep going
+ * when they halt you" entry carrying "ship it"). A missing quote costs nothing; a wrong one teaches
+ * the assistant the wrong trigger, so it is worse than silence. The COUNT is the receipt that the
+ * line was measured, and the "In the moment" key already carries recognisable phrasing.
+ *
+ * Register keeps its quote, because there the quote IS the instruction — no description of bluntness
+ * beats hearing "which is the fucking file?".
+ */
+function block(claim: string, stat: CategoryStat, quote?: string): string {
   const bits: string[] = [];
   if (stat.direction === 'rising' || stat.direction === 'fading') bits.push(stat.direction);
   if (stat.burst) bits.push('comes in bursts');
@@ -175,8 +205,8 @@ function block(claim: string, stat: CategoryStat, quote: string): string {
   const c = claim.replace(/\s+/g, ' ').trim();
   // Collapse the quote to one line, exactly as the claim above is. A raw reply carries newlines (most
   // do), and only its first line would get the `> ` prefix — the rest would break out of the blockquote.
-  const q = quote.replace(/\s+/g, ' ').trim();
-  return `**${c}**\n${stat.count} times across ${stat.sessions} conversations${note}\n> ${q}\n\n`;
+  const q = quote?.replace(/\s+/g, ' ').trim();
+  return `**${c}**\n${stat.count} times across ${stat.sessions} conversations${note}\n${q ? `> ${q}\n` : ''}\n`;
 }
 
 interface Entry {
@@ -186,9 +216,21 @@ interface Entry {
 
 /**
  * THE PURE ASSEMBLER — given per-category stats, a routing+quote+line per category, and provenance,
- * build the file text. Pure and no model, so the whole shape is testable from fixtures. Returns null
- * when no bookend earned a place (neither a Frame nor a Judge entry survived with a quote — a brief
- * with neither bookend is not a conductor's brief).
+ * build the file text. Pure and no model, so the whole shape is testable from fixtures.
+ *
+ * THE PROFILE CARRIES WHATEVER THE PERSON'S DATA EARNS (2026-07-26). The section HEADINGS are
+ * instructions to the reader — "here is how to use the list below" — not claims about the person;
+ * a stable vocabulary is what makes the file usable. But nothing may DEMAND that a person have a
+ * given section:
+ *
+ *   · an empty section simply does not print — including BOTH bookends;
+ *   · a profile with no "what to catch" entries is a valid profile. It says this person does not
+ *     systematically catch things, which is a finding, not a failure. An earlier rule returned null
+ *     unless a bookend survived, which quietly required everyone to be a conductor;
+ *   · a behaviour that is not an offer, a catch, or a register note is routed to NONE and left out,
+ *     rather than jammed into the least-bad of three. Forcing the fit is declaring.
+ *
+ * Returns null only when NOTHING earned a place at all.
  */
 export function assemble(
   stats: CategoryStat[],
@@ -199,14 +241,19 @@ export function assemble(
   const entries: Entry[] = stats
     .filter((s) => s.scope !== 'project' && s.count > 0)
     .map((s) => ({ stat: s, v: voiced.get(s.name) }))
-    .filter((e): e is Entry => !!e.v && typeof e.v.quote === 'string' && e.v.quote.length > 0);
+    // A quote is REQUIRED only where it is the content — Register. Frame and Judge ship on their
+    // instruction plus their count, so a category with no clean quote no longer loses its place in
+    // the brief for a receipt the section does not print.
+    .filter((e): e is Entry => !!e.v && (e.v.section !== 'register' || (typeof e.v.quote === 'string' && e.v.quote.length > 0)));
 
   const inSection = (sec: Section): Entry[] =>
     entries.filter((e) => e.v.section === sec).sort((a, b) => b.stat.count - a.stat.count);
   const frame = inSection('frame');
   const judge = inSection('judge');
   const register = inSection('register');
-  if (!frame.length && !judge.length) return null; // no bookend earned a place
+  // Nothing at all earned a place — not "no bookend earned a place". A person with only register
+  // notes still has a profile worth loading.
+  if (!frame.length && !judge.length && !register.length) return null;
 
   const decodeLines = decode ? decodeKey(decode) : [];
   const head: string[] = [
@@ -223,11 +270,11 @@ export function assemble(
   // Frame + Judge are the bookends — always shipped in full. Register fills the remaining budget.
   if (frame.length) {
     text += ['## What to offer me before I ask', '', 'Set these up or hand them over before I ask. Offering them unprompted is the point, not overstepping.', '', ''].join('\n');
-    for (const e of frame) text += block(e.v.line, e.stat, e.v.quote);
+    for (const e of frame) text += block(e.v.line, e.stat);
   }
   if (judge.length) {
     text += ['## What to catch for me', '', 'What I reliably challenge or refuse. Pre-empt these, so I do not have to catch them myself.', '', ''].join('\n');
-    for (const e of judge) text += block(e.v.line, e.stat, e.v.quote);
+    for (const e of judge) text += block(e.v.line, e.stat);
   }
   let shippedReg = 0;
   if (register.length) {
