@@ -24,30 +24,30 @@
   <circle cx="42" cy="34" r="6" fill="#ff5f56"/>
   <circle cx="62" cy="34" r="6" fill="#febc2e"/>
   <circle cx="82" cy="34" r="6" fill="#28c840"/>
-  <text x="300" y="38" text-anchor="middle" fill="#b9b3a3" font-size="11">my-app, -zsh, 92x24</text>
+  <text x="300" y="38" text-anchor="middle" fill="#b9b3a3" font-size="11">~, -zsh, 92x24</text>
 
-  <text x="36" y="74"><tspan class="g">➜</tspan>  <tspan class="pa">~/my-app</tspan> <tspan class="w">stratless profile</tspan></text>
+  <text x="36" y="74"><tspan class="g">➜</tspan>  <tspan class="pa">~</tspan> <tspan class="w">stratless profile</tspan></text>
 
-  <text x="36" y="106" class="d"># who you are working with, read from your own history</text>
+  <text x="36" y="106" class="w">WHO YOU'RE WORKING WITH</text>
 
-  <text x="36" y="142" class="w">WHAT TO OFFER ME BEFORE I ASK</text>
+  <text x="36" y="142"><tspan class="d">##</tspan> <tspan class="w">What to offer me before I ask</tspan></text>
   <text x="36" y="163">- offer a quick sketch of the idea before building it</text>
   <text x="52" y="184">out, then ask them to validate it. <tspan class="d">(218×)</tspan></text>
 
-  <text x="36" y="224" class="w">WHAT TO CATCH FOR ME</text>
-  <text x="36" y="245">- catch completed work presented as done and expect a</text>
-  <text x="52" y="266">double-check pass before it's accepted. <tspan class="d">(101×)</tspan></text>
+  <text x="36" y="224"><tspan class="d">##</tspan> <tspan class="w">What to catch for me</tspan></text>
+  <text x="36" y="245">- catch the urge to patch symptoms, they want the</text>
+  <text x="52" y="266">actual bug found and fixed first. <tspan class="d">(156×)</tspan></text>
 
-  <text x="36" y="306" class="w">HOW TO TALK TO ME</text>
+  <text x="36" y="306"><tspan class="d">##</tspan> <tspan class="w">How to talk to me</tspan></text>
   <text x="36" y="327">- talk in short go-ahead bursts, they approve with a</text>
   <text x="52" y="348">brief word and expect you to keep moving. <tspan class="d">(159×, rising)</tspan></text>
 
   <text x="36" y="390" class="d">not loaded yet · load it into your assistant: stratless update</text>
 
-  <text x="36" y="426"><tspan class="g">➜</tspan>  <tspan class="pa">~/my-app</tspan> <tspan class="w">stratless update</tspan></text>
+  <text x="36" y="426"><tspan class="g">➜</tspan>  <tspan class="pa">~</tspan> <tspan class="w">stratless update</tspan></text>
 
   <text x="36" y="458"><tspan class="g">↳ loaded</tspan>  <tspan class="d">your assistant now talks to a person, not a blank.</tspan></text>
 
-  <text x="36" y="490"><tspan class="g">➜</tspan>  <tspan class="pa">~/my-app</tspan></text>
-  <rect x="133" y="478" width="8" height="15" fill="#e6e2d6"/>
+  <text x="36" y="490"><tspan class="g">➜</tspan>  <tspan class="pa">~</tspan></text>
+  <rect x="75" y="478" width="8" height="15" fill="#e6e2d6"/>
 </svg>

@@ -6,9 +6,14 @@ const GITHUB = 'https://github.com/stratless-ai/stratless'
 const version = useRuntimeConfig().public.version
 
 // THE ONE SAMPLE SOURCE: a real build, checked in verbatim (see AGENTS.md, "One sample profile").
-// Imported raw at build time and shown in full — behind the file icon in the install band, as a modal.
+// Imported raw at build time and shown in full — behind the HUMAN.md sheet that ends the boundary
+// diagram in the reveal section, as a modal.
 import sampleRaw from '~/content/samples/HUMAN.md?raw'
 const sample = sampleRaw.trim()
+// Split for the modal's per-line render: the brief shows as a file in a dark editor (VS Code
+// Dark+), and the only tokenizing is the one rule Dark+ applies that matters for markdown —
+// heading lines go blue. Everything else is the raw file, uncolored, as an editor would show it.
+const sampleLines = sample.split('\n')
 
 // The brief modal: scroll-locks the page while open, focuses the close button (so Esc lands on the
 // dialog), and restores everything on close. All client-side; the prerendered page ships it closed.
@@ -93,36 +98,61 @@ useHead({
       <div class="term realterm">
         <div class="term-bar" aria-hidden="true">
           <div class="term-dots"><span class="d-r" /><span class="d-y" /><span class="d-g" /></div>
-          <div class="term-title">my-app — -zsh — 72×24</div>
+          <div class="term-title">~ — -zsh — 72×24</div>
         </div>
-        <pre class="term-body" tabindex="0" role="region" aria-label="stratless profile, printed to the terminal"><code><span class="t-arrow" aria-hidden="true">➜</span>  <span class="t-path">~/my-app</span> <span class="t-c">stratless profile</span>
+        <pre class="term-body" tabindex="0" role="region" aria-label="stratless free read and profile, printed to the terminal"><code><span class="t-arrow" aria-hidden="true">➜</span>  <span class="t-path">~</span> <span class="t-c">npx stratless</span>
 
-<span class="t-d"># who you are working with, read from your own history</span>
+  <span class="t-b">You and your AI, measured</span>
 
-<span class="t-b">WHAT TO OFFER ME BEFORE I ASK</span>
-- offer a quick sketch of the idea before building it
-  out, then ask them to validate it. <span class="t-d">(218×)</span>
+    <span class="t-d">you and your assistant</span>    5,912 messages · 49 active days
+    <span class="t-d">a median day</span>              123 messages
+    <span class="t-d">span</span>                      2026-06-09 → 2026-07-27
+                              · longest streak 49 days
+    <span class="t-d">how you write</span>             median 17 words · 8% four words
+                              or fewer · 42% questions
+    <span class="t-d">what you keep typing</span>      "go" 20× · "continue" 18× · "sure" 11×
+    <span class="t-d">screenshots sent</span>          205
+    <span class="t-d">course corrections</span>        2.49 / 100 messages
+    <span class="t-d">tool declines</span>             51
+    <span class="t-d">friction days</span>             44 of 49 active days
+    <span class="t-d">not counted against you</span>   63 permission stops · 33 system blocks
+    <span class="t-d">busiest repo</span>              stratless · across 6 repos · 50 branches
+    <span class="t-d">tools it ran for you</span>      27,661 calls · Bash 38% · Edit 26%
 
-<span class="t-b">WHAT TO CATCH FOR ME</span>
-- catch completed work presented as done and expect a
-  double-check pass before it's accepted. <span class="t-d">(101×)</span>
+  <span class="t-d">Nothing was changed on your machine.</span>
 
-<span class="t-b">HOW TO TALK TO ME</span>
-- talk in short go-ahead bursts, they approve with a
-  brief word and expect you to keep moving. <span class="t-d">(159×, rising)</span>
+<span class="t-arrow" aria-hidden="true">➜</span>  <span class="t-path">~</span> <span class="t-c">stratless profile</span>
 
-<span class="t-d">not loaded yet · load it into your assistant: stratless update</span>
+  <span class="t-b">WHO YOU'RE WORKING WITH</span>
 
-<span class="t-arrow" aria-hidden="true">➜</span>  <span class="t-path">~/my-app</span> <span class="t-c">stratless update</span>
+  <span class="t-d">##</span> <span class="t-b">What to offer me before I ask</span>
+  - offer a quick sketch of the idea before building it
+    out, then ask them to validate it. <span class="t-d">(218×)</span>
 
+  <span class="t-d">##</span> <span class="t-b">What to catch for me</span>
+  - catch the urge to patch symptoms, they want the
+    actual bug found and fixed first. <span class="t-d">(156×)</span>
+
+  <span class="t-d">##</span> <span class="t-b">How to talk to me</span>
+  - talk in short go-ahead bursts, they approve with a
+    brief word and expect you to keep moving. <span class="t-d">(159×, rising)</span>
+
+  <span class="t-d">not loaded yet · load it into your assistant: stratless update</span>
+
+<span class="t-arrow" aria-hidden="true">➜</span>  <span class="t-path">~</span> <span class="t-c">stratless update</span>
 <span class="t-ok">↳ loaded</span>  <span class="t-d">your assistant now talks to a person, not a blank.</span>
 
-<span class="t-arrow" aria-hidden="true">➜</span>  <span class="t-path">~/my-app</span> <span class="term-cursor" aria-hidden="true" /></code></pre>
+<span class="t-arrow" aria-hidden="true">➜</span>  <span class="t-path">~</span> <span class="term-cursor" aria-hidden="true" /></code></pre>
       </div>
 
-      <!-- PROFILER HERO, two beats: `stratless profile` prints the model (a faithful excerpt of real
-           output — re-pull it from the then-current HUMAN.md when refreshing the showcase), then
-           `stratless update` loads it. profile LOOKS, update LOADS — the terminal teaches the split. -->
+      <!-- THE TWO-BEAT SCENE — the landing page in miniature, performed. Beat 1 (above the shell's
+           fold): `npx stratless`, the command the pill below sells, printing the AUTHOR'S REAL
+           mirror run verbatim (minus the spinner and the `profile captures` row, which belongs to
+           the after-state). Beat 2 (the scroll reward): `stratless profile` → three rows pulled
+           verbatim from the one blessed sample (content/samples/HUMAN.md) in the real print format
+           (the header's meta paren omitted: that build's moments count rotated out of the status
+           history), then `update` loads it. Re-pull BOTH beats when the sample or the mirror
+           format changes: the terminal must never say what a real run would not. -->
 
       <div class="cta-row">
         <Btn href="#install" primary>Install</Btn>
@@ -132,35 +162,15 @@ useHead({
     </div>
   </section>
 
-  <!-- INSTALL — two columns: the commands, and the receipt. Left: one command to run, one to keep,
-       one to leave (never command cards; reference lives at /docs/commands). Right: the author's
-       real HUMAN.md behind a file icon — click it and the full, unedited brief opens in a modal. -->
+  <!-- INSTALL — one command, nothing else. The TRY is the whole ask; init/stop and the rest of the
+       reference live at /docs/commands, and the sample HUMAN.md lives at the end of the boundary
+       diagram below, where the pipeline that writes it finishes. -->
   <section id="install" class="section install">
     <div class="container">
       <h2 class="sr-only">Install</h2>
-      <p class="eyebrow center">See it for yourself</p>
-      <div class="install-cols">
-        <div class="install-col">
-          <div class="install-lead">
-            <div class="cmd"><code>npx stratless</code></div>
-            <p class="cmd-note">See what your AI already knows about you. Runs on your machine, changes nothing.</p>
-          </div>
-          <p class="keep-line">
-            Like it? Keep it: <code>npx stratless init</code> stops Claude Code's 30-day reaper and archives
-            your history. Whatever's already gone is gone.
-          </p>
-          <p class="keep-line">
-            Turn it off anytime: <code>stratless stop</code>. Being able to shut it up is half of why you
-            can trust it.
-          </p>
-        </div>
-        <div class="install-col brief-col">
-          <button type="button" class="brief-icon" aria-haspopup="dialog" @click="briefOpen = true">
-            <span class="bi-doc" aria-hidden="true"><span class="bi-fold" /><span class="bi-line" /><span class="bi-line" /><span class="bi-line" /></span>
-            <span class="bi-name">HUMAN.md</span>
-          </button>
-          <p class="brief-sub">View my own brief to the AI: the author's real <code>HUMAN.md</code>, unedited. Yours will say different things. That's the point.</p>
-        </div>
+      <p class="eyebrow center">Try it free · changes nothing</p>
+      <div class="install-lead">
+        <div class="cmd"><code>npx stratless</code></div>
       </div>
       <p class="cmd-meta center">v{{ version }} · MIT · <a :href="`${GITHUB}/releases`" target="_blank" rel="noopener">changelog ↗</a></p>
     </div>
@@ -174,7 +184,7 @@ useHead({
           <span class="fname">~/.claude/HUMAN.md</span>
           <button ref="briefClose" type="button" class="brief-x" aria-label="close" @click="briefOpen = false">×</button>
         </div>
-        <pre class="filebody"><code>{{ sample }}</code></pre>
+        <div class="filebody"><div v-for="(l, i) in sampleLines" :key="i" class="fline" :class="{ 'md-h': l.startsWith('#') }"><template v-if="l.startsWith('- ')"><span class="md-li">-</span>{{ l.slice(1) }}</template><template v-else>{{ l }}</template></div></div>
       </div>
     </div>
   </Teleport>
@@ -185,23 +195,46 @@ useHead({
       <p class="eyebrow">There's no trick</p>
       <h2>The conversation was on your disk the whole time.</h2>
       <p>
-        No cloud. No training. No separate bill. Every assistant that can resume a chat has to
-        store the chat, and Claude Code keeps yours in <code>~/.claude/projects</code>.
-        <strong>Nobody reads it.</strong>
-      </p>
-      <p>
-        stratless reads it, and it reads what you did, not what it said. It walks each session into
-        moments and finds the kinds of thing you do again and again. Your
-        <em>"wait, what does this mean"</em> is one. Your <em>"ok, next"</em> is another.
+        No cloud. No training. No separate bill. Claude Code already keeps your chats in
+        <code>~/.claude/projects</code>, and <strong>nobody reads them.</strong> stratless does, on
+        your machine, and it reads what you did, not what it said: the kinds of thing you do again
+        and again.
       </p>
 
-      <div class="pipeline">
-        <div><code>moments</code><span>what you typed, and what the assistant was doing</span></div>
-        <div><code>cluster</code><span>the recurring things you do, found on your machine</span></div>
-        <div><code>count</code><span>how often, over what span, rising or fading</span></div>
-        <div><code>write</code><span>the patterns that survive become your HUMAN.md</span></div>
+      <!-- THE BOUNDARY DIAGRAM — the privacy claim, drawn instead of stated. Everything happens
+           inside the box; the one inbound arrow (the runtime, at init) sits on the border, and
+           there is no outbound arrow to point to. The prose this replaced lives in the docs
+           (/docs/how-it-works, /docs/privacy), which the caption links. -->
+      <!-- Not role="img" anymore: the HUMAN.md sheet at the end is a live button (it opens the
+           brief modal), and an interactive element may not sit inside an aria-hidden or role="img"
+           subtree. The decorative flow hides as one piece; the sr-only line narrates instead. -->
+      <div class="machine">
+        <span class="machine-tag" aria-hidden="true">your machine</span>
+        <p class="sr-only">On your machine, your chats become moments, then clusters, then counts, and finally HUMAN.md. One runtime comes in at init. Nothing goes out.</p>
+        <div class="flow">
+          <span class="flow-deco" aria-hidden="true">
+            <span class="mdoc-item">
+              <span class="mchat"><span class="mchat-b mchat-b1" /><span class="mchat-b mchat-b2" /></span>
+              <span class="mdoc-name">your chats</span>
+            </span>
+            <span class="flow-arrow">→</span>
+            <span class="flow-step">moments</span>
+            <span class="flow-arrow">→</span>
+            <span class="flow-step">cluster</span>
+            <span class="flow-arrow">→</span>
+            <span class="flow-step">count</span>
+            <span class="flow-arrow">→</span>
+            <span class="flow-step">write</span>
+            <span class="flow-arrow">→</span>
+          </span>
+          <button type="button" class="mdoc-item mdoc-btn" aria-haspopup="dialog" aria-label="HUMAN.md: read the author's real one, unedited" @click="briefOpen = true">
+            <span class="mdoc" aria-hidden="true"><span class="mdoc-fold" /><span class="mdoc-line" /><span class="mdoc-line" /><span class="mdoc-line" /></span>
+            <span class="mdoc-name">HUMAN.md</span>
+          </button>
+        </div>
+        <span class="machine-io" aria-hidden="true">one runtime in at init · nothing goes out</span>
       </div>
-      <p class="quiet">Three of the four run entirely on your machine: the grouping runs on <strong>bge-small</strong>, an open MIT model fetched once at <code>init</code> (~3MB runtime + ~34MB weights, itemized before you say yes — the npm package itself has zero dependencies), and only the naming borrows the assistant you already have. The engine comes in, nothing goes out. If a moment carries no honest signal, it records nothing. <strong>Derived, not pre-matched.</strong></p>
+      <p class="quiet reveal-cap"><strong>Derived, not pre-matched.</strong> <NuxtLink to="/docs/how-it-works">how it works →</NuxtLink></p>
     </div>
   </section>
 
@@ -240,6 +273,8 @@ useHead({
      The nav sits at z-index 10 and the hero at auto, so the logo + links stay above the fog. */
   margin-top: -58px;
   padding-top: calc(1rem + 58px);
+  /* the fog-side half of the hero→install seam — pairs with the landing seam rule below */
+  padding-bottom: 3.5rem;
   /* The fog's stand-in, painted from static CSS the moment the HTML parses. The canvas needs
      hydration + two 512² noise tiles (~1s cold) and is transparent until then — without this,
      bare paper shows through the header strip and the fog visibly pops in. Same ramp as
@@ -278,7 +313,7 @@ h1 {
   font-family: var(--font-read);
   font-size: var(--fs-lg);
   line-height: 1.6;
-  margin: 0.666rem;
+  margin: 0;
 }
 .cta-row {
   display: flex;
@@ -342,15 +377,16 @@ h1 {
 .term-body {
   margin: 0;
   padding: 1.15rem 1.25rem 1.4rem;
-  /* A fixed-height shell you scroll inside — the profile is longer than the window, like real output.
-     Sized so the fold lands inside the third section: all three headings reachable, and the second
-     beat (`stratless update` → loaded) stays below the fold as the reward for scrolling. */
-  max-height: 24rem;
+  /* A fixed-height shell you scroll inside — the scene is longer than the window, like real output.
+     Sized so the fold lands inside beat 1's mirror rows (the "what you keep typing" row safely
+     visible) and beat 2 (`stratless profile` → the rows → `update` → loaded) stays below the fold
+     as the reward for scrolling. */
+  max-height: 20.5rem;
   overflow: auto;
   overscroll-behavior: contain;
   font-family: var(--font-mono);
   font-size: var(--fs-term);
-  line-height: 1.7;
+  line-height: 1.45;
   color: #e6e2d6;
   -webkit-font-smoothing: antialiased;
 }
@@ -396,9 +432,21 @@ h1 {
   50% { opacity: 0; }
 }
 
+/* ── the landing seams: every section joint totals 6.5rem, 3.5rem below the border + 3rem above
+   (the hero's 3.5rem half lives on .hero). The global .section 5rem/5rem stays for other pages. ── */
+.install,
+.reveal,
+.roadmap {
+  padding-top: 3rem;
+  padding-bottom: 3.5rem;
+}
+
 /* ── install ── */
 .install {
-  padding-top: 4rem;
+  /* top = the FULL visual gap below the band (our 3rem + the reveal's 1.5rem top), because the
+     hero's horizon border sits directly above: the eye measures border→eyebrow against
+     meta→next-eyebrow, not padding against padding */
+  padding: 4.5rem 0 3rem;
   /* The hero CTA jumps here. The header is sticky at 58px, so without this the eyebrow lands
      UNDER it. DocsShell sets the same on its headings for exactly this reason. */
   scroll-margin-top: 80px;
@@ -408,7 +456,7 @@ h1 {
   flex-direction: column;
   align-items: center;
   gap: 0.7rem;
-  margin: 0 auto 0.9rem;
+  margin: 0 auto;
   max-width: 42rem;
 }
 .cmd {
@@ -427,9 +475,8 @@ h1 {
   padding: 0;
 }
 .cmd-meta {
-  /* the last element of the install band now — a little air above so it reads as the section's
-     footer, not the tail of the stop line */
-  margin: 2rem auto 0;
+  /* 1rem above, mirroring the eyebrow's 1rem below, so the pill sits centered in the band */
+  margin: 1rem auto 0;
   font-family: var(--font-mono);
   font-size: var(--fs-sm);
   color: var(--mid);
@@ -442,128 +489,6 @@ h1 {
 .cmd-meta a:hover {
   color: var(--accent-deep);
 }
-.cmd-note {
-  margin: 0;
-  max-width: 15rem;
-  text-align: left;
-  font-size: var(--fs-xs);
-  line-height: 1.5;
-  color: var(--mid);
-}
-/* the note stacks centered under the single command box (not the left-aligned side note the old
-   single-command row used). Descendant selector so it wins over .cmd-note's default left-align. */
-.install-lead .cmd-note {
-  max-width: 30rem;
-  text-align: center;
-}
-/* the KEEP and the OFF-SWITCH — inline follow-up lines, deliberately NOT command cards, so there's a
-   single boxed CTA above them. Each command sits inline as bold mono, not a box. */
-.keep-line {
-  margin: 1.3rem auto 0;
-  max-width: 34rem;
-  text-align: center;
-  font-family: var(--font-read);
-  font-size: var(--fs-sm);
-  line-height: 1.6;
-  color: var(--mid);
-}
-.keep-line code {
-  font-size: var(--fs-code);
-  font-weight: 700;
-  color: var(--ink);
-}
-
-/* ── the install columns + the brief showcase ── */
-.install-cols {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 2.5rem;
-  align-items: center;
-  max-width: 52rem;
-  margin: 0 auto;
-}
-@media (max-width: 760px) {
-  .install-cols {
-    grid-template-columns: 1fr;
-    gap: 2rem;
-  }
-}
-.brief-col {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.9rem;
-}
-/* The file icon: a paper sheet with a folded corner and faint rule lines. A BUTTON — it opens the brief. */
-.brief-icon {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.55rem;
-  background: none;
-  border: none;
-  padding: 0.4rem;
-  cursor: pointer;
-}
-.bi-doc {
-  position: relative;
-  width: 64px;
-  height: 80px;
-  background: var(--paper-2);
-  border: 1.5px solid var(--ink);
-  border-radius: 6px 14px 6px 6px;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  gap: 7px;
-  padding: 0 12px 14px;
-  transition: transform 0.15s ease;
-}
-.brief-icon:hover .bi-doc,
-.brief-icon:focus-visible .bi-doc {
-  transform: translateY(-2px);
-}
-.bi-fold {
-  position: absolute;
-  top: -1.5px;
-  right: -1.5px;
-  width: 16px;
-  height: 16px;
-  background: var(--paper);
-  border-left: 1.5px solid var(--ink);
-  border-bottom: 1.5px solid var(--ink);
-  border-radius: 0 0 0 6px;
-}
-.bi-line {
-  height: 2px;
-  background: var(--mid);
-  border-radius: 1px;
-}
-.bi-line:nth-child(3) {
-  width: 75%;
-}
-.bi-name {
-  font-family: var(--font-mono);
-  font-size: var(--fs-sm);
-  font-weight: 700;
-  color: var(--ink);
-}
-.brief-sub {
-  margin: 0;
-  max-width: 20rem;
-  text-align: center;
-  font-family: var(--font-read);
-  font-size: var(--fs-sm);
-  line-height: 1.55;
-  color: var(--mid);
-}
-.brief-sub code {
-  font-size: var(--fs-code);
-  font-weight: 700;
-  color: var(--ink);
-}
-
 /* ── the brief modal ── */
 .brief-overlay {
   position: fixed;
@@ -575,61 +500,91 @@ h1 {
   justify-content: center;
   padding: 4vh 1rem;
 }
+/* The dialog interior is VS Code Dark+ — the brief is a file, and this is the editor most devs
+   will recognise it in. Outer frame stays the site's (black border, like the hero terminal). */
 .brief-dialog {
   width: min(46rem, 100%);
   max-height: 92vh;
   display: flex;
   flex-direction: column;
-  border: 1.5px solid var(--ink);
+  border: 1px solid #000;
   border-radius: 8px;
-  background: var(--paper-2);
+  background: #1e1e1e;
   overflow: hidden;
-  box-shadow: 0 18px 50px color-mix(in srgb, var(--ink) 35%, transparent);
+  box-shadow: 0 18px 50px color-mix(in srgb, var(--ink) 45%, transparent);
 }
 .filebar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0.55rem 1rem;
-  border-bottom: 1.5px solid var(--ink);
-  background: color-mix(in srgb, var(--ink) 6%, var(--paper-2));
+  border-bottom: 1px solid #3c3c3c;
+  background: #252526;
 }
 .fname {
   font-family: var(--font-mono);
   font-size: var(--fs-sm);
   font-weight: 700;
-  color: var(--ink);
+  color: #cccccc;
 }
 .brief-x {
   font-family: var(--font-mono);
   font-size: 1.2rem;
   line-height: 1;
-  color: var(--ink);
+  color: #cccccc;
   background: none;
   border: none;
   padding: 0.1rem 0.3rem;
   cursor: pointer;
 }
-/* The whole file scrolls inside the dialog. Long provenance lines soft-wrap. */
+.brief-x:hover {
+  color: #ffffff;
+}
+/* The whole file scrolls inside the dialog. Long provenance lines soft-wrap per line. */
 .filebody {
   margin: 0;
   padding: 1.2rem 1.25rem 1.4rem;
   overflow-y: auto;
+}
+.filebody::-webkit-scrollbar {
+  width: 10px;
+}
+.filebody::-webkit-scrollbar-thumb {
+  background: #424242;
+  border-radius: 5px;
+}
+.filebody::-webkit-scrollbar-track {
+  background: transparent;
+}
+.fline {
   font-family: var(--font-mono);
   font-size: 0.8rem;
   line-height: 1.6;
-  color: var(--ink-2);
+  color: #d4d4d4;
   white-space: pre-wrap;
   overflow-wrap: break-word;
+  /* an empty markdown line still holds its height */
+  min-height: calc(0.8rem * 1.6);
 }
-.filebody code {
-  font-family: inherit;
-  font-size: inherit;
-  background: none;
-  padding: 0;
+/* Dark+ colours markdown heading lines blue and bold. The bullets take Dark+'s string orange
+   (#ce9178) — real Dark+ gives bullets #6796e6 blue, but Sun chose feel over fidelity here. */
+.md-h {
+  color: #569cd6;
+  font-weight: 700;
+}
+.md-li {
+  color: #ce9178;
 }
 
 /* ── the reveal ── */
+.reveal {
+  /* tighter than the shared seam: the install band above is short and mostly air already */
+  padding-top: 1.5rem;
+}
+/* centered, like the install band above and the roadmap below it */
+.reveal .narrow {
+  text-align: center;
+}
 .reveal h2 {
   font-size: var(--fs-title);
   line-height: 1.25;
@@ -646,29 +601,188 @@ h1 {
 .reveal strong {
   color: var(--ink);
 }
-/* the pipeline steps under the reveal (moments · cluster · count · write) */
-.pipeline {
-  display: flex;
-  flex-direction: column;
-  gap: 0.55rem;
-  margin: 1.8rem 0 0.9rem;
+/* ── the boundary diagram (moments → cluster → count → write, inside "your machine") ── */
+.machine {
+  position: relative;
+  margin: 2.2rem 0 1.1rem;
+  padding: 2rem 1.2rem 2.1rem;
+  border: 1.5px solid var(--ink);
+  border-radius: 10px;
 }
-.pipeline div {
-  display: flex;
-  gap: 0.9rem;
-  align-items: baseline;
-  font-family: var(--font-read);
-  font-size: var(--fs-md);
-  color: var(--ink-2);
+/* the two border labels: paper-backed so they knock a gap out of the border line, like a legend */
+.machine-tag,
+.machine-io {
+  position: absolute;
+  padding: 0 0.55rem;
+  background: var(--paper);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--mid);
+  white-space: nowrap;
 }
-.pipeline code {
+.machine-tag {
+  top: -0.6em;
+  left: 1.1rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.machine-io {
+  bottom: -0.6em;
+  left: 50%;
+  transform: translateX(-50%);
+}
+@media (max-width: 480px) {
+  .machine-io {
+    font-size: 0.62rem;
+  }
+}
+.flow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.55rem 0.7rem;
+}
+/* the decorative run participates in the flex row as if unwrapped; only the button is live */
+.flow-deco {
+  display: contents;
+}
+.flow-step {
   font-family: var(--font-mono);
   font-size: var(--fs-sm);
   font-weight: 700;
-  min-width: 5.5rem;
-  background: none;
-  padding: 0;
   color: #1f6f8b;
+}
+.flow-arrow {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--mid);
+}
+/* the chat-logs mark: two speech bubbles, one from each side of the conversation, drawn with the
+   same 1.5px ink stroke as the paper sheets so the diagram's icons stay one family */
+.mchat {
+  position: relative;
+  width: 46px;
+  height: 50px;
+}
+.mchat-b {
+  position: absolute;
+  width: 30px;
+  height: 19px;
+  background: var(--paper-2);
+  border: 1.5px solid var(--ink);
+}
+.mchat-b::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 55%;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--mid);
+}
+.mchat-b1 {
+  top: 3px;
+  left: 0;
+  border-radius: 7px 7px 7px 2px;
+}
+.mchat-b2 {
+  bottom: 3px;
+  right: 0;
+  border-radius: 7px 7px 2px 7px;
+}
+
+/* the paper sheet, the old install-band file icon in miniature */
+.mdoc-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+}
+.mdoc {
+  position: relative;
+  width: 40px;
+  height: 50px;
+  background: var(--paper-2);
+  border: 1.5px solid var(--ink);
+  border-radius: 4px 10px 4px 4px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 0 7px 8px;
+  transition: transform 0.15s ease;
+}
+/* the HUMAN.md sheet is the modal's trigger — it HOVERS off the paper at rest, so the one clickable
+   mark in the diagram announces itself before anyone mouses near it: the whole button bobs gently,
+   the sheet casts a shadow, and hover adds the usual lift on top. Reduced motion drops the bob and
+   keeps the shadow as the still tell. */
+.mdoc-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  /* easeInOutSine — each half of the cycle is a true sine arc, so the turnarounds have no dwell */
+  animation: mdoc-float 3.6s cubic-bezier(0.37, 0, 0.63, 1) infinite;
+  will-change: transform;
+}
+.mdoc-btn .mdoc {
+  box-shadow: 0 8px 12px -6px color-mix(in srgb, var(--ink) 40%, transparent);
+}
+.mdoc-btn:hover .mdoc,
+.mdoc-btn:focus-visible .mdoc {
+  transform: translateY(-2px);
+}
+@keyframes mdoc-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mdoc-btn {
+    animation: none;
+  }
+}
+.mdoc-fold {
+  position: absolute;
+  top: -1.5px;
+  right: -1.5px;
+  width: 11px;
+  height: 11px;
+  background: var(--paper);
+  border-left: 1.5px solid var(--ink);
+  border-bottom: 1.5px solid var(--ink);
+  border-radius: 0 0 0 4px;
+}
+.mdoc-line {
+  height: 2px;
+  background: var(--mid);
+  border-radius: 1px;
+}
+.mdoc-line:nth-child(3) {
+  width: 70%;
+}
+.mdoc-name {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  color: var(--ink);
+}
+.reveal-cap a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.reveal-cap a:hover {
+  color: var(--accent-deep);
 }
 .quiet {
   font-size: var(--fs-sm);

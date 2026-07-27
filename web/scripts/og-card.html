@@ -1,7 +1,9 @@
 <!doctype html>
 <!-- og.png source — the 1200×630 social card. public/og.png is a screenshot of this file.
      Rewritten 2026-07-16 for the profiler: the card mirrors the homepage hero, so the shared link
-     and the page it lands on say the same thing.
+     and the page it lands on say the same thing. 2026-07-28: the footer's site URL became the
+     `npx stratless` pill — the funnel leads with the try-command, and link previews print the
+     domain under the card anyway, so the URL text was the one redundant element.
      Regenerate: serve web/public at / (so /fonts + /favicon.svg resolve), then
        chrome --headless=new --window-size=1200,630 --screenshot=og.png http://localhost:PORT/og-card.html
      (drop a copy of this file into the served dir first; it lives in scripts/ so it isn't deployed). -->
@@ -58,7 +60,11 @@
     position: absolute; left: 68px; right: 68px; bottom: 48px;
     display: flex; align-items: center; justify-content: space-between;
   }
-  .site { font-family: var(--mono); font-size: 27px; letter-spacing: 0.08em; color: var(--accent-deep); }
+  .pill {
+    font-family: var(--mono); font-size: 27px; font-weight: 700; color: var(--ink);
+    background: var(--paper); border: 2px solid var(--ink); border-radius: 10px;
+    padding: 10px 24px; box-shadow: 5px 5px 0 var(--ink);
+  }
   .badge {
     font-family: var(--mono); font-size: 22px; color: var(--ink);
     background: rgba(163, 207, 220, 0.55); border: 2px solid var(--ink); border-radius: 12px;
@@ -70,7 +76,7 @@
   <h1>Made for your AI.<br>Meant for you.</h1>
   <p class="sub">stratless reads your chats and teaches your AI <b>who you are</b>,<br>so it stops talking over your head or under it.</p>
   <div class="foot">
-    <span class="site">stratless.com</span>
+    <span class="pill">npx stratless</span>
     <span class="badge">Open source · runs on your machine</span>
   </div>
 </div>

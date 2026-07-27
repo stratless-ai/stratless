@@ -21,7 +21,7 @@ function base(): Mirror {
       firstMessage: '2026-06-09',
       lastMessage: '2026-07-21',
     },
-    writing: { median: 12, p25: 4, p75: 30, p90: 60, terseShare: 0.3, questionShare: 0.2, pastes: 5, images: 2 },
+    writing: { median: 12, p25: 4, p75: 30, p90: 60, terseShare: 0.3, questionShare: 0.2, pastes: 5, images: 2, repeated: [] },
     friction: { courseCorrections: 119, toolDeclines: 26, permissionStops: 44, systemBlocks: 3, perHundred: 3.26, daysWithAny: 30, events: [] },
     context: {
       repos: [
@@ -96,6 +96,70 @@ test('a repo root with a trailing slash still yields a clean basename', () => {
   const m = base();
   m.context.repos = [{ root: '/Users/jx/stratless-mono/', messages: 10 }];
   assert.equal(renderMirror(m).find((r) => r.label === 'busiest repo')!.value, 'stratless-mono');
+});
+
+// ── The vault rows (2026-07-27): fields the mirror always computed, promoted into the FULL read
+// only — the init door's tight teaser must not grow, and the card must never quote the person.
+
+test('full: the vault rows appear — median day, the person\'s words, screenshots, friction days, the uncounted interrupts', () => {
+  const m = base();
+  m.writing.repeated = [
+    { text: 'go', count: 20 },
+    { text: 'continue', count: 18 },
+    { text: 'sure', count: 11 },
+    { text: 'yes', count: 7 },
+  ];
+  const full = renderMirror(m, { full: true });
+  assert.equal(full.find((r) => r.label === 'a median day')!.value, '20 messages');
+  assert.equal(
+    full.find((r) => r.label === 'what you keep typing')!.value,
+    '"go" 20× · "continue" 18× · "sure" 11×',
+    'top three repeats only, exact text quoted',
+  );
+  assert.equal(full.find((r) => r.label === 'screenshots sent')!.value, '2');
+  assert.equal(full.find((r) => r.label === 'friction days')!.value, '30 of 40 active days');
+  assert.equal(
+    full.find((r) => r.label === 'not counted against you')!.value,
+    '44 permission stops · 3 system blocks',
+    'the interrupts excluded from the rate are shown, never silently dropped (mirror.ts:69)',
+  );
+  assert.equal(
+    full.find((r) => r.label === 'busiest repo')!.value,
+    'stratless-mono · across 2 repos · 4 branches',
+    'the full read carries the spread beside the basename',
+  );
+  assert.equal(
+    full.find((r) => r.label === 'tools it ran for you')!.value,
+    '400 calls · Edit 50% · Bash 25%',
+    'delegation scale plus the top of the mix',
+  );
+  assert.ok(!full.some((r) => r.label === 'most-used tool'), 'the single-tool row is replaced by the mix in full');
+});
+
+test('the door teaser gains none of the vault rows', () => {
+  const m = base();
+  m.writing.repeated = [{ text: 'go', count: 20 }];
+  const tight = renderMirror(m);
+  for (const label of [
+    'a median day',
+    'what you keep typing',
+    'screenshots sent',
+    'friction days',
+    'not counted against you',
+    'tools it ran for you',
+  ]) {
+    assert.ok(!tight.some((r) => r.label === label), `door has no "${label}" row`);
+  }
+  assert.equal(tight.find((r) => r.label === 'busiest repo')!.value, 'stratless-mono', 'door repo row stays bare — no spread');
+  assert.equal(tight.find((r) => r.label === 'most-used tool')!.value, 'Edit (50%)', 'door keeps the single top tool');
+});
+
+test('the card never quotes the person — writing.repeated is terminal-only', () => {
+  const m = base();
+  m.writing.repeated = [{ text: 'acme-payments rollout', count: 9 }];
+  const rows = renderCard(m);
+  assert.ok(!rows.some((r) => r.label === 'what you keep typing'), 'no words row on the shareable card');
+  assert.ok(!rows.some((r) => r.value.includes('acme-payments')), 'no repeated text leaks into any card value');
 });
 
 // ── The shareable card (`renderCard`) — the screenshot-safe subset. Same numbers as the full read,
