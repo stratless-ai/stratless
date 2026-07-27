@@ -65,11 +65,11 @@ export default defineNuxtConfig({
         { property: 'og:title', content: TITLE },
         { property: 'og:description', content: DESC },
         { property: 'og:url', content: `${URL}/` }, // match the canonical's trailing slash
-        { property: 'og:image', content: `${URL}/og.png?v=2` },
+        { property: 'og:image', content: `${URL}/og.png?v=3` },
         { name: 'twitter:card', content: 'summary_large_image' },
         { name: 'twitter:title', content: TITLE },
         { name: 'twitter:description', content: DESC },
-        { name: 'twitter:image', content: `${URL}/og.png?v=2` },
+        { name: 'twitter:image', content: `${URL}/og.png?v=3` },
       ],
     },
   },
