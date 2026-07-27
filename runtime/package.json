@@ -1,0 +1,45 @@
+{
+  "name": "@stratless/runtime",
+  "version": "1.0.0",
+  "description": "The local embedding runtime for stratless, pre-bundled to WASM. Downloaded once by the stratless CLI after explicit consent — never installed directly, never a dependency.",
+  "type": "module",
+  "//": "WHY THIS PACKAGE EXISTS. Declaring transformers.js as a normal dependency made a first-time",
+  "//1": "`npx stratless` download 116MB and unpack 259MB — ~90% native binaries and image codecs the",
+  "//2": "engine never executes. This package is the same runtime bundled by US at build time with the",
+  "//3": "dead weight stubbed out: ~1.3MB of JS + one ~9.6MB WASM binary. The CLI fetches it into",
+  "//4": "~/.stratless/runtime at `init`, after the person's yes, pinned by exact version + integrity",
+  "//5": "hash in CLI code. 'Nothing arrives until you say yes' — literally, auditably true.",
+  "//6": "WASM ON PURPOSE — standard over speed (decided 2026-07-27): the WASM standard computes",
+  "//7": "identical bits on every machine, so fingerprints are portable and cacheable; native was",
+  "//8": "faster but machine-flavored. Changing ANYTHING in this bundle changes everyone's",
+  "//9": "fingerprints: every version bump here is a versioned, announced rebuild in the CLI.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stratless-ai/stratless.git",
+    "directory": "runtime"
+  },
+  "homepage": "https://stratless.com",
+  "bugs": "https://github.com/stratless-ai/stratless/issues",
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node check.mjs",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "//dev": "Exact pins, no ranges: this package's whole job is byte-reproducible output. The bundled",
+  "//dev1": "libraries are devDependencies BECAUSE they are compiled in — the published artifact has",
+  "//dev2": "no dependencies at all, which check.mjs enforces.",
+  "devDependencies": {
+    "@xenova/transformers": "2.17.2",
+    "esbuild": "0.23.1"
+  }
+}

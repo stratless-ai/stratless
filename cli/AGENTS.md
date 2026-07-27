@@ -1,6 +1,6 @@
 # cli — agent guide
 
-The published tool (`npm: stratless`). TypeScript, **one runtime dependency** (see below), shipped standalone.
+The published tool (`npm: stratless`). TypeScript, **zero runtime dependencies** (see below), shipped standalone.
 Both matter: the "audit the whole thing in an afternoon" trust argument depends on a small, dep-free surface.
 
 Pipeline: `transcript.ts` (parse raw JSONL) → `moments.ts` (the persisted pile: what you typed and
@@ -45,15 +45,17 @@ export class CorruptStoreError extends Error {
 
 ## Boundaries
 
-- ⚠️ **ONE runtime dependency, and the bar for a second is very high.** `@xenova/transformers` carries
-  the local embedding model, and it is what keeps a cold build at **$0.25** (measured 2026-07-26,
-  5,647 moments) — the grouping is arithmetic on the user's own machine, so the only paid call left
-  is the one that names what the arithmetic found. It **breaks**
-  "zero runtime dependency"; it **keeps** "nothing leaves", since the model runs locally and only the
-  weights ever arrive. Pinned to its **WASM backend** in `embed.ts` — no native binary, so it cannot
-  fail-to-install the way native deps do. The weights are **not bundled**: `npx stratless` runs
-  `mirror`, which needs no model at all, and must stay instant. Dev-only deps (`@types/node`, `tsx`,
-  `typescript`) remain fine; anything else in `dependencies` still breaks the audit-in-an-afternoon
-  promise.
+- 🚫 **ZERO runtime dependencies — and the embedding engine is NOT one (0.6.0, the consent-arrival
+  rule).** The local model is what keeps a cold build at **~$0.25** (measured 2026-07-27, 5,784
+  moments) — the grouping is arithmetic on the user's own machine, so the only paid call left is the
+  one that names what the arithmetic found. But its runtime does not ride in `dependencies`
+  (declaring it made `npx stratless` cost strangers 116MB): it arrives ONCE, at `init`, after the
+  person's yes — `@stratless/runtime` (~3MB, our own pre-bundled WASM, see `runtime/AGENTS.md`) plus
+  the weights (~34MB), into `~/.stratless/`, pinned by exact version + hashes in `src/fetch.ts`.
+  WASM is the canonical runtime, **standard over speed**: identical bits on every machine, and any
+  runtime or model change is a versioned, announced rebuild (the `pipeline` stamp in `engine.ts`),
+  never silent drift. `npx stratless` runs `mirror`, which needs no model at all, and must stay
+  instant. Dev-only deps (`@types/node`, `tsx`, `typescript`) remain fine; anything in
+  `dependencies` breaks the audit-in-an-afternoon promise — and now also the consent story.
 - 🚫 **No confident guess** when honesty isn't possible — refuse and explain (see `atomic.ts`'s `CorruptStoreError`).
 - ✅ Node built-ins only (`node:fs`, `node:path`, …) plus the `claude` the user already has.

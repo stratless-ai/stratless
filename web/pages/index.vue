@@ -201,7 +201,7 @@ useHead({
         <div><code>count</code><span>how often, over what span, rising or fading</span></div>
         <div><code>write</code><span>the patterns that survive become your HUMAN.md</span></div>
       </div>
-      <p class="quiet">Three of the four run entirely on your machine: the grouping runs on <strong>bge-small</strong>, an open MIT model (~34MB) fetched once at <code>init</code>, and only the naming borrows the assistant you already have. Weights come in, nothing goes out. If a moment carries no honest signal, it records nothing. <strong>Derived, not pre-matched.</strong></p>
+      <p class="quiet">Three of the four run entirely on your machine: the grouping runs on <strong>bge-small</strong>, an open MIT model fetched once at <code>init</code> (~3MB runtime + ~34MB weights, itemized before you say yes — the npm package itself has zero dependencies), and only the naming borrows the assistant you already have. The engine comes in, nothing goes out. If a moment carries no honest signal, it records nothing. <strong>Derived, not pre-matched.</strong></p>
     </div>
   </section>
 

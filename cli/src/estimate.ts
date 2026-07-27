@@ -17,28 +17,28 @@
  */
 
 /**
- * The one paid measurement — the v3 engine's first real cold build (2026-07-26): **5,647 moments for
- * $0.25 in 3.7 minutes**, on an archive of ~5,550 submitted messages. Update all four here from a
- * fresh confirmation run.
+ * The one paid measurement — the 0.6.0 confirmation run (2026-07-27, the WASM runtime): **5,784
+ * moments for ~$0.25 in ~10.5 minutes**, on the build machine's real archive. The naming call
+ * measured $0.17 in that run; the write stage is carried from the previous reference (~$0.08 /
+ * ~15s), which the runtime change did not touch. Update all four here from a fresh confirmation run.
  *
- * WHAT CHANGED, and why the numbers moved by two orders of magnitude. The previous reference was
- * $13.27 / 33 minutes, and 71% of it was cache-creation the borrowed CLI writes and never reads back
- * — a tax that scaled with pile tokens and that batching could not touch. v3 removed the stage that
- * paid it: `assign` asked a model "does this moment fit this category?" ~190,000 times per build, and
- * a local embedding model now answers the same question with arithmetic, on this machine, for
- * nothing. **The whole remaining bill is ONE naming call plus the profile write.**
+ * WHY WALL-CLOCK ROSE from the previous reference (3.7 min, 2026-07-26): 0.6.0 moved fingerprinting
+ * from the native runtime to WASM — standard over speed, decided deliberately. The dollars did NOT
+ * move: fingerprinting costs $0 on either runtime, and **the whole bill remains ONE naming call
+ * plus the profile write** (v3 deleted `assign`, which used to ask a model ~190,000 questions per
+ * build at $13.27; a local embedding model answers them with arithmetic, on this machine).
  *
- * Measured breakdown of that run: build (shape + fingerprint + cluster + name) 192.8s, write 15.0s.
- * The fingerprinting — the longest stretch — costs $0 and never leaves the machine.
+ * Measured breakdown of the 0.6.0 run: fingerprint 8.5 min · cluster ~54s · name ~50s — the
+ * longest stretch costs $0 and never leaves the machine.
  *
- * `messages` is carried at the previous run's moments-per-message ratio (~1.02) rather than
- * re-measured: it describes how a transcript becomes a pile, which the engine change did not touch.
+ * `messages` is carried at the prior moments-per-message ratio (~1.02) rather than re-measured: it
+ * describes how a transcript becomes a pile, which no engine change has touched.
  */
 export const REFERENCE = {
-  moments: 5647,
+  moments: 5784,
   usd: 0.25,
-  minutes: 3.7,
-  messages: 5550,
+  minutes: 10.5,
+  messages: 5685,
 } as const;
 
 const USD_PER_MOMENT = REFERENCE.usd / REFERENCE.moments; // ≈ $0.000044

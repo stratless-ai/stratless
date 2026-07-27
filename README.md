@@ -53,13 +53,13 @@ If the assistant can't answer honestly, it writes nothing: a confidently-wrong p
 
 ## Read the source, that's the point
 
-This thing reads your entire conversation history, so the first question any sensible person asks is *"is it phoning home?"* The whole tool is in `cli/`, open source under MIT, so you don't have to take that on trust: you can read exactly what it does and confirm the only three things that touch the network: your own assistant on your own plan, a one-time model download at `init` that you're asked about first, and the opt-in version check. *"trust me"* is the one thing we're not allowed to say.
+This thing reads your entire conversation history, so the first question any sensible person asks is *"is it phoning home?"* The whole tool is in `cli/`, open source under MIT, so you don't have to take that on trust: you can read exactly what it does and confirm the only three things that touch the network: your own assistant on your own plan, a one-time engine download at `init` that you're asked about first (itemized, checksum-pinned), and the opt-in version check. *"trust me"* is the one thing we're not allowed to say.
 
 ## Privacy
 
 Everything runs on your machine. **Your conversations, the moments stratless derives, and your profile never leave it**, not for telemetry, not for "aggregate insight," not ever. There is no server, no account, nothing to sign up for.
 
-Three things touch the network, and the direction matters: the model weights come **in** once at `init` (with your consent, then permanently offline), the version check comes **in**, and the only thing that goes **out** is the borrowed call to your own assistant, on your own plan, the same place your code was already going.
+Three things touch the network, and the direction matters: the local engine comes **in** once at `init` (with your consent — a ~3MB runtime from npm and ~34MB of model weights from Hugging Face, both checksum-pinned, then permanently offline), the version check comes **in**, and the only thing that goes **out** is the borrowed call to your own assistant, on your own plan, the same place your code was already going.
 
 The profile is a plain text file. It's yours: load it into any other assistant, read it, or delete it.
 
@@ -78,7 +78,7 @@ pnpm test        # the CLI's tests
 pnpm dev:web     # stratless.com, locally
 ```
 
-The `cli/` is published standalone and carries exactly one runtime dependency: the local embedding model that does the pattern-finding. The bar for a second is very high. Never auto-commit. The tree is left green and uncommitted for a human to review.
+The `cli/` is published standalone and carries **zero runtime dependencies** — the local embedding engine is not one: it arrives once at `init`, after your yes, pinned and checksummed (`runtime/` in this repo is that package). The bar for ever adding a real dependency is very high. Never auto-commit. The tree is left green and uncommitted for a human to review.
 
 ---
 

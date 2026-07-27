@@ -8,7 +8,7 @@ import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { engineReady, loadEngine, saveEngine } from './engine.js';
+import { PIPELINE, engineReady, loadEngine, saveEngine } from './engine.js';
 import { writeAssignments, loadAssignments } from './assign.js';
 
 const scratch = (name: string): string => join(mkdtempSync(join(tmpdir(), 'engine-')), name);
@@ -29,8 +29,21 @@ test('engineReady: a machine with categories but NO frozen model is NOT ready', 
   assert.equal(engineReady(mismatched), false, 'centres without labels cannot name what a moment joined');
 
   const good = scratch('engine.json');
-  saveEngine({ vocab: ['the'], centroids: [[1, 0]], labels: ['asks-for-a-plan'], builtAt: 'x' }, good);
+  saveEngine({ vocab: ['the'], centroids: [[1, 0]], labels: ['asks-for-a-plan'], builtAt: 'x', pipeline: PIPELINE }, good);
   assert.equal(engineReady(good), true);
+});
+
+test('engineReady: centroids from a DIFFERENT runtime are NOT ready — the versioned-rebuild case', () => {
+  // THE RUNTIME CASE (0.6.0). Native vs WASM measured at cosine ~0.995 on identical texts: joining
+  // new vectors against foreign centres would silently corrupt every count in the profile. A stale
+  // or missing stamp routes the next consented update down the cold path — the announced rebuild.
+  const pre060 = scratch('engine.json');
+  saveEngine({ vocab: ['the'], centroids: [[1, 0]], labels: ['asks-for-a-plan'], builtAt: 'x' }, pre060);
+  assert.equal(engineReady(pre060), false, 'a pre-0.6.0 file has no stamp: stale');
+
+  const foreign = scratch('engine.json');
+  saveEngine({ vocab: ['the'], centroids: [[1, 0]], labels: ['asks-for-a-plan'], builtAt: 'x', pipeline: 'some-future-runtime' }, foreign);
+  assert.equal(engineReady(foreign), false, 'a different stamp is a different calculator: stale');
 });
 
 test('a corrupt engine file reads as not-ready rather than crashing a background worker', () => {

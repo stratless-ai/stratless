@@ -6,6 +6,36 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+## [0.6.0] · 2026-07-27 · nothing arrives until you say yes
+
+The npm package returns to **zero runtime dependencies**. 0.5.0's one dependency made a first-time
+`npx stratless` download 116MB — ~90% of it native binaries and image codecs the tool never runs.
+Now `npx stratless` costs you the tool alone, and everything the pattern-finding needs arrives
+once, at `init`, after your yes, itemized in the consent line.
+
+### Changed
+- **The engine arrives at consent, not with the package.** Saying yes at `init` fetches two things
+  into `~/.stratless/`: `@stratless/runtime` (~3MB — transformers.js and the ONNX WASM backend,
+  pre-bundled by us, from registry.npmjs.org) and the bge-small model weights (~34MB, from
+  huggingface.co). Both are pinned to exact versions and checksums in the published code; a
+  download that doesn't match its pin is refused, never installed. Nothing else ever downloads,
+  and the background refresh still fetches nothing, ever.
+- **The fingerprinting runtime is now WASM, permanently — standard over speed.** 0.5.0 believed it
+  ran on WASM; it actually ran a native binary that computes slightly different numbers on every
+  chip. WASM computes identical bits on every machine, which is the right foundation for a profile
+  that calls itself measured. The cost is honest: a full build now takes ~10 minutes instead of ~4.
+  The spend is unchanged (~$0.25 — the slow part is free and local).
+- **Because the runtime changed, your patterns need one rebuild.** The engine now stamps its frozen
+  state with the exact runtime and model that computed it, and refuses to mix stamps — silently
+  cross-matching two runtimes would quietly corrupt your counts. After updating, the next refresh
+  tells you plainly; one `stratless init` (fetches the ~3MB runtime; your model is already on
+  disk) and one `stratless update` rebuilds from your existing history. Nothing you collected is
+  lost.
+
+### Added
+- `@stratless/runtime` — a new companion package holding the pre-bundled WASM runtime. You never
+  install it yourself; the CLI fetches and verifies it at consent. Upstream licences ship inside.
+
 ## [0.5.0] · 2026-07-26 · a brief, not a portrait
 
 Two changes that go together. Your profile stops describing you and starts telling your assistant

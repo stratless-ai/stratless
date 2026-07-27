@@ -25,7 +25,8 @@ import { dirname, join } from 'node:path';
 
 import { appendCategories } from './categories.js';
 import { buildPiles, join as nearest, type Pile } from './cluster.js';
-import { embedAll, modelPresent } from './embed.js';
+import { MODEL, embedAll, runtimePresent } from './embed.js';
+import { MODEL_WEIGHTS_SHA256, RUNTIME_VERSION } from './fetch.js';
 import { namePiles, type Named } from './name.js';
 import { loadMoments, type Moment } from './moments.js';
 import { shapeOf, vocabulary } from './shape.js';
@@ -33,6 +34,14 @@ import { assignedKeys, writeAssignments, type Assignment } from './assign.js';
 
 /** Where the frozen model lives. Override with STRATLESS_ENGINE (tests). */
 const statePath = (): string => process.env.STRATLESS_ENGINE || join(homedir(), '.stratless', 'engine.json');
+
+/** What this build of the CLI fingerprints with — BOTH halves. The runtime is the accent (native
+ *  vs WASM measured at cosine ~0.995 on identical texts); the model is the LANGUAGE (different
+ *  weights = a different coordinate system entirely, not even comparably wrong). Centroids frozen
+ *  under any other stamp must never be joined against — so the stamp names the runtime version AND
+ *  the exact weights, and a change to either is a versioned, announced rebuild. The stamp, not
+ *  hope, decides compatibility. */
+export const PIPELINE = `stratless-runtime@${RUNTIME_VERSION} · ${MODEL}@${MODEL_WEIGHTS_SHA256.slice(0, 8)} · wasm`;
 
 /**
  * The frozen model — everything a later run needs to place a new moment without re-deriving anything.
@@ -47,6 +56,10 @@ export interface EngineState {
    *  produced, so a joining moment knows what it just became a member of */
   labels: string[];
   builtAt: string;
+  /** the runtime that computed these centroids (see PIPELINE). Absent on pre-0.6.0 files — which
+   *  reads as stale, exactly right: those centres came from the native runtime and must not be
+   *  joined against. */
+  pipeline?: string;
 }
 
 export function loadEngine(file: string = statePath()): EngineState | undefined {
@@ -66,10 +79,15 @@ export function loadEngine(file: string = statePath()): EngineState | undefined 
  * categories exist, so such a machine would take the steady path forever, find no centres to join
  * against, place nothing, and quietly stop updating — with no error and no sign anything was wrong.
  * The branch has to ask THIS question, not "are there categories".
+ *
+ * THE RUNTIME CASE is the same trap wearing 0.6.0's clothes: centroids frozen by a DIFFERENT
+ * runtime (the pre-0.6.0 native build, or any future engine bump) read as not-ready, which routes
+ * the next consented `update` down the cold path — the versioned, announced rebuild — instead of
+ * quietly mis-joining new WASM vectors against native centres forever.
  */
 export function engineReady(file: string = statePath()): boolean {
   const s = loadEngine(file);
-  return Boolean(s?.centroids.length && s.centroids.length === s.labels.length);
+  return Boolean(s?.centroids.length && s.centroids.length === s.labels.length && s.pipeline === PIPELINE);
 }
 
 export function saveEngine(state: EngineState, file: string = statePath()): void {
@@ -161,6 +179,7 @@ function freeze(moments: Moment[], piles: Pile[], named: Named[], vocab: Set<str
     centroids: kept.map((p) => [...p.centroid]),
     labels: kept.map((p) => labelOf.get(p.id) as string),
     builtAt: at,
+    pipeline: PIPELINE,
   });
 
   return { categories: named.length, scored: records.length, piles: piles.length };
@@ -168,6 +187,9 @@ function freeze(moments: Moment[], piles: Pile[], named: Named[], vocab: Set<str
 
 export interface GrowResult {
   scored: number;
+  /** the frozen centroids came from a different runtime — nothing was placed, because placing would
+   *  mis-join. The worker's branch already routes this to a cold rebuild; this is defense in depth. */
+  stale?: boolean;
 }
 
 /**
@@ -185,12 +207,18 @@ export async function grow(opts: { shouldStop?: () => boolean } = {}): Promise<G
   const state = loadEngine();
   if (!state?.centroids.length) return { scored: 0 };
 
+  // NEVER JOIN ACROSS RUNTIMES. engineReady() already routes a stale engine to the cold path, so
+  // this should be unreachable — but "should be" is not a property, and the cost of mis-joining
+  // (silently wrong counts in the profile) buys a two-line guard.
+  if (state.pipeline !== PIPELINE) return { scored: 0, stale: true };
+
   // THE BACKGROUND PATH NEVER FETCHES. `grow` runs unattended from the after-session hook, and the
-  // privacy docs promise that the refresh downloads nothing — so if the model is absent (deleted,
-  // an interrupted install), STOP rather than quietly pulling 34MB while someone is working. The
-  // moments stay pending and are placed once `init` has fetched it with consent. A promise about
-  // network behaviour has to be enforced here, not left true by luck.
-  if (!modelPresent()) return { scored: 0 };
+  // privacy docs promise that the refresh downloads nothing — so if the runtime or weights are
+  // absent (deleted, an interrupted install), STOP rather than quietly pulling ~40MB while someone
+  // is working. The moments stay pending and are placed once `init` has fetched them with consent.
+  // A promise about network behaviour has to be enforced here, not left true by luck. (The fake
+  // seam skips the check: under STRATLESS_FAKE_EMBED nothing can fetch, by construction.)
+  if (process.env.STRATLESS_FAKE_EMBED !== '1' && !runtimePresent()) return { scored: 0 };
 
   const seen = assignedKeys();
   const fresh = loadMoments().filter((m) => !seen.has(m.key));

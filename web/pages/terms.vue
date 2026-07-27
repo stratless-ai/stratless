@@ -54,7 +54,9 @@ useSeo({
             <strong>bge-small-en-v1.5</strong> (BAAI) — the model weights, ~34MB, MIT licence.
           </li>
           <li>
-            <strong>transformers.js</strong> (Xenova) — the runtime that executes them, Apache-2.0.
+            <strong>@stratless/runtime</strong> — the runtime that executes them (transformers.js,
+            Apache-2.0, and ONNX Runtime, MIT, pre-bundled to WASM; upstream licences ship inside
+            the package), ~3MB.
           </li>
         </ul>
         <p>
