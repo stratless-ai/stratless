@@ -53,11 +53,13 @@ useSeo({
           assistant's provider exactly as it does when you use it normally.
         </p>
         <p>
-          <strong>2. A one-time model download, at <code>init</code>, with your consent.</strong>
-          The pattern-finding runs on a small open-weights model (~34MB) that lives on your machine.
-          It has to arrive once. <code>init</code> tells you before it happens and asks; nothing
-          downloads in the background, and the after-session refresh never fetches anything. After
-          it lands, that step is permanently offline.
+          <strong>2. A one-time engine download, at <code>init</code>, with your consent.</strong>
+          The pattern-finding runs on a small local engine: a ~3MB runtime (from
+          registry.npmjs.org) and a ~34MB open-weights model (from huggingface.co), both pinned to
+          exact checksums in the tool's published code. They have to arrive once.
+          <code>init</code> itemizes them before it happens and asks; nothing downloads in the
+          background, the npm package itself carries zero dependencies, and the after-session
+          refresh never fetches anything. After they land, that step is permanently offline.
         </p>
         <p>
           <strong>3. The version check.</strong> <code>stratless status --check</code> asks the npm

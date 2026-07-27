@@ -4,29 +4,35 @@
  *
  * THIS IS THE STAGE THAT MADE v3 POSSIBLE. It replaces `assign`, which asked a borrowed model "does
  * this moment fit this category?" about 190,000 times per cold build — a reasoning engine doing a
- * lookup table's job, at $20.40 and forty minutes. This does the same work in ~90 seconds for $0,
- * and nothing leaves the machine.
+ * lookup table's job, at $20.40 and forty minutes. This does the same work locally for $0, and
+ * nothing leaves the machine.
  *
- * THE ONE DEPENDENCY. `bge-small-en-v1.5` (BAAI, MIT, ~34MB int8 ONNX) via `transformers.js`. This
- * is the first runtime dependency the CLI has ever taken, and it was taken deliberately:
+ * NOT A DEPENDENCY — AN ARRIVAL (0.6.0, Route B). The runtime that does the math is NOT in
+ * `package.json`: it arrives once, at `init`, after the person's yes — `@stratless/runtime`
+ * (transformers.js + the ONNX WASM backend, pre-bundled, ~3MB down) into `~/.stratless/runtime`,
+ * plus the bge-small weights (~34MB) beside it. `fetch.ts` owns the arrivals, pinned and
+ * checksummed; this module only ever LOADS what is already here, and refuses when it isn't.
  *
- *   · it BREAKS  "cli/ stays zero runtime dependency"
- *   · it KEEPS   "nothing leaves" — the model runs entirely here. The only network touch is the
- *                weights arriving ONCE, like an app update, never the person's data going out.
+ * WASM IS THE CANONICAL RUNTIME — STANDARD OVER SPEED (decided 2026-07-27). The WASM standard
+ * computes identical bits on every machine, so fingerprints are portable, cacheable, and
+ * comparable across time; the native runtime was ~7× faster but machine-flavored. (0.5.0
+ * believed two config lines here pinned WASM — they never did; transformers picks the native
+ * binary in Node unconditionally, which is why 0.6.0 rebuilds are versioned via the `pipeline`
+ * stamp in engine.json rather than assumed compatible.) A runtime change is ALWAYS a versioned,
+ * announced rebuild, never silent drift.
  *
- * ⚠️ THE WASM BACKEND IS PINNED, AND THAT IS NOT OPTIONAL. Left alone, `transformers.js` in Node
- * will load `onnxruntime-node` — a NATIVE binary — if it can resolve one. A native binary is exactly
- * the cross-platform install hazard the whole no-native-build choice exists to avoid: it fails at
- * `npm install` on someone else's machine, in a way we cannot reproduce or debug. WASM is slower and
- * cannot fail that way.
- *
- * LAZY BY CONSTRUCTION. The model is loaded on first use, never at import. `mirror` — the free read
- * that `npx stratless` runs, and the surface the launch points at — does pure arithmetic over logs
- * and must never touch a model. If importing this module downloaded 34MB, that would be broken.
+ * LAZY BY CONSTRUCTION. The runtime is loaded on first use, never at import. `mirror` — the free
+ * read that `npx stratless` runs, and the surface the launch points at — does pure arithmetic over
+ * logs and must never touch a model.
  */
 import { existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+import { runtimeDir, runtimeInstalled, fetchRuntime, modelWeights } from './fetch.js';
+
+export { runtimeDir, runtimeInstalled } from './fetch.js';
 
 /** BAAI, MIT-licensed, 384 dimensions. Strong on short informal text, no native build.
  *  (Runner-up: all-MiniLM-L6-v2 — smaller and measurably weaker on the harder behaviours.) */
@@ -51,14 +57,34 @@ type Extractor = (texts: string[], opts: { pooling: 'mean'; normalize: boolean }
 let extractor: Extractor | undefined;
 
 /**
- * Load the model, once per process. The import is dynamic so that merely importing this module costs
- * nothing — `mirror` imports the world and must stay instant.
+ * Load the runtime, once per process, from `~/.stratless/engine` — never from node_modules, which
+ * has nothing to offer. The import is dynamic so that merely importing this module costs nothing —
+ * `mirror` imports the world and must stay instant. Refuses (it does NOT fetch) when the runtime is
+ * absent or the weights on disk fail their pinned hash: a wrong fingerprint is worse than none.
  */
 async function load(): Promise<Extractor> {
   if (extractor) return extractor;
-  const { pipeline, env } = await import('@xenova/transformers');
-  // THE PIN. See the header — without these two lines the runtime may reach for a native binary.
+  if (!runtimeInstalled()) {
+    throw new Error('the local runtime is not installed — `stratless init` fetches it, with consent');
+  }
+  if (modelWeights() === 'mismatch') {
+    throw new Error('the model weights on disk do not match their pinned hash — refusing to fingerprint with an unverified model');
+  }
+  const { pipeline, env } = (await import(pathToFileURL(join(runtimeDir(), 'runtime.mjs')).href)) as {
+    pipeline: (task: string, model: string) => Promise<unknown>;
+    env: {
+      backends: { onnx: { wasm: { numThreads: number; wasmPaths: string } } };
+      allowLocalModels: boolean; localModelPath: string; cacheDir: string;
+    };
+  };
+  // ONE THREAD, DELIBERATELY: a fixed order of floating-point work is what makes "identical bits on
+  // every machine" true. Faster threaded WASM exists — it ships only if fingerprints survive it.
   env.backends.onnx.wasm.numThreads = 1;
+  // EXPLICIT, because the default is a trap: left alone, ort looks for its .wasm relative to the
+  // process's CWD (measured: `<cwd>/dist/ort-wasm-simd.wasm`), which happens to work exactly when
+  // a bundle sits in a folder named dist under wherever the person ran the command. The binary
+  // lives beside runtime.mjs; say so.
+  env.backends.onnx.wasm.wasmPaths = `${runtimeDir()}/`;
   env.allowLocalModels = true;
   env.localModelPath = modelDir();
   env.cacheDir = modelDir();
@@ -67,30 +93,44 @@ async function load(): Promise<Extractor> {
   return extractor;
 }
 
-/** Is the model already on this machine? `init` asks before offering to fetch it. */
+/** Are the weights already on this machine? One half of `runtimePresent`. */
 export function modelPresent(): boolean {
   return existsSync(join(modelDir(), MODEL.replace('/', '_'))) || existsSync(join(modelDir(), ...MODEL.split('/')));
 }
 
+/** Is EVERYTHING the engine needs on this machine — runtime files AND weights? `init` asks before
+ *  offering the fetch; the background paths refuse (never download) when this is false. */
+export function runtimePresent(): boolean {
+  return runtimeInstalled() && modelPresent();
+}
+
 /**
- * Fetch the weights if they are not here yet. Called by `init`, in the FOREGROUND, after consent —
- * never from the background Stop hook, which must stay silent and free. A ~34MB download that
- * happens invisibly while someone is working is a surprise, and surprises are how trust goes.
+ * Fetch whatever is missing — the runtime tarball, then the weights (the engine pulls them from
+ * Hugging Face on first load). Called by `init`, in the FOREGROUND, after consent — never from the
+ * background Stop hook, which must stay silent and free. Both arrivals verify against pinned
+ * hashes; a failure reports honestly and installs nothing.
  */
-export async function ensureModel(): Promise<void> {
+export async function ensureRuntime(): Promise<void> {
+  await fetchRuntime();
   await load();
+  const weights = modelWeights();
+  if (weights !== 'valid') {
+    throw new Error(weights === 'absent'
+      ? 'the model weights never arrived — check your connection and run `stratless init` again'
+      : 'the model weights do not match their pinned hash — refusing to keep an unverified model');
+  }
 }
 
 /**
  * Fingerprint every text. Returns unit vectors, so a dot product IS cosine everywhere downstream and
  * no stage has to remember to normalise.
  *
- * `onProgress` exists because this is the longest silent stretch in a cold build — a minute and a
- * half of nothing is indistinguishable from a hang, and the CLI has spinners on every other wait.
+ * `onProgress` exists because this is the longest silent stretch in a cold build — minutes of
+ * nothing is indistinguishable from a hang, and the CLI has spinners on every other wait.
  */
 export async function embedAll(texts: string[], onProgress?: (done: number, total: number) => void): Promise<Float32Array[]> {
   // TEST SEAM. The end-to-end worker tests (kill-safety, stop, the consent gate) exercise the real
-  // pipeline and must not download 34MB or reach the network to do it. This returns deterministic
+  // pipeline and must not download 40MB or reach the network to do it. This returns deterministic
   // vectors derived from the text itself — same text, same vector; similar text, similar vector —
   // which is every property the stages downstream actually depend on.
   if (process.env.STRATLESS_FAKE_EMBED === '1') return texts.map(fakeVector);

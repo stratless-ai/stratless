@@ -570,3 +570,33 @@ test('the door (init): arms the hook by default, shows a free read, defers the b
   assert.match(out, /Full profile:/, 'and the cost estimate');
   assert.match(out, /Build the full profile any time|No rush/, 'non-TTY defers the build, never prompts');
 });
+
+// ── status: WHICH build is loaded, not just whether ────────────────────────────────────────────
+
+test('status names the loaded build, flags a stale one, and never guesses without a stamp', () => {
+  const { env } = makeHome('loaded-stamp', [{ exchanges: 2 }]);
+  const childEnv = { ...process.env, ...env };
+  const run = (): string =>
+    execFileSync(process.execPath, [cli, 'status'], { encoding: 'utf8', env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+  // loaded = HUMAN.md exists AND CLAUDE.md carries the managed block — same rule as profileLoaded().
+  writeFileSync(env.STRATLESS_CLAUDE_MD, '<!-- stratless:start -->\n@HUMAN.md\n<!-- stratless:end -->\n');
+  const meta = { builtAt: '2026-07-26T16:01:22.000Z', sessions: 136, exchanges: 5751, categories: 30 };
+  writeFileSync(env.STRATLESS_RENDERS, JSON.stringify({ profile: meta, history: [meta] }));
+
+  // 1. the loaded file IS the latest build → the line says which, with the stamp
+  writeFileSync(env.STRATLESS_HUMAN_MD, '# Who you are working with\n# (managed by stratless)\n# built 2026-07-26 16:01 UTC\n\nbody\n');
+  assert.match(run(), /this build \(2026-07-26 16:01 UTC\)/, 'loaded == latest names the build');
+
+  // 2. the loaded file is an older build → flagged loudly, both stamps, and the fix
+  writeFileSync(env.STRATLESS_HUMAN_MD, '# Who you are working with\n# built 2026-07-24 02:12 UTC\n\nbody\n');
+  const stale = run();
+  assert.match(stale, /OLDER build \(2026-07-24 02:12 UTC\)/, 'a stale load is named, not hidden');
+  assert.match(stale, /latest is 2026-07-26 16:01 UTC/, 'with the stamp it should be on');
+  assert.match(stale, /stratless update/, 'and the one command that fixes it');
+
+  // 3. no `# built` header (a pre-0.4.0 file) → the plain line, no claim it cannot back
+  writeFileSync(env.STRATLESS_HUMAN_MD, 'no header here\n');
+  const plain = run();
+  assert.match(plain, /profile loaded\s+yes/, 'still honestly loaded');
+  assert.ok(!plain.includes('this build') && !plain.includes('OLDER'), 'no stamp, no claim');
+});

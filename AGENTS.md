@@ -11,7 +11,8 @@ product's *output*: a profile of a person.
 
 ## Layout
 
-- `cli/` — the tool. TypeScript, **one** runtime dep (the local embedding model — see `cli/AGENTS.md`), published standalone to npm.
+- `cli/` — the tool. TypeScript, **zero** runtime deps (the embedding runtime arrives at `init`'s consent, never via npm — see `cli/AGENTS.md`), published standalone to npm.
+- `runtime/` — `@stratless/runtime`: the embedding runtime (transformers.js + ONNX WASM), pre-bundled by us, fetched once at consent. Zero deps of its own; changes here are versioned rebuild events (see `runtime/AGENTS.md`).
 - `web/` — stratless.com. Nuxt 3, no modules, prerendered to static HTML.
 
 ## Commands (from the repo root)

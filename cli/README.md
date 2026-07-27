@@ -79,8 +79,9 @@ with no setup and no archive, so bare `npx stratless` (no verb) runs it too. `st
 `init` is the one thing you can't do later. Claude Code **deletes your transcripts after 30 days**,
 per file, so your history rots from the back even in a project you use every day. `init` stops that
 and copies everything somewhere safe. Everything else reads from there. Saying yes to the full build
-also fetches the local pattern-finding model, once (~34MB, named before you answer); after that,
-every build runs offline.
+also fetches the local pattern-finding machinery, once (~3MB runtime + ~34MB model, itemized before
+you answer); after that, every build runs offline. That is the **only** download door: the npm
+package itself has zero dependencies, and nothing heavier arrives until you say yes.
 
 ## How it works, there's no trick
 
@@ -111,10 +112,10 @@ a guess.
 Everything runs on your machine. **Your conversations, the moments stratless derives, and your
 profile never leave it**, not for telemetry, not for "aggregate insight," not ever. There is no
 server, no account, nothing to sign up for. Three things touch the network and the direction matters:
-the model weights come **in** once at `init` (with your consent, then permanently offline), the
-version check comes **in**, and the only thing that goes **out** is the borrowed call to your own
-assistant, on your
-own plan, the same place your code was already going.
+the local engine comes **in** once at `init` (with your consent — the runtime from
+registry.npmjs.org and the model weights from huggingface.co, both pinned and checksummed, then
+permanently offline), the version check comes **in**, and the only thing that goes **out** is the
+borrowed call to your own assistant, on your own plan, the same place your code was already going.
 
 The profile is a plain text file. It's yours: load it into any other assistant, read it, or delete
 it.

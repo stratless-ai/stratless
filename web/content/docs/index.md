@@ -29,7 +29,7 @@ That does two things, and the first one is urgent:
 1. **Stops the reaper.** Claude Code deletes your transcripts after 30 days, per file, so your history rots from the back even in a project you open every day. `init` stops that and archives everything it can still reach. Whatever has already aged out is gone. This is the only part of stratless you cannot do later.
 2. **Turns it on.** From here, stratless keeps your history, and after each session it reads what is new in the background and keeps your profile current. `stop` turns that off whenever you want.
 
-Building the full profile is a separate yes: `init` shows you a free read and an honest quote first, and if you say yes it fetches a small local model (~34MB) once — the pattern-finding runs on your machine, offline, from then on.
+Building the full profile is a separate yes: `init` shows you a free read and an honest quote first, and if you say yes it fetches the local engine once — a ~3MB runtime plus a ~34MB open-weights model, itemized before you answer — and the pattern-finding runs on your machine, offline, from then on. The npm package itself has zero dependencies; nothing heavier than the tool arrives until that yes.
 
 ## The commands
 

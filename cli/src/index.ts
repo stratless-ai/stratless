@@ -15,7 +15,7 @@ import { loadAssignments } from './assign.js';
 import { join as joinLabelled, misfitRate } from './count.js';
 import { findAssistant, onPath } from './claude.js';
 import { init as doInit, ARCHIVE, PROJECTS, stopRefresh, refreshArmed, type InitResult } from './init.js';
-import { ensureModel, modelPresent, modelDir } from './embed.js';
+import { runtimeDir, runtimeInstalled, ensureRuntime, runtimePresent, modelPresent, modelDir } from './embed.js';
 import { dailyCheck, fetchLatest, newerThan } from './notify.js';
 import { loadRecentExchanges } from './exchange.js';
 import { removeProfile, humanMdPath, claudeMdPath } from './sink.js';
@@ -160,6 +160,16 @@ function profileLoaded(): boolean {
     );
   } catch {
     return false; // treat unreadable as not-loaded
+  }
+}
+
+/** The `# built` stamp inside the LOADED HUMAN.md — WHICH build the assistant is actually reading,
+ *  not just whether one is. undefined when the file is absent or predates the stamp (pre-0.4.0). */
+function loadedBuiltStamp(): string | undefined {
+  try {
+    return readFileSync(humanMdPath(), 'utf8').slice(0, 400).match(/^# built (.+)$/m)?.[1]?.trim();
+  } catch {
+    return undefined;
   }
 }
 
@@ -485,6 +495,9 @@ async function stop(): Promise<void> {
   if (existsSync(modelDir())) {
     console.log(`  ${C.dim(`The local model (~34MB) is still at ${modelDir()} — remove it if you want the disk back.`)}`);
   }
+  if (runtimeInstalled()) {
+    console.log(`  ${C.dim(`The local runtime (~11MB) is still at ${runtimeDir()} — remove it if you want the disk back.`)}`);
+  }
   console.log(`  ${C.dim(`Run \`${hint('stratless update')}\` to load it again, \`${hint('stratless init')}\` to turn the refresh back on.`)}\n`);
 }
 
@@ -583,7 +596,19 @@ async function status(rest: string[] = []): Promise<void> {
       }
     }
   }
-  console.log(`    profile loaded          ${loaded ? C.ok('yes') : C.dim('no')}${humanExists ? `  ${C.dim(human)}` : ''}`);
+  // WHICH build is loaded, not just whether. The file's own `# built` stamp is compared to the
+  // latest build's — they diverge only when a rebuild never loaded, a `stop` unloaded, or the file
+  // was replaced by hand: exactly the states a bare "yes" would hide. Same stamp formula on both
+  // sides (sink.ts writes it, builtStamp renders it), so agreement is exact, never fuzzy.
+  const loadedStamp = loaded ? loadedBuiltStamp() : undefined;
+  const latestStamp = builds.length ? builtStamp(builds[0].builtAt) : undefined;
+  if (loaded && loadedStamp && latestStamp && loadedStamp !== latestStamp) {
+    console.log(`    profile loaded          ${C.ok('yes')}  ${C.warn(`an OLDER build (${loadedStamp})`)} ${C.dim(`— latest is ${latestStamp} · load it: ${hint('stratless update')}`)}`);
+  } else if (loaded && loadedStamp) {
+    console.log(`    profile loaded          ${C.ok('yes')}  ${C.dim(`${latestStamp ? 'this build' : 'built'} (${loadedStamp}) · ${human}`)}`);
+  } else {
+    console.log(`    profile loaded          ${loaded ? C.ok('yes') : C.dim('no')}${humanExists ? `  ${C.dim(human)}` : ''}`);
+  }
 
   // RECENT BUILDS — when it last updated, and how the pile is growing. The trust surface: a person
   // sees their profile is kept fresh, never silently frozen. Newest first, the latest one flagged.
@@ -737,11 +762,16 @@ async function main(): Promise<void> {
     const est = pile > 0 ? estimateBuild(pile) : estimateFromMessages(mirror!.scale.messages);
     console.log(`\n  ${C.dim('Full profile:')}    ${C.b(estimateLine(est))}   ${C.dim('built on your own claude, nothing leaves.')}`);
     // THE DOWNLOAD IS PART OF THE ASK. Most of the build now runs on a small local model, which is
-    // why it costs cents instead of dollars — but it is ~34MB and it has to arrive once. Consenting
-    // to a build must mean consenting to that, said out loud, before the yes. Silently pulling 34MB
+    // why it costs cents instead of dollars — but the engine (~3MB runtime) and its weights (~34MB)
+    // have to arrive once, and neither is in the npm package. Consenting to a build must mean
+    // consenting to that, said out loud and itemized, before the yes. Silently pulling ~40MB
     // because someone agreed to a price is the kind of surprise the whole door exists to prevent.
-    if (!modelPresent()) {
-      console.log(`  ${C.dim('One-time:')}         ${C.b('~34MB local model')}   ${C.dim('downloaded once, then every build runs offline.')}`);
+    if (!runtimePresent()) {
+      const arriving = [
+        !runtimeInstalled() ? 'local runtime (~3MB)' : '',
+        !modelPresent() ? 'local model (~34MB)' : '',
+      ].filter(Boolean).join(' + ');
+      console.log(`  ${C.dim('One-time:')}         ${C.b(arriving)}   ${C.dim('downloaded once, then every build runs offline.')}`);
     }
 
     // 4. the one consent. Only a real terminal can say yes; a pipe or a missing assistant points to
@@ -757,15 +787,15 @@ async function main(): Promise<void> {
       }
       if (yes) {
         // FOREGROUND, on the consented path only. The background Stop hook must never do this: a
-        // 34MB fetch that happens invisibly while someone is working is exactly the surprise the
+        // ~40MB fetch that happens invisibly while someone is working is exactly the surprise the
         // door exists to prevent. If it fails, say so and stop — the build would only fail later.
-        if (!modelPresent()) {
-          const stopFetch = startSpinner('fetching the local model (one time, ~34MB)…', process.stdout);
+        if (!runtimePresent()) {
+          const stopFetch = startSpinner('fetching the local runtime (one time)…', process.stdout);
           try {
-            await ensureModel();
+            await ensureRuntime();
           } catch (err) {
             stopFetch();
-            console.error(`\n  ${C.bad('could not download the local model.')}`);
+            console.error(`\n  ${C.bad('could not download the local runtime.')}`);
             console.error(`  ${C.dim(String(err instanceof Error ? err.message : err))}`);
             console.error(`  ${C.dim(`check your connection and run ${hint('stratless init')} again.`)}\n`);
             process.exit(1);

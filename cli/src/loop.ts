@@ -187,8 +187,15 @@ export async function runWorker(): Promise<number> {
         if (!consented) {
           flush = false; // nothing scored, no profile yet — skip the scoreboard/rebuild block below
           const est = estimateLine(estimateBuild(loadMoments().length));
+          // TWO WAYS TO LAND HERE, and they deserve different words: a fresh machine that has never
+          // built, and a machine whose frozen centroids predate the current runtime/model stamp
+          // (the 0.6.0 migration, or any future versioned change). The second person HAS a profile
+          // — telling them "full build not run yet" would be a wrong reason, and a wrong reason is
+          // worse than none.
           summary.push(
-            `collected ${built.total} moment${built.total === 1 ? '' : 's'} · full build not run yet — run \`stratless update\` to build your profile (${est})`,
+            cats.length
+              ? `the engine changed — your patterns need one rebuild to stay honest: run \`stratless update\` (${est})`
+              : `collected ${built.total} moment${built.total === 1 ? '' : 's'} · full build not run yet — run \`stratless update\` to build your profile (${est})`,
           );
         } else {
           // COLD START: the engine shapes, fingerprints, clusters, names, and freezes. Everything up
@@ -212,8 +219,8 @@ export async function runWorker(): Promise<number> {
             );
           } else if (dr.noModel) {
             // A wrong reason is worse than none: without this the person is told there is not enough
-            // behaviour to profile, when in fact the model never arrived.
-            summary.push('the local model is not available yet — run `stratless init` to fetch it, then `stratless update`');
+            // behaviour to profile, when in fact the engine never arrived (or was deleted).
+            summary.push('the local engine is not on this machine yet — run `stratless init` to fetch it, then `stratless update`');
           } else if (!bin) {
             summary.push('no assistant found to name the patterns — install Claude Code, then run `stratless update`');
           } else {
