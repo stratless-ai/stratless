@@ -41,7 +41,7 @@ const statePath = (): string => process.env.STRATLESS_ENGINE || join(homedir(), 
  *  under any other stamp must never be joined against — so the stamp names the runtime version AND
  *  the exact weights, and a change to either is a versioned, announced rebuild. The stamp, not
  *  hope, decides compatibility. */
-export const PIPELINE = `stratless-runtime@${RUNTIME_VERSION} · ${MODEL}@${MODEL_WEIGHTS_SHA256.slice(0, 8)} · wasm`;
+export const PIPELINE = `stratless-runtime@${RUNTIME_VERSION} · ${MODEL}@${MODEL_WEIGHTS_SHA256.slice(0, 8)} · wasm · b1`;
 
 /**
  * The frozen model — everything a later run needs to place a new moment without re-deriving anything.
