@@ -163,6 +163,16 @@ function profileLoaded(): boolean {
   }
 }
 
+/** The `# built` stamp inside the LOADED HUMAN.md — WHICH build the assistant is actually reading,
+ *  not just whether one is. undefined when the file is absent or predates the stamp (pre-0.4.0). */
+function loadedBuiltStamp(): string | undefined {
+  try {
+    return readFileSync(humanMdPath(), 'utf8').slice(0, 400).match(/^# built (.+)$/m)?.[1]?.trim();
+  } catch {
+    return undefined;
+  }
+}
+
 /** The one honest footer a look shares. */
 function lookFooter(): void {
   console.log(
@@ -583,7 +593,19 @@ async function status(rest: string[] = []): Promise<void> {
       }
     }
   }
-  console.log(`    profile loaded          ${loaded ? C.ok('yes') : C.dim('no')}${humanExists ? `  ${C.dim(human)}` : ''}`);
+  // WHICH build is loaded, not just whether. The file's own `# built` stamp is compared to the
+  // latest build's — they diverge only when a rebuild never loaded, a `stop` unloaded, or the file
+  // was replaced by hand: exactly the states a bare "yes" would hide. Same stamp formula on both
+  // sides (sink.ts writes it, builtStamp renders it), so agreement is exact, never fuzzy.
+  const loadedStamp = loaded ? loadedBuiltStamp() : undefined;
+  const latestStamp = builds.length ? builtStamp(builds[0].builtAt) : undefined;
+  if (loaded && loadedStamp && latestStamp && loadedStamp !== latestStamp) {
+    console.log(`    profile loaded          ${C.ok('yes')}  ${C.warn(`an OLDER build (${loadedStamp})`)} ${C.dim(`— latest is ${latestStamp} · load it: ${hint('stratless update')}`)}`);
+  } else if (loaded && loadedStamp) {
+    console.log(`    profile loaded          ${C.ok('yes')}  ${C.dim(`${latestStamp ? 'this build' : 'built'} (${loadedStamp}) · ${human}`)}`);
+  } else {
+    console.log(`    profile loaded          ${loaded ? C.ok('yes') : C.dim('no')}${humanExists ? `  ${C.dim(human)}` : ''}`);
+  }
 
   // RECENT BUILDS — when it last updated, and how the pile is growing. The trust surface: a person
   // sees their profile is kept fresh, never silently frozen. Newest first, the latest one flagged.
