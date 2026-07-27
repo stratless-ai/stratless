@@ -6,6 +6,23 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+## [0.6.2] · 2026-07-27 · many hands, same fingerprints
+
+A full build now takes ~2.7 minutes — and unlike every speedup before it, this one changes
+nothing else. No rebuild, no migration, no download: your patterns, your profile, and every
+fingerprint stay byte-for-byte what they were.
+
+### Changed
+- **Fingerprinting fans out across up to 4 workers on multi-core machines.** Each worker runs its
+  own copy of the local runtime and fingerprints its share of your history one text at a time.
+  This is safe *because* of 0.6.1: a fingerprint no longer depends on which texts are processed
+  together, so splitting the work cannot change a single bit — and that is enforced, not assumed:
+  the pooled path ships gated on producing hash-identical output to the sequential path, verified
+  on a real archive. Measured: the fingerprint stage dropped from ~2.4 minutes to ~47 seconds,
+  and the one paid call (naming) is now the longest single stage of a build. Machines with few
+  cores, small daily refreshes, and any pool failure all fall back to the sequential path
+  automatically — slower, never wronger.
+
 ## [0.6.1] · 2026-07-27 · one text at a time
 
 Builds got 2.3× faster by deleting an assumption, and fingerprints became fully reproducible.

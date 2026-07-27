@@ -60,8 +60,18 @@ export const modelDir = (): string => process.env.STRATLESS_MODELS || join(homed
 const BATCH = 1;
 
 /** BGE's window. Beyond this the tokenizer truncates from the END — and the end of a reply is often
- *  where the person's point lands, so we cap deliberately rather than letting it happen silently. */
-const MAX_CHARS = 512;
+ *  where the person's point lands, so we cap deliberately rather than letting it happen silently.
+ *  Exported for `embedworker.ts`, which must slice identically or bit-identity breaks. */
+export const MAX_CHARS = 512;
+
+/** Below this many texts the pool is not worth its worker startup (~1s) — and `grow`'s daily
+ *  handful must never pay it. At or above it (cold builds, migrations), fingerprinting fans out. */
+const POOL_MIN = 256;
+
+/** Never more than 4 workers: measured on an 8-core/4-performance-core laptop, K=4 gave 3.07× and
+ *  K=8 was SLOWER and 2× the memory (efficiency cores + startup don't pay). Each worker holds its
+ *  own runtime + weights (~260MB); 4 keeps peak ~1GB. */
+const POOL_MAX = 4;
 
 type Extractor = (texts: string[], opts: { pooling: 'mean'; normalize: boolean }) => Promise<{
   data: Float32Array; dims: number[];
@@ -70,12 +80,15 @@ type Extractor = (texts: string[], opts: { pooling: 'mean'; normalize: boolean }
 let extractor: Extractor | undefined;
 
 /**
- * Load the runtime, once per process, from `~/.stratless/engine` — never from node_modules, which
+ * Load the runtime, once per process, from `~/.stratless/runtime` — never from node_modules, which
  * has nothing to offer. The import is dynamic so that merely importing this module costs nothing —
  * `mirror` imports the world and must stay instant. Refuses (it does NOT fetch) when the runtime is
  * absent or the weights on disk fail their pinned hash: a wrong fingerprint is worse than none.
+ *
+ * Exported for `embedworker.ts`: every pool worker loads through THIS function, so the pins
+ * (single thread, wasmPaths, local-only models) have exactly one home.
  */
-async function load(): Promise<Extractor> {
+export async function loadExtractor(): Promise<Extractor> {
   if (extractor) return extractor;
   if (!runtimeInstalled()) {
     throw new Error('the local runtime is not installed — `stratless init` fetches it, with consent');
@@ -125,7 +138,7 @@ export function runtimePresent(): boolean {
  */
 export async function ensureRuntime(): Promise<void> {
   await fetchRuntime();
-  await load();
+  await loadExtractor();
   const weights = modelWeights();
   if (weights !== 'valid') {
     throw new Error(weights === 'absent'
@@ -147,7 +160,20 @@ export async function embedAll(texts: string[], onProgress?: (done: number, tota
   // vectors derived from the text itself — same text, same vector; similar text, similar vector —
   // which is every property the stages downstream actually depend on.
   if (process.env.STRATLESS_FAKE_EMBED === '1') return texts.map(fakeVector);
-  const embed = await load();
+  // THE POOL. Big jobs (cold builds, migrations) fan out across up to POOL_MAX workers, each with
+  // its own single-threaded runtime, each fingerprinting one text at a time. SAFE ONLY BECAUSE OF
+  // BATCH=1: fingerprints are grouping-independent, so sharding cannot change a single bit —
+  // measured 3.07× on a real pile with hashes equal to the sequential run. A pool problem must
+  // never fail a build, so any worker error falls back to the sequential path below; and
+  // STRATLESS_NO_POOL=1 is the escape hatch (also how the bit-identity test gets its reference).
+  if (texts.length >= POOL_MIN && process.env.STRATLESS_NO_POOL !== '1' && runtimePresent()) {
+    try {
+      return await embedPooled(texts, onProgress);
+    } catch {
+      /* fall through — sequential embedding answers every question the pool can't */
+    }
+  }
+  const embed = await loadExtractor();
   const out: Float32Array[] = [];
   for (let i = 0; i < texts.length; i += BATCH) {
     const chunk = texts.slice(i, i + BATCH).map((t) => t.slice(0, MAX_CHARS) || '.');
@@ -156,6 +182,53 @@ export async function embedAll(texts: string[], onProgress?: (done: number, tota
     for (let j = 0; j < chunk.length; j++) out.push(Float32Array.from(res.data.slice(j * dim, (j + 1) * dim)));
     onProgress?.(Math.min(i + BATCH, texts.length), texts.length);
   }
+  return out;
+}
+
+/**
+ * Fan the texts out across workers as contiguous shards and reassemble in order. Progress is
+ * reported as 640-multiples only — the cold build's throttle prints on exact multiples, and the
+ * pool's aggregate counts would otherwise never land on one.
+ */
+async function embedPooled(texts: string[], onProgress?: (done: number, total: number) => void): Promise<Float32Array[]> {
+  const { Worker } = await import('node:worker_threads');
+  const { availableParallelism } = await import('node:os');
+  const k = Math.min(POOL_MAX, Math.max(1, availableParallelism() - 1));
+  if (k < 2) throw new Error('no parallelism to pool');
+
+  const shards: string[][] = [];
+  const base = Math.floor(texts.length / k);
+  let off = 0;
+  for (let w = 0; w < k; w++) {
+    const size = base + (w < texts.length % k ? 1 : 0);
+    shards.push(texts.slice(off, off + size));
+    off += size;
+  }
+
+  const progress = new Array<number>(k).fill(0);
+  let lastMilestone = 0;
+  const flats = await Promise.all(shards.map((shard, w) => new Promise<Float32Array>((resolve, reject) => {
+    const worker = new Worker(new URL('./embedworker.js', import.meta.url), { workerData: { texts: shard } });
+    worker.on('message', (m: { progress?: number; done?: ArrayBuffer }) => {
+      if (m.done) return resolve(new Float32Array(m.done));
+      progress[w] = m.progress ?? 0;
+      const total = progress.reduce((a, b) => a + b, 0);
+      const milestone = Math.floor(total / 640) * 640;
+      if (milestone > lastMilestone) {
+        lastMilestone = milestone;
+        onProgress?.(milestone, texts.length);
+      }
+    });
+    worker.on('error', reject);
+    worker.on('exit', (code) => { if (code !== 0) reject(new Error(`embed worker exited ${code}`)); });
+  })));
+
+  const out: Float32Array[] = [];
+  shards.forEach((shard, w) => {
+    const flat = flats[w];
+    const dim = shard.length ? flat.length / shard.length : 0;
+    for (let i = 0; i < shard.length; i++) out.push(flat.subarray(i * dim, (i + 1) * dim));
+  });
   return out;
 }
 
