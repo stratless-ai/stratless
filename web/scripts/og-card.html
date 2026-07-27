@@ -8,10 +8,11 @@
 <meta charset="utf-8">
 <style>
   @font-face { font-family: 'Space Grotesk'; src: url('/fonts/space-grotesk.woff2') format('woff2'); font-weight: 400 700; }
-  <!-- Epetri is INLINED here because public/fonts/epetri.woff2 no longer exists — it was subset and
-       embedded into assets/css/main.css on 2026-07-20 so the wordmark never renders in a fallback.
-       This is a copy of that same base64. If you re-subset Epetri, re-copy it here too, or this
-       card regenerates with a monospace wordmark. -->
+  /* Epetri is INLINED here because public/fonts/epetri.woff2 no longer exists — it was subset and
+     embedded into assets/css/main.css on 2026-07-20 so the wordmark never renders in a fallback.
+     This is a copy of that same base64. If you re-subset Epetri, re-copy it here too, or this
+     card regenerates with a monospace wordmark. (A CSS comment, not an HTML one: an HTML comment
+     inside <style> parses as a garbage rule that swallows the @font-face below it.) */
   @font-face { font-family: 'Epetri'; src: url('data:font/woff2;base64,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') format('woff2'); }
   :root {
     --paper: #e9e5d8; --paper-2: #f4f1e8; --ink: #15140f; --ink-2: #46443d;
@@ -66,7 +67,7 @@
 </style>
 <div class="card">
   <div class="logo"><img src="/favicon.svg" alt=""><span class="wordmark">tratless</span></div>
-  <h1>Your AI knows your code.<br>It doesn't know you.</h1>
+  <h1>Made for your AI.<br>Meant for you.</h1>
   <p class="sub">stratless reads your chats and teaches your AI <b>who you are</b>,<br>so it stops talking over your head or under it.</p>
   <div class="foot">
     <span class="site">stratless.com</span>

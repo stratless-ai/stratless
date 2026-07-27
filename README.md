@@ -9,7 +9,7 @@
 
 [![npm](https://img.shields.io/npm/v/stratless?color=cb3837&logo=npm&logoColor=white)](https://www.npmjs.com/package/stratless)
 [![tests](https://img.shields.io/github/actions/workflow/status/stratless-ai/stratless/cli.yml?branch=main&label=tests)](https://github.com/stratless-ai/stratless/actions/workflows/cli.yml)
-[![runtime deps](https://img.shields.io/badge/runtime%20deps-1%2C%20the%20local%20model-3fb950)](cli/package.json)
+[![runtime deps](https://img.shields.io/badge/runtime%20deps-0-3fb950)](cli/package.json)
 [![license](https://img.shields.io/npm/l/stratless?color=3fb950)](LICENSE)
 
 [stratless.com](https://stratless.com) &nbsp;·&nbsp; [npm](https://www.npmjs.com/package/stratless) &nbsp;·&nbsp; [How it works](#how-it-works-theres-no-trick) &nbsp;·&nbsp; [Privacy](#privacy)
