@@ -58,6 +58,12 @@ export interface Mirror {
     pastes: number;
     /** one unit: one image carried by a submitted message */
     images: number;
+    /** the person's most-repeated messages — one unit: one submitted, non-pasted message whose
+     *  entire trimmed text is exactly this. "Repeated" means count ≥ 2 by definition, not a tuned
+     *  threshold; top 8 kept, ties broken by text so the list is stable across runs. THE ONE
+     *  TEXT-CARRYING FIELD in the Mirror: it exists for the person's own terminal, and the share
+     *  card must never draw it (renderCard states the rule). */
+    repeated: { text: string; count: number }[];
   };
   friction: {
     /** one unit: one Escape pressed mid-generation. NOT the same event as a tool decline. */
@@ -169,6 +175,7 @@ export function personTopics(titles: { aiTitle: string; sessionId: string }[], p
  *  the per-metric tallies and the friction receipts. */
 export function mirrorOf(turns: Iterable<Turn>, titles: { aiTitle: string; sessionId: string }[] = []): Mirror {
   const lens: number[] = [];
+  const exactCounts = new Map<string, number>();
   const byHour = new Array(24).fill(0) as number[];
   const dayCounts = new Map<string, number>();
   const frictionDays = new Set<string>();
@@ -245,6 +252,8 @@ export function mirrorOf(turns: Iterable<Turn>, titles: { aiTitle: string; sessi
     if (t.pasted) {
       pastes++;
     } else {
+      const trimmed = t.text.trim();
+      if (trimmed) exactCounts.set(trimmed, (exactCounts.get(trimmed) ?? 0) + 1);
       const w = words(t.text);
       lens.push(w);
       if (w <= 4) terse++;
@@ -286,6 +295,11 @@ export function mirrorOf(turns: Iterable<Turn>, titles: { aiTitle: string; sessi
       questionShare: messages ? questions / messages : 0,
       pastes,
       images,
+      repeated: [...exactCounts.entries()]
+        .filter(([, c]) => c >= 2)
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .slice(0, 8)
+        .map(([text, count]) => ({ text, count })),
     },
     friction: {
       courseCorrections,

@@ -228,3 +228,39 @@ test('mirrorOfArchiveAsync is a faithful twin: same mirror as the sync read, onl
   assert.deepEqual(await mirrorOfArchiveAsync(dir), mirrorOfArchive(dir), 'yielding for the spinner must not change a single number');
   rmSync(dir, { recursive: true });
 });
+
+test('repeated messages are exact-text counts — trimmed, pastes excluded, a true repeat required', () => {
+  const m = mirrorOf([
+    msg('go'),
+    msg('go '),
+    msg('go'),
+    msg('ok'),
+    msg('ship it', { pasted: true }),
+    msg('ship it', { pasted: true }),
+  ]);
+  assert.deepEqual(
+    m.writing.repeated,
+    [{ text: 'go', count: 3 }],
+    '"go " trims into "go"; a single "ok" is not a repeat; two pasted twins never count',
+  );
+});
+
+test('repeated messages rank by count then text, and cap at eight', () => {
+  const turns = [];
+  for (const [text, k] of [
+    ['b', 2],
+    ['a', 2],
+    ['c', 3],
+  ] as const) {
+    for (let i = 0; i < k; i++) turns.push(msg(text));
+  }
+  assert.deepEqual(
+    mirrorOf(turns).writing.repeated.map((r) => r.text),
+    ['c', 'a', 'b'],
+    'count descending, then alphabetical — the list must not reshuffle between identical runs',
+  );
+
+  const many = [];
+  for (let i = 0; i < 10; i++) for (let k = 0; k < 2; k++) many.push(msg(`repeat ${i}`));
+  assert.equal(mirrorOf(many).writing.repeated.length, 8, 'ten qualifying repeats keep only the top eight');
+});

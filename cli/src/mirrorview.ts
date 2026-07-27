@@ -78,9 +78,12 @@ export function renderMirror(m: Mirror, opts: { full?: boolean } = {}): MirrorRo
     value: `${messages.toLocaleString()} messages · ${m.scale.activeDays} active day${m.scale.activeDays === 1 ? '' : 's'}`,
   });
 
-  // FULL (the `mirror` read, not the init door's tight teaser): the span and the writing fingerprint.
-  // Both are already computed for the free read — the door just keeps them tucked away.
+  // FULL (the `mirror` read, not the init door's tight teaser): everything below the anchor that
+  // is already computed for the free read — the door keeps its four-row teaser untouched.
   if (opts.full) {
+    if (m.scale.medianPerActiveDay) {
+      rows.push({ label: 'a median day', value: `${m.scale.medianPerActiveDay} messages` });
+    }
     if (m.scale.firstMessage && m.scale.lastMessage) {
       rows.push({
         label: 'span',
@@ -88,32 +91,75 @@ export function renderMirror(m: Mirror, opts: { full?: boolean } = {}): MirrorRo
       });
     }
     rows.push(writingRow(m));
+    // The one row that quotes the person instead of counting them. Terminal only — the card
+    // never draws `writing.repeated` (see renderCard).
+    if (m.writing.repeated.length) {
+      rows.push({
+        label: 'what you keep typing',
+        value: m.writing.repeated
+          .slice(0, 3)
+          .map((r) => `"${r.text}" ${r.count}×`)
+          .join(' · '),
+      });
+    }
+    if (m.writing.images) rows.push({ label: 'screenshots sent', value: m.writing.images.toLocaleString() });
   }
 
   // The two friction numbers, reported separately (never summed).
   rows.push(...frictionRows(m, messages));
 
-  // Busiest repo, by messages typed in it.
+  if (opts.full) {
+    if (m.friction.daysWithAny) {
+      rows.push({ label: 'friction days', value: `${m.friction.daysWithAny} of ${m.scale.activeDays} active days` });
+    }
+    // mirror.ts:69 promises the excluded interrupts are "shown, never silently dropped" — this row
+    // is where that promise is kept.
+    if (m.friction.permissionStops || m.friction.systemBlocks) {
+      rows.push({
+        label: 'not counted against you',
+        value: `${m.friction.permissionStops} permission stops · ${m.friction.systemBlocks} system blocks`,
+      });
+    }
+  }
+
+  // Busiest repo, by messages typed in it — the full read carries the spread beside it.
   const topRepo = m.context.repos.reduce<{ root: string; messages: number } | undefined>(
     (best, r) => (!best || r.messages > best.messages ? r : best),
     undefined,
   );
-  if (topRepo) rows.push({ label: 'busiest repo', value: basename(topRepo.root) });
+  if (topRepo) {
+    const spread =
+      opts.full && m.context.repos.length > 1 && m.context.branchNames
+        ? ` · across ${m.context.repos.length} repos · ${m.context.branchNames} branches`
+        : '';
+    rows.push({ label: 'busiest repo', value: basename(topRepo.root) + spread });
+  }
 
-  // Most-used tool, as a share of all tool calls.
-  const tool = topToolRow(m);
-  if (tool) rows.push(tool);
+  // Tools: the full read shows the scale of delegation and the mix; the door keeps the single
+  // top tool it has always shown.
+  if (opts.full && m.work.toolCalls) {
+    const mix = m.work.toolMix
+      .slice(0, 2)
+      .map((t) => `${t.name} ${Math.round(100 * t.share)}%`)
+      .join(' · ');
+    rows.push({ label: 'tools it ran for you', value: `${m.work.toolCalls.toLocaleString()} calls · ${mix}` });
+  } else {
+    const tool = topToolRow(m);
+    if (tool) rows.push(tool);
+  }
 
   return rows;
 }
 
 /**
  * THE SHAREABLE CARD — the same free read, curated to the UNIVERSAL, name-safe surface so it is safe
- * to screenshot and forward (the viral unit the launch carries). It is `renderMirror` minus the one
- * identifying row — `busiest repo`, whose value is a repo basename that can be a client or project
- * name — and it never touches `topics` (session titles) either. Everything left is an aggregate; the
- * mirror holds no raw message text, so the card leaks nothing. Neutral labels only: the post brands
- * the number ("AI Brain Fry" etc.), the tool never marries a noun that might not stick.
+ * to screenshot and forward (the viral unit the launch carries). The rule: the card draws ONLY from
+ * aggregate number fields. It omits `busiest repo` (a repo basename can be a client or project name),
+ * never touches `topics` (session titles), and never touches `writing.repeated` — the Mirror's one
+ * text-carrying field, which exists for the person's own terminal alone. Any future field that
+ * carries text is terminal-only by default; the card must opt nothing in without this comment
+ * changing. Neutral labels only: the post brands the number ("AI Brain Fry" etc.), the tool never
+ * marries a noun that might not stick.
  */
 export function renderCard(m: Mirror): MirrorRow[] {
   const messages = m.scale.messages;
@@ -131,7 +177,8 @@ export function renderCard(m: Mirror): MirrorRow[] {
   const tool = topToolRow(m);
   if (tool) rows.push(tool);
 
-  // Deliberately omitted: `busiest repo` (a repo basename can name a client/project) and `topics`
-  // (session titles). Universal numbers only — nothing here can carry a name.
+  // Deliberately omitted: `busiest repo` (a repo basename can name a client/project), `topics`
+  // (session titles), and `writing.repeated` (the person's own words). Universal numbers only —
+  // nothing here can carry a name or a quote.
   return rows;
 }
