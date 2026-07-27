@@ -42,9 +42,22 @@ export const MODEL = 'Xenova/bge-small-en-v1.5';
  *  does not re-download 34MB, and `stop` can reason about everything stratless put on the disk. */
 export const modelDir = (): string => process.env.STRATLESS_MODELS || join(homedir(), '.stratless', 'models');
 
-/** How many texts ride in one forward pass. Bigger is faster until memory; 32 is comfortable on a
- *  laptop and the whole pass is under two minutes on a 5,000-moment pile. */
-const BATCH = 32;
+/** How many texts ride in one forward pass. ONE, measured, and the number is load-bearing twice.
+ *
+ *  SPEED: a batch must be a rectangle — every text padded to the batch's longest — and on the
+ *  single-thread WASM runtime every padded blank is paid in real serial time. Shaped texts are
+ *  short (median ~55 chars) with rare 512-char outliers, so batches of 32 were 73% padding;
+ *  batch-of-one computes exactly each text and measured 3.7× faster (2026-07-27). The old
+ *  "bigger is faster until memory" was true on the multi-core native runtime and inverted when
+ *  the runtime changed — a tuning constant is a claim about hardware, and it expired.
+ *
+ *  DETERMINISM: the int8 model picks its quantization scales per forward pass, so batch-mates
+ *  used to leak into each other's fingerprints (~0.995 cosine by company). At batch 1 there are
+ *  no batch-mates: same text → same bits, alone, in any order, on any machine. That property is
+ *  what makes embedding caches and sharded/parallel embedding sound, and it is named in the
+ *  PIPELINE stamp (`b1`) — changing this constant changes every fingerprint and is a versioned,
+ *  announced rebuild, never a tweak. */
+const BATCH = 1;
 
 /** BGE's window. Beyond this the tokenizer truncates from the END — and the end of a reply is often
  *  where the person's point lands, so we cap deliberately rather than letting it happen silently. */

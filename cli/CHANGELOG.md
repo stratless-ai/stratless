@@ -6,6 +6,29 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+## [0.6.1] · 2026-07-27 · one text at a time
+
+Builds got 2.3× faster by deleting an assumption, and fingerprints became fully reproducible.
+
+### Changed
+- **Fingerprinting now processes one text at a time, and a full build takes ~4.5 minutes instead
+  of ~10.5.** The engine used to feed the model batches of 32, a habit inherited from hardware
+  that processes batches in parallel. On the WASM runtime nothing is parallel, and a batch must be
+  padded so every text matches its longest member — measured on a real archive, 73% of the
+  fingerprinting work was computing padding. One text at a time computes exactly what each text
+  needs: measured 3.7× faster on the fingerprint stage, ~2.3× on the whole build. The spend is
+  unchanged (~$0.25 — the fast part and the slow part are both free and local).
+- **Fingerprints are now fully reproducible: same text, same fingerprint, always.** The compressed
+  model tunes itself per batch, so a text's fingerprint used to depend slightly on which texts
+  shared its batch. With no batch, that's gone — a fingerprint depends on the text alone, on any
+  machine, in any order. This is the property that makes future caching and parallel fingerprinting
+  safe, and it's now named in the engine's version stamp.
+- **Because the fingerprints changed, your patterns need one rebuild** — the same announced,
+  versioned migration as 0.6.0, and the rebuild itself is now the faster kind (~4.5 min). The next
+  refresh tells you; one `stratless update` rebuilds from your existing history. Nothing you
+  collected is lost. Quality was gated before shipping: same number of patterns, signature
+  behaviours intact, every moment still placed.
+
 ## [0.6.0] · 2026-07-27 · nothing arrives until you say yes
 
 The npm package returns to **zero runtime dependencies**. 0.5.0's one dependency made a first-time

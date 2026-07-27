@@ -17,28 +17,29 @@
  */
 
 /**
- * The one paid measurement — the 0.6.0 confirmation run (2026-07-27, the WASM runtime): **5,784
- * moments for ~$0.25 in ~10.5 minutes**, on the build machine's real archive. The naming call
- * measured $0.17 in that run; the write stage is carried from the previous reference (~$0.08 /
- * ~15s), which the runtime change did not touch. Update all four here from a fresh confirmation run.
+ * The one paid measurement — the 0.6.1 confirmation run (2026-07-27, WASM runtime at batch=1):
+ * **5,837 moments for ~$0.25 in ~4.5 minutes**, on the build machine's real archive. The naming
+ * call measured $0.18 in that run; the write stage is carried from the earlier reference (~$0.08 /
+ * ~15s), which no engine change has touched. Update all four here from a fresh confirmation run.
  *
- * WHY WALL-CLOCK ROSE from the previous reference (3.7 min, 2026-07-26): 0.6.0 moved fingerprinting
- * from the native runtime to WASM — standard over speed, decided deliberately. The dollars did NOT
- * move: fingerprinting costs $0 on either runtime, and **the whole bill remains ONE naming call
- * plus the profile write** (v3 deleted `assign`, which used to ask a model ~190,000 questions per
- * build at $13.27; a local embedding model answers them with arithmetic, on this machine).
+ * WHY WALL-CLOCK HALVED from 0.6.0's 10.5 min: batch-of-one fingerprinting. A batch must be a
+ * rectangle — every text padded to the batch's longest — and on single-thread WASM every padded
+ * blank is paid in serial time; batches of 32 were measured 73% padding on real shaped texts.
+ * The dollars never move with any of this: fingerprinting costs $0 on every runtime, and **the
+ * whole bill remains ONE naming call plus the profile write** (v3 deleted `assign`, which used to
+ * ask a model ~190,000 questions per build at $13.27).
  *
- * Measured breakdown of the 0.6.0 run: fingerprint 8.5 min · cluster ~54s · name ~50s — the
+ * Measured breakdown of the 0.6.1 run: fingerprint 2.4 min · cluster ~55s · name ~53s — the
  * longest stretch costs $0 and never leaves the machine.
  *
  * `messages` is carried at the prior moments-per-message ratio (~1.02) rather than re-measured: it
  * describes how a transcript becomes a pile, which no engine change has touched.
  */
 export const REFERENCE = {
-  moments: 5784,
+  moments: 5837,
   usd: 0.25,
-  minutes: 10.5,
-  messages: 5685,
+  minutes: 4.5,
+  messages: 5737,
 } as const;
 
 const USD_PER_MOMENT = REFERENCE.usd / REFERENCE.moments; // ≈ $0.000044

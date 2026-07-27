@@ -35,6 +35,7 @@ import { loadAssignments, pendingMoments } from './assign.js';
 import { join as joinLabelled, scoreboard } from './count.js';
 import { buildProfile, looksLikeProfile } from './write.js';
 import { coldBuild, engineReady, grow } from './engine.js';
+import { runtimePresent } from './embed.js';
 import { estimateBuild, estimateLine } from './estimate.js';
 import { injectProfile, humanMdPath } from './sink.js';
 import { startRun } from './stopwatch.js';
@@ -192,9 +193,15 @@ export async function runWorker(): Promise<number> {
           // (the 0.6.0 migration, or any future versioned change). The second person HAS a profile
           // — telling them "full build not run yet" would be a wrong reason, and a wrong reason is
           // worse than none.
+          // Point at the door that will actually work: a 0.5.x machine migrating has no runtime on
+          // disk, so `update` would refuse and bounce them to `init` — say `init` directly. A
+          // machine whose runtime is present (e.g. a batch/stamp migration) goes straight to
+          // `update`. One hop, never two.
           summary.push(
             cats.length
-              ? `the engine changed — your patterns need one rebuild to stay honest: run \`stratless update\` (${est})`
+              ? runtimePresent()
+                ? `the engine changed — your patterns need one rebuild to stay honest: run \`stratless update\` (${est})`
+                : `the engine changed — run \`stratless init\` to fetch the new runtime, then \`stratless update\` rebuilds your patterns (${est})`
               : `collected ${built.total} moment${built.total === 1 ? '' : 's'} · full build not run yet — run \`stratless update\` to build your profile (${est})`,
           );
         } else {
