@@ -17,29 +17,28 @@
  */
 
 /**
- * The one paid measurement — the 0.6.1 confirmation run (2026-07-27, WASM runtime at batch=1):
- * **5,837 moments for ~$0.25 in ~4.5 minutes**, on the build machine's real archive. The naming
- * call measured $0.18 in that run; the write stage is carried from the earlier reference (~$0.08 /
- * ~15s), which no engine change has touched. Update all four here from a fresh confirmation run.
+ * The one paid measurement — the 0.6.2 confirmation run (2026-07-27, batch=1 across a 4-worker
+ * pool): **5,857 moments for ~$0.25 in ~2.7 minutes**, on the build machine's real archive. The
+ * naming call is carried at its stable measurement (~$0.17); the write stage from the earlier
+ * reference (~$0.08 / ~15s). Update all four here from a fresh confirmation run.
  *
- * WHY WALL-CLOCK HALVED from 0.6.0's 10.5 min: batch-of-one fingerprinting. A batch must be a
- * rectangle — every text padded to the batch's longest — and on single-thread WASM every padded
- * blank is paid in serial time; batches of 32 were measured 73% padding on real shaped texts.
- * The dollars never move with any of this: fingerprinting costs $0 on every runtime, and **the
- * whole bill remains ONE naming call plus the profile write** (v3 deleted `assign`, which used to
- * ask a model ~190,000 questions per build at $13.27).
+ * THE SPEED LINEAGE, one line each, all measured: native batch-32 3.7 min (machine-flavored bits)
+ * → WASM batch-32 10.5 min (0.6.0: identical bits, standard over speed) → batch-of-one 4.5 min
+ * (0.6.1: padding deleted, bits grouping-independent) → 4-worker pool 2.7 min (0.6.2: same bits,
+ * hash-gated, faster than native ever was). The paid naming call is now the longest single stage.
+ * The dollars never move: fingerprinting costs $0 at every step, and **the whole bill remains ONE
+ * naming call plus the profile write** (v3 deleted `assign`: ~190,000 questions at $13.27).
  *
- * Measured breakdown of the 0.6.1 run: fingerprint 2.4 min · cluster ~55s · name ~53s — the
- * longest stretch costs $0 and never leaves the machine.
+ * Measured breakdown of the 0.6.2 run: fingerprint 47s · cluster ~37s · name ~60s.
  *
  * `messages` is carried at the prior moments-per-message ratio (~1.02) rather than re-measured: it
  * describes how a transcript becomes a pile, which no engine change has touched.
  */
 export const REFERENCE = {
-  moments: 5837,
+  moments: 5857,
   usd: 0.25,
-  minutes: 4.5,
-  messages: 5737,
+  minutes: 2.7,
+  messages: 5756,
 } as const;
 
 const USD_PER_MOMENT = REFERENCE.usd / REFERENCE.moments; // ≈ $0.000044
