@@ -193,12 +193,11 @@ useHead({
   <section class="section reveal">
     <div class="container narrow">
       <p class="eyebrow">There's no trick</p>
-      <h2>The conversation was on your disk the whole time.</h2>
+      <h2>The conversation was always there.</h2>
       <p>
         No cloud. No training. No separate bill. Claude Code already keeps your chats in
-        <code>~/.claude/projects</code>, and <strong>nobody reads them.</strong> stratless does, on
-        your machine, and it reads what you did, not what it said: the kinds of thing you do again
-        and again.
+        <code>~/.claude/projects</code>, and <strong>probably nobody reads them.</strong><br>stratless reads
+        what you did, and the things you'd do again and again.
       </p>
 
       <!-- THE BOUNDARY DIAGRAM — the privacy claim, drawn instead of stated. Everything happens
@@ -234,7 +233,10 @@ useHead({
         </div>
         <span class="machine-io" aria-hidden="true">one runtime in at init · nothing goes out</span>
       </div>
-      <p class="quiet reveal-cap"><strong>Derived, not pre-matched.</strong> <NuxtLink to="/docs/how-it-works">how it works →</NuxtLink></p>
+      <!-- "Minutes" stays a ballpark word, never a typed figure: the measured build time moves
+           release to release and would rot here. Exact numbers live where they are computed —
+           init's consent door quotes cost and time on the person's own archive before spending. -->
+      <p class="quiet reveal-cap"><strong>Derived, not pre-matched.</strong> Minutes to build. <NuxtLink to="/docs/how-it-works">how it works →</NuxtLink></p>
     </div>
   </section>
 
