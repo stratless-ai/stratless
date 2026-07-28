@@ -97,6 +97,13 @@ export interface Exchange {
    * after a paragraph. This is the largest fact the judge was never given.
    */
   tools?: string[];
+  /**
+   * WHICH TOOLS THE PERSON REFUSED in this exchange — the denial's tool_use id resolved to a name
+   * (reader.ts). `declined` says a refusal happened; this says what was refused, which is the
+   * difference between "he declined something" and "he declined the plan". Only `user-rejected`
+   * denials land here — a system block is not the person's act.
+   */
+  denied?: string[];
   /** last exchange of its session — "ended it here" is an act, and it was invisible */
   lastOfSession?: boolean;
   /**
@@ -189,6 +196,7 @@ export function exchangesOfTurns(turns: Turn[], session: string): Exchange[] {
   let cwd: string | undefined;
   let branch: string | undefined;
   let tools: string[] = [];
+  let denied: string[] = [];
 
   for (const t of turns) {
     if (t.cwd) cwd = t.cwd;
@@ -204,7 +212,10 @@ export function exchangesOfTurns(turns: Turn[], session: string): Exchange[] {
       interrupted = t.interruptKind ?? 'plain';
       continue;
     }
-    if (t.denial === 'user-rejected') declined = true;
+    if (t.denial === 'user-rejected') {
+      declined = true;
+      if (t.deniedTools) denied.push(...t.deniedTools);
+    }
     if (!t.text) continue;
 
     // `said` keeps its TAIL: the reaction answers the end of the turn, not its preamble.
@@ -243,6 +254,7 @@ export function exchangesOfTurns(turns: Turn[], session: string): Exchange[] {
         ...(t.images ? { images: t.images } : {}),
         ...(p.length > PASTE_BOUND || r.length > PASTE_BOUND ? { pasted: true } : {}),
         ...(tools.length ? { tools: [...tools] } : {}),
+        ...(denied.length ? { denied: [...denied] } : {}),
         // Raw lengths, before CAP — the point of the field is to say how big the thing actually was.
         shape: { ask: prompt.length, said: saidRaw.length, reply: t.text.length },
       });
@@ -252,6 +264,7 @@ export function exchangesOfTurns(turns: Turn[], session: string): Exchange[] {
     interrupted = undefined;
     declined = false;
     tools = []; // reset with `said` — tools belong to the answering turn that just closed
+    denied = [];
   }
 
   // Position and rhythm — knowable only once the session is whole, which is why they are set here

@@ -28,6 +28,7 @@ import { loadCategories } from './categories.js';
 import { loadAssignments } from './assign.js';
 import { loadMoments, type Moment } from './moments.js';
 import { join, tally, LIFT_CUT, type Labelled, type CategoryStat } from './count.js';
+import { openRiders, type Rider } from './rules.js';
 import { signatures, type Signature } from './shorthand.js';
 
 /** The whole file targets this size; Frame + Judge always ship in full, Register fills the rest by
@@ -55,6 +56,8 @@ export interface ProfileMeta {
   register: number;
   /** lines in the "In the moment" decode key */
   shorthand: number;
+  /** gap riders attached to their host rows (LIFT never gets a section of its own) */
+  rules: number;
 }
 
 /** Up to 5 quote candidates for a category: readable length, least-overlapping (most specific to
@@ -200,18 +203,31 @@ ${body}`;
  * carried. The quote still EXISTS for register rows — voice() must pick one or the row drops — it is
  * the quality gate proving the line is demonstrable, not display.
  */
-function block(claim: string, stat: CategoryStat): string {
+function block(claim: string, stat: CategoryStat, sec: Section, rd?: Rider): string {
   // THE COMPACT RECEIPT (2026-07-26). The row is an instruction with a terse marker, not a claim
   // followed by an evidence SENTENCE — "338 times across 77 conversations" on its own line was
   // written for a human auditor, and the AI gains nothing from the prose. The count itself stays:
   // it is what separates a profile from a prompt (an instruction backed by "(338×)" is observed
-  // fact, not author opinion), and the file's own preamble promises every line carries it. The
-  // conversation-spread moves to the auditor's surfaces; the trend rides in the same parenthesis.
+  // fact, not author opinion), and the file's own preamble promises every line carries it.
+  //
+  // WHICH TREND WORDS MAY RIDE IN THE PARENTHESIS depends on the section (2026-07-27). Register
+  // rows describe the person, and their one-sided trend stays. Frame and Judge rows instruct the
+  // assistant to ACT, so a trend word there is a directive — and it prints only when count.ts
+  // confirmed it from both sides of the conversation (`met`, or a fading the assistant's own
+  // supply agrees with). A one-sided word on a demand row taught sabotage: the plan row's
+  // `fading` told every assistant to ease off the very behaviour that was working.
+  //
+  // THE RIDER (2026-07-28). A gap rule prints as a when-clause on the row its category already
+  // earned — never a section of its own (the founder's read killed that: a separate section was
+  // the design's internal schema leaking into the file). The receipt then carries both sides:
+  // the row's own count and the gap's slip count, with any trend word on the gap itself.
   const bits: string[] = [];
-  if (stat.direction === 'rising' || stat.direction === 'fading') bits.push(stat.direction);
+  if (stat.direction && (sec === 'register' || stat.verified)) bits.push(stat.direction);
   if (stat.burst) bits.push('comes in bursts');
-  const c = claim.replace(/\s+/g, ' ').trim();
-  return `- ${c} (${stat.count}×${bits.length ? ', ' + bits.join(', ') : ''})\n`;
+  const base = claim.replace(/\s+/g, ' ').trim();
+  const c = rd ? `${base.replace(/\s*\.\s*$/, '')} — and ${rd.rider.replace(/\s*\.\s*$/, '').replace(/\s+/g, ' ').trim()}.` : base;
+  const slipBit = rd ? ` · slip ${rd.slip}×${rd.trend ? ', ' + rd.trend : ''}` : '';
+  return `- ${c} (${stat.count}×${bits.length ? ', ' + bits.join(', ') : ''}${slipBit})\n`;
 }
 
 interface Entry {
@@ -242,6 +258,7 @@ export function assemble(
   voiced: Map<string, Voiced>,
   prov: { sessions: number; moments: number; from: string; to: string },
   decode?: { sigs: Signature[]; signals: Map<string, string> },
+  riders?: Map<string, Rider>,
 ): { text: string; meta: ProfileMeta } | null {
   const entries: Entry[] = stats
     .filter((s) => s.scope !== 'project' && s.count > 0)
@@ -260,15 +277,41 @@ export function assemble(
   // notes still has a profile worth loading.
   if (!frame.length && !judge.length && !register.length) return null;
 
+  // Riders attach only to categories that earned a row — a rule whose category has no entry stays
+  // invisible, key line and all (the file may not gesture at something it cannot host). Attachment
+  // is judged pre-budget; in the rare case a register host is later budget-dropped, its key line
+  // still stands — a true trigger without its detail row, which the key's own subtitle allows.
+  const riderFor = (name: string): Rider | undefined => riders?.get(name);
+  const attached = [...(riders?.keys() ?? [])].filter((n) => entries.some((e) => e.stat.name === n));
+
   const decodeLines = decode ? decodeKey(decode) : [];
+  // THE SITUATION TRIGGERS — the gap's live recognizer. Phrase triggers are states the person
+  // announces; a gap's trigger is the state they don't (if they had announced it, there would be
+  // no gap). Derived mechanically from the rider's when-clause; an unparseable rider casts none.
+  const situations: string[] = [];
+  for (const n of attached) {
+    const m = riders!.get(n)!.rider.match(/^when\s+([^,]+),\s*(.+)$/i);
+    if (m) situations.push(`- ${m[1].trim()} → ${m[2].trim().replace(/\.\s*$/, '')}`);
+  }
+  const keyLines = [...decodeLines, ...situations];
+
   const head: string[] = [
-    `Derived from ${prov.sessions} of this person's own conversations with an AI assistant, ${prov.from} to ${prov.to}. Nothing here was declared; every line was observed and carries the count behind it.`,
+    `Derived from ${prov.sessions} of this person's own conversations with an AI assistant, ${prov.from} to ${prov.to}. Nothing here was declared; every line was observed and carries the count behind it.${attached.length ? ' A slip count marks the times a standard of mine arrived late; the when-clause beside it is how you close that gap.' : ''}`,
     '',
     '**Read this as a prior, not a law.** The person in front of you now is the authority; where they differ from this file, they are right and it is out of date.',
     '',
   ];
-  if (decodeLines.length) {
-    head.push('## In the moment', '', 'Their shorthand. Recognise these live; the detail is in the sections below.', '', ...decodeLines, '');
+  if (keyLines.length) {
+    head.push(
+      '## In the moment',
+      '',
+      situations.length
+        ? 'Their shorthand, and the situations to catch unprompted. Recognise these live; the detail is in the sections below.'
+        : 'Their shorthand. Recognise these live; the detail is in the sections below.',
+      '',
+      ...keyLines,
+      '',
+    );
   }
   // One more blank so the first section HEADING gets its own blank line above it. Every later
   // heading gets one for free (block() ends with '\n\n'); the head is the only seam without one,
@@ -279,22 +322,34 @@ export function assemble(
   // Frame + Judge are the bookends — always shipped in full. Register fills the remaining budget.
   // Rows are single-line bullets now, so each section closes with one blank line ('\n') to keep the
   // next heading separated — block() no longer carries trailing spacing of its own.
+  let attachedPrinted = 0;
   if (frame.length) {
     text += ['## What to offer me before I ask', '', 'Set these up or hand them over before I ask. Offering them unprompted is the point, not overstepping.', '', ''].join('\n');
-    for (const e of frame) text += block(e.v.line, e.stat);
+    for (const e of frame) {
+      const rd = riderFor(e.stat.name);
+      if (rd) attachedPrinted++;
+      text += block(e.v.line, e.stat, 'frame', rd);
+    }
     text += '\n';
   }
   if (judge.length) {
     text += ['## What to catch for me', '', 'What I reliably challenge or refuse. Pre-empt these, so I do not have to catch them myself.', '', ''].join('\n');
-    for (const e of judge) text += block(e.v.line, e.stat);
+    for (const e of judge) {
+      const rd = riderFor(e.stat.name);
+      if (rd) attachedPrinted++;
+      text += block(e.v.line, e.stat, 'judge', rd);
+    }
     text += '\n';
   }
   let shippedReg = 0;
   if (register.length) {
     text += ['## How to talk to me', '', 'The register I work in. Match it rather than smoothing it over.', '', ''].join('\n');
     for (const e of register) {
-      if (text.length + block(e.v.line, e.stat).length > CHAR_BUDGET) break;
-      text += block(e.v.line, e.stat);
+      const rd = riderFor(e.stat.name);
+      const row = block(e.v.line, e.stat, 'register', rd);
+      if (text.length + row.length > CHAR_BUDGET) break;
+      if (rd) attachedPrinted++;
+      text += row;
       shippedReg++;
     }
   }
@@ -310,6 +365,7 @@ export function assemble(
       judge: judge.length,
       register: shippedReg,
       shorthand: decodeLines.length,
+      rules: attachedPrinted,
     },
   };
 }
@@ -363,5 +419,6 @@ export function buildProfile(): { text: string; meta: ProfileMeta } | null {
       to: (times[times.length - 1] ?? '').slice(0, 10),
     },
     { sigs, signals },
+    openRiders(),
   );
 }

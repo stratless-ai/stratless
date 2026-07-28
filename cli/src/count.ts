@@ -9,6 +9,8 @@
  *                 write.ts). It now feeds the scoreboard, ranks shorthand, and hints the voicer.
  *   · direction — rising or fading, read ONLY from the moments a category actually carries (frozen-once
  *                 guarantees those never predate its birth, so there is no birth-boundary to police).
+ *                 A fading ask is re-read against the assistant's own actions (tools/denied on the
+ *                 moment) and may resolve to `met` — the ask faded because it stopped being needed.
  *   · misfit    — the share of recent moments that matched nothing. Read by `status` as coverage;
  *                 it no longer triggers anything (re-discovery went with the discover stage).
  *   · scoreboard— the one number the person sees: how much of what they typed was correcting the AI.
@@ -32,7 +34,8 @@ export const MIN_CONVERSATIONS = 3;
 /** Not enough evidence to claim a trend under this many carrying moments. */
 const MIN_FOR_TREND = 6;
 const RISE = 1.3;
-const FADE = 0.7;
+/** Exported: the rules lifecycle (rules.ts) reuses the same steady/fading boundary. */
+export const FADE = 0.7;
 const WEEK_MS = 7 * 24 * 3600 * 1000;
 
 /** A moment paired with the categories it carries — the join every metric reads. */
@@ -91,6 +94,222 @@ export function direction(labelled: Labelled[], name: string): 'rising' | 'fadin
   return undefined;
 }
 
+/* ——— THE TWO-SIDED MARKER (2026-07-27) ———
+ *
+ * A fading stamp read from the person's words alone cannot tell "stopped wanting it" from "stopped
+ * having to ask" — and on a demand-shaped row the second is the profile WORKING: an assistant that
+ * reads one-sided fading as "ease off" dismantles its own adaptation and brings the asking back.
+ * The discriminator is the other side of the conversation, which the pile already carries: what
+ * the assistant DID (moment.tools) and what the person REFUSED (moment.denied). Measured on the
+ * reference archive before this code existed (the fading spike, 2026-07-27): plan-asks fell to
+ * 0.55× while plan-mode actions held 1.20× with near-zero refusals — met, not fading.
+ *
+ *   met := asks fading AND action-supply steady-or-rising AND declines not rising.
+ *
+ * Every threshold below was pre-registered from the spike's measurements, not tuned until
+ * something passed. */
+
+/** The mapping floor. A category earns an action only by RESPONSE ADJACENCY — the action fires in
+ *  the moment right after the ask far more often than its base rate. Measured separation: the one
+ *  true pair scored 12.75×, the runner-up 2.17×; the cut sits in the gap, near neither. */
+const ADJ_LIFT = 5;
+/** ...and the response must be common after the ask, not merely disproportionate. */
+const ADJ_P = 0.1;
+/** Below this many ask→response pairs, adjacency is anecdote. */
+const MIN_ADJ = 30;
+/** A tool must appear in this many moments before it can be anyone's mapped action. */
+const MIN_ACTION = 30;
+
+export interface Adjacency {
+  /** moment.key → the moment that follows it in the same session */
+  next: Map<string, Moment>;
+  /** tool name → how many moments ran it */
+  base: Map<string, number>;
+  total: number;
+  /** session → its moments in time order — the within-session ordering the pile itself lacks */
+  bySession: Map<string, Labelled[]>;
+}
+
+export function adjacencyOf(labelled: Labelled[]): Adjacency {
+  const ordered = [...labelled].sort((a, b) =>
+    a.moment.session === b.moment.session
+      ? a.moment.ts.localeCompare(b.moment.ts)
+      : a.moment.session.localeCompare(b.moment.session),
+  );
+  const next = new Map<string, Moment>();
+  for (let i = 0; i + 1 < ordered.length; i++) {
+    if (ordered[i].moment.session === ordered[i + 1].moment.session) next.set(ordered[i].moment.key, ordered[i + 1].moment);
+  }
+  const bySession = new Map<string, Labelled[]>();
+  for (const l of ordered) {
+    const rows = bySession.get(l.moment.session);
+    if (rows) rows.push(l);
+    else bySession.set(l.moment.session, [l]);
+  }
+  const base = new Map<string, number>();
+  for (const l of labelled) for (const t of l.moment.tools ?? []) base.set(t, (base.get(t) ?? 0) + 1);
+  return { next, base, total: labelled.length, bySession };
+}
+
+/** The action a category's asks are answered WITH — or nothing. Derived per build, never stored:
+ *  category names do not survive a rebuild, and neither should a mapping keyed on them. No tool is
+ *  special-cased; whatever answers the asks is the action. */
+export function actionFor(labelled: Labelled[], name: string, adj: Adjacency = adjacencyOf(labelled)): string | undefined {
+  const answered = labelled.filter((l) => l.kinds.includes(name) && adj.next.has(l.moment.key));
+  if (answered.length < MIN_ADJ) return undefined;
+  let best: { action: string; lift: number } | undefined;
+  for (const [action, n] of adj.base) {
+    if (n < MIN_ACTION) continue;
+    const p = answered.filter((l) => (adj.next.get(l.moment.key)!.tools ?? []).includes(action)).length / answered.length;
+    const lift = p / (n / adj.total);
+    if (p >= ADJ_P && lift >= ADJ_LIFT && (!best || lift > best.lift)) best = { action, lift };
+  }
+  return best?.action;
+}
+
+/** The assistant's side of a fading ask, on the same span and normalisation as direction(). */
+export interface SupplyRead {
+  action: string;
+  /** late action-rate over early. ≥ FADE: the assistant kept doing it while the asking faded. */
+  supplyRatio: number;
+  /** the person refused the action more lately (late refusal-rate > early × RISE) */
+  declinesRose: boolean;
+}
+
+export function supplyRead(labelled: Labelled[], name: string, adj?: Adjacency): SupplyRead | undefined {
+  const action = actionFor(labelled, name, adj ?? adjacencyOf(labelled));
+  if (!action) return undefined;
+  // Refuse, don't lie: a pile with no denial data ANYWHERE cannot clear the declines leg — this
+  // moment shape may predate the `denied` field, and "no refusals recorded" must not be read as
+  // "no refusals happened". Conservative: such a pile never claims met, only bare counts.
+  if (!labelled.some((l) => l.moment.denied?.length)) return undefined;
+  const carry = labelled
+    .filter((l) => l.kinds.includes(name))
+    .map((l) => Date.parse(l.moment.ts))
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
+  if (carry.length < MIN_FOR_TREND) return undefined;
+  const start = carry[0];
+  const end = carry[carry.length - 1];
+  if (end <= start) return undefined;
+  const mid = start + (end - start) / 2;
+  const half = (lo: number, hi: (t: number) => boolean) => {
+    const rows = labelled.filter((l) => {
+      const t = Date.parse(l.moment.ts);
+      return Number.isFinite(t) && t >= lo && hi(t);
+    });
+    const acts = rows.filter((l) => (l.moment.tools ?? []).includes(action)).length;
+    const refused = rows.filter((l) => (l.moment.denied ?? []).includes(action)).length;
+    return { all: rows.length, acts, refused };
+  };
+  const early = half(start, (t) => t < mid);
+  const late = half(mid, (t) => t <= end);
+  if (!early.all || !late.all) return undefined;
+  const earlyS = early.acts / early.all;
+  const lateS = late.acts / late.all;
+  if (earlyS === 0 && lateS === 0) return undefined;
+  const supplyRatio = earlyS === 0 ? Infinity : lateS / earlyS;
+  const earlyD = early.acts ? early.refused / early.acts : 0;
+  const lateD = late.acts ? late.refused / late.acts : 0;
+  return { action, supplyRatio, declinesRose: lateD > earlyD * RISE };
+}
+
+/* ——— THE GAP READ (LIFT layer 2, 2026-07-28) ———
+ *
+ * A LIFT rule is the gap between a standard the person holds and the moments they pay for not
+ * applying it in time. Both valences of one axis land in the SAME pile (the engine clusters by
+ * content): "lets plan" said calmly is the standard — pile `ordinary`; "wait, lets plan" said as
+ * an interruption is the late catch — pile `interrupt`/`decline`. So the pairing is
+ * within-category, split by the recorded pile event. Cross-category centroid pairing was measured
+ * dead first (all-pairs cosine mean 0.821, max 0.930 — no decisive gap), and session position was
+ * measured to be noise; the pile is the valence, full stop.
+ *
+ * Every floor below was pre-registered from the reference archive's probes before this code was
+ * written (the one clearing candidate: 25 slips / 20 sessions / 7 stumbles / 208 reaches; the
+ * runner-up fails twice) — not tuned until something passed. */
+
+/** A slip only counts against the PERSON when no reach preceded it in the session. */
+const SLIP_MIN = 15;
+const SLIP_SESS_MIN = 8;
+const STUMBLE_SESS_MIN = 5;
+const REACH_MIN = 30;
+/** The lifecycle's measurement window — each build re-measures the gap over this much recent time. */
+export const RECENT_DAYS = 21;
+
+export interface GapCandidate {
+  name: string;
+  /** ordinary-pile carries — the person reaching for their own standard */
+  reach: number;
+  /** interrupt/decline-pile carries — the recorded late catches */
+  slip: number;
+  slipSessions: number;
+  /** sessions where the slip came with NO reach before it — the rule's whole evidence */
+  stumbleSessions: string[];
+  /** sessions where the standard WAS deployed and things slipped anyway — the assistant's failure,
+   *  excluded from the rule (it is catch-row material, not a gap in the person) */
+  guardedSessions: number;
+}
+
+/** Did this session stumble (first slip of `name` arrives with no prior ordinary reach)? */
+function stumbled(rows: Labelled[], name: string): boolean {
+  for (const l of rows) {
+    if (!l.kinds.includes(name)) continue;
+    if (isNegative(l.moment)) return true; // the slip came first
+    if (l.moment.pile === 'ordinary') return false; // the reach came first — guarded
+  }
+  return false;
+}
+
+/** The categories whose gap is real enough to mint a rule from. The ENTRY gate is the scoreboard's
+ *  own signal criteria (a distress-shaped, well-evidenced category); the floors are the rule's. */
+export function gapCandidates(labelled: Labelled[], categories: Category[], adj: Adjacency = adjacencyOf(labelled)): GapCandidate[] {
+  const stats = tally(labelled, categories);
+  const out: GapCandidate[] = [];
+  for (const s of stats) {
+    if (s.scope === 'project') continue;
+    if (s.lift < LIFT_CUT || s.sessions < MIN_CONVERSATIONS) continue;
+    const carry = labelled.filter((l) => l.kinds.includes(s.name));
+    const slip = carry.filter((l) => isNegative(l.moment));
+    const reach = carry.filter((l) => l.moment.pile === 'ordinary');
+    if (slip.length < SLIP_MIN || reach.length < REACH_MIN) continue;
+    const slipSess = new Set(slip.map((l) => l.moment.session));
+    if (slipSess.size < SLIP_SESS_MIN) continue;
+    const stumbles: string[] = [];
+    let guarded = 0;
+    for (const sess of slipSess) {
+      if (stumbled(adj.bySession.get(sess) ?? [], s.name)) stumbles.push(sess);
+      else guarded++;
+    }
+    if (stumbles.length < STUMBLE_SESS_MIN) continue;
+    out.push({ name: s.name, reach: reach.length, slip: slip.length, slipSessions: slipSess.size, stumbleSessions: stumbles.sort(), guardedSessions: guarded });
+  }
+  return out.sort((a, b) => b.slip - a.slip);
+}
+
+/** One build's re-measurement of a rule's gap, over the trailing window. `sample` says how much
+ *  recent evidence the rates stand on — a quiet stretch must not read as a closed gap. */
+export function gapWindowRead(
+  labelled: Labelled[],
+  name: string,
+  nowMs: number,
+  days = RECENT_DAYS,
+): { slipRate: number; stumbleSessions: number; reach: number; sample: number } {
+  const cut = nowMs - days * 24 * 3600_000;
+  const win = labelled.filter((l) => {
+    const t = Date.parse(l.moment.ts);
+    return Number.isFinite(t) && t >= cut && t <= nowMs;
+  });
+  if (!win.length) return { slipRate: 0, stumbleSessions: 0, reach: 0, sample: 0 };
+  const adj = adjacencyOf(win);
+  const slip = win.filter((l) => l.kinds.includes(name) && isNegative(l.moment));
+  const reach = win.filter((l) => l.kinds.includes(name) && l.moment.pile === 'ordinary').length;
+  let stumbles = 0;
+  for (const sess of new Set(slip.map((l) => l.moment.session))) {
+    if (stumbled(adj.bySession.get(sess) ?? [], name)) stumbles++;
+  }
+  return { slipRate: slip.length / win.length, stumbleSessions: stumbles, reach, sample: win.length };
+}
+
 /** True when a single ISO week holds at least half a category's moments — concentrated in a bad
  *  stretch, a fact neither the count nor the trend captures. */
 function isBurst(carry: Labelled[]): boolean {
@@ -114,7 +333,14 @@ export interface CategoryStat {
   lift: number;
   /** an ISO week holds ≥50% of the members — concentrated in a bad stretch vs spread evenly */
   burst: boolean;
-  direction?: 'rising' | 'fading';
+  direction?: 'rising' | 'fading' | 'met';
+  /** The trend was confirmed from BOTH sides of the conversation: met always is; fading is when
+   *  the assistant's supply faded with the asking. Only a verified trend may print on a
+   *  demand-shaped row (write.ts) — a one-sided fading there instructs sabotage of a working
+   *  adaptation. */
+  verified?: true;
+  /** the assistant action this category's asks are answered with — met's evidence, derived per build */
+  action?: string;
   bornAt: string;
   firstSeen?: string;
   lastSeen?: string;
@@ -125,6 +351,8 @@ export interface CategoryStat {
 export function tally(labelled: Labelled[], categories: Category[]): CategoryStat[] {
   const negTotal = labelled.filter((l) => isNegative(l.moment)).length;
   const ordTotal = labelled.filter((l) => l.moment.pile === 'ordinary').length;
+  // Built once, on first fading category — most tallies (a rising pile, a fresh build) never pay it.
+  let adj: Adjacency | undefined;
 
   return categories.map((c) => {
     const carry = labelled.filter((l) => l.kinds.includes(c.name));
@@ -135,6 +363,24 @@ export function tally(labelled: Labelled[], categories: Category[]): CategorySta
     const ord = carry.filter((l) => l.moment.pile === 'ordinary').length;
     const ts = carry.map((l) => l.moment.ts).sort();
     const dir = direction(labelled, c.name);
+    // Only a fading ask gets the two-sided read: fading is the one stamp that can instruct an
+    // assistant to stop doing something that is working, so it alone must survive both sides.
+    let stamped: 'rising' | 'fading' | 'met' | undefined = dir;
+    let verified: true | undefined;
+    let action: string | undefined;
+    if (dir === 'fading') {
+      adj ??= adjacencyOf(labelled);
+      const read = supplyRead(labelled, c.name, adj);
+      if (read) {
+        action = read.action;
+        if (read.supplyRatio >= FADE && !read.declinesRose) {
+          stamped = 'met'; // the asking faded because the doing kept happening, untrefused
+          verified = true;
+        } else if (read.supplyRatio <= FADE) {
+          verified = true; // both sides quiet — the fade is real on the evidence of both
+        }
+      }
+    }
     return {
       name: c.name,
       description: c.description,
@@ -142,7 +388,9 @@ export function tally(labelled: Labelled[], categories: Category[]): CategorySta
       sessions: new Set(carry.map((l) => l.moment.session)).size,
       lift: computeLift(neg, negTotal, ord, ordTotal),
       burst: isBurst(carry),
-      ...(dir ? { direction: dir } : {}),
+      ...(stamped ? { direction: stamped } : {}),
+      ...(verified ? { verified } : {}),
+      ...(action ? { action } : {}),
       bornAt: c.bornAt,
       firstSeen: ts[0],
       lastSeen: ts[ts.length - 1],

@@ -50,7 +50,9 @@ export interface Pile {
   centroid: Float32Array;
 }
 
-const dot = (a: Float32Array, b: Float32Array): number => {
+/** Exported for the rules store's re-anchoring (rules.ts): every vector in play is unit-length,
+ *  so a dot product IS cosine — no separate cosine helper exists on purpose. */
+export const dot = (a: ArrayLike<number>, b: ArrayLike<number>): number => {
   let s = 0;
   for (let i = 0; i < a.length; i++) s += a[i] * b[i];
   return s;

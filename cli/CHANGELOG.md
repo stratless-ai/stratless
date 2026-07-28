@@ -6,6 +6,38 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+### Added
+- **A row can now deepen — and then thin itself.** When the engine measures a gap — a standard you
+  demonstrably hold (in your own calm words) that sometimes arrives only as a late correction —
+  the row holding that standard gains a when-clause: *"…offer to enter plan mode first — and when
+  work is starting and I haven't set a plan yet, stop and plan first."* Its receipt gains a second
+  count, `(234×, met · slip 25×)`: the slips are the times the standard arrived late. The decode
+  key gains the situation to catch unprompted — the state you never announce, which is exactly why
+  it is a gap. Nothing here is our opinion of who you should be: a gap can only exist where BOTH
+  sides are in your own history (the reaching and the late catch), arithmetic decides what exists,
+  and the model's one job is wording the clause — once, at birth; it never re-rolls. Every clause
+  carries its own retirement test: when the gap closes or the stumbles stop on their own, the
+  clause and its slip count disappear. **The file gets shorter as you get better** — an
+  accumulating memory cannot say that. Most profiles will carry zero or one of these; that is the
+  honest count, not a shortage.
+- The person-layer schema marker steps to `humanmd/v3` (the rider clause, the slip receipt, and the
+  situation triggers are a schema change).
+
+### Changed
+- **A fading offer/catch row is now checked against what the assistant actually did before it
+  prints.** The moment record already knew every tool the assistant ran; it now also records which
+  tools you refused (`denied`, resolved from the denial record itself — nothing guessed). When your
+  asking for something fades, the engine reads the other side of the conversation: if the assistant
+  kept doing the thing and you kept accepting it, the row is stamped **`met`** instead of `fading` —
+  the asking faded because it stopped being needed. Offer and catch rows only carry a trend word the
+  engine confirmed from both sides; a bare count there means the trend is unproven, not absent.
+  "How to talk to me" rows keep their one-sided trend — they describe you rather than instruct.
+  Measured on the reference archive before the code was written: the plan-first row that shipped as
+  "fading" was in truth met — asks fell to 0.55× while plan-mode actions held at 1.20×, with zero
+  refusals of plan mode in 103 uses.
+- **Moment shape v2.** Existing history re-derives itself from your transcripts on the next quiet
+  refresh — free, no model, nothing leaves the machine, and your paid assignments are untouched.
+
 ## [0.6.2] · 2026-07-27 · many hands, same fingerprints
 
 A full build now takes ~2.7 minutes — and unlike every speedup before it, this one changes

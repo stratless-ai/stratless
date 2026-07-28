@@ -33,6 +33,7 @@ import { driftCheck } from './reader.js';
 import { loadCategories } from './categories.js';
 import { loadAssignments, pendingMoments } from './assign.js';
 import { join as joinLabelled, scoreboard } from './count.js';
+import { runRules } from './rules.js';
 import { buildProfile, looksLikeProfile } from './write.js';
 import { coldBuild, engineReady, grow } from './engine.js';
 import { runtimePresent } from './embed.js';
@@ -290,10 +291,21 @@ export async function runWorker(): Promise<number> {
         // mirror's course-corrections rate (`mirror` + the init door, ~2.5/100 — literal Escape presses).
         // Showing both would put two near-identical "corrections per 100" figures on screen, 5x apart —
         // the exact confusion the mirror's KPI was split out to avoid. Kept in state for the record.
-        const board = scoreboard(joinLabelled(loadMoments(), loadAssignments()), cats);
+        const labelledAll = joinLabelled(loadMoments(), loadAssignments());
+        const board = scoreboard(labelledAll, cats);
         writeState({ ...readState(), scoreboard: { rate: board.rate, at: new Date().toISOString() }, lastFlushAt: new Date().toISOString() });
 
-        if (changed || !existsSync(humanMdPath())) {
+        // THE RULES PASS (LIFT layer 2): re-measure every open rule's gap over the recent window,
+        // retire what earned an exit, mint newly cleared candidates — the one worded call, and this
+        // is already the paid path. Arithmetic decides what exists; a moved rule set forces the
+        // profile rebuild below.
+        const rulesStart = Date.now();
+        const rr = runRules(bin, labelledAll, cats, Date.now());
+        sw.stage('rules', Date.now() - rulesStart, rr.minted + rr.retired);
+        if (rr.minted) summary.push(`${rr.minted} lift rule${rr.minted === 1 ? '' : 's'} minted — the counts decided; the model only worded it`);
+        if (rr.retired) summary.push(`${rr.retired} lift rule${rr.retired === 1 ? '' : 's'} retired — the gap moved`);
+
+        if (changed || rr.changed || !existsSync(humanMdPath())) {
           const writeStart = Date.now();
           const profile = buildProfile();
           sw.stage('write', Date.now() - writeStart, profile ? 1 : 0);
@@ -302,7 +314,7 @@ export async function runWorker(): Promise<number> {
             injectProfile(profile.text, undefined, undefined, builtAt); // writes ~/.claude/HUMAN.md AND points CLAUDE.md at it — the load
             writeRender('profile', { builtAt, sessions: profile.meta.sessions, exchanges: profile.meta.moments, categories: loadCategories().length });
             summary.push(
-              `profile written and loaded · ${profile.meta.frame} to offer + ${profile.meta.judge} to catch + ${profile.meta.register} register${profile.meta.shorthand ? ` + ${profile.meta.shorthand} shorthand handles` : ''}`,
+              `profile written and loaded · ${profile.meta.frame} to offer + ${profile.meta.judge} to catch + ${profile.meta.register} register${profile.meta.rules ? ` + ${profile.meta.rules} to move` : ''}${profile.meta.shorthand ? ` + ${profile.meta.shorthand} shorthand handles` : ''}`,
             );
           } else {
             summary.push('profile not rebuilt — not enough clear evidence yet');

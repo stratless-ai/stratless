@@ -79,6 +79,31 @@ test('a moment with no assistant text has neither head nor tail — an opener, a
   assert.deepEqual(toolOnly.tools, ['Edit'], 'but what it was DOING is carried');
 });
 
+test('a refused tool is NAMED on the moment — denied travels from the raw denial to the pile', () => {
+  const toolAsstIds = (text: string, uses: { id: string; name: string }[]) =>
+    JSON.stringify({
+      type: 'assistant',
+      timestamp: '2026-07-01T10:00:05Z',
+      message: { content: [{ type: 'text', text }, ...uses.map(({ id, name }) => ({ type: 'tool_use', id, name, input: {} }))] },
+    });
+  const denyToolRec = (id: string) =>
+    JSON.stringify({
+      type: 'user',
+      timestamp: '2026-07-01T10:00:07Z',
+      toolDenialKind: 'user-rejected',
+      message: { content: [{ type: 'tool_result', tool_use_id: id, is_error: true, content: 'rejected' }] },
+    });
+  const ex = parseExchanges(
+    join(
+      roots('deny', [u('plan it'), toolAsstIds('entering plan mode', [{ id: 't1', name: 'EnterPlanMode' }]), denyToolRec('t1'), u('no, just do it')]),
+      'deny.jsonl',
+    ),
+  );
+  const m = toMoment(ex[1]);
+  assert.equal(m.pile, 'decline', 'the recorded event still decides the pile');
+  assert.deepEqual(m.denied, ['EnterPlanMode'], 'and the moment says WHICH tool was refused');
+});
+
 test('the pile is the recorded event: decline beats interrupt, a bare tool-use interrupt is ordinary', () => {
   const ex = (fields: Partial<Exchange>): Exchange => ({ reaction: 'r', hash: 'h', session: 's', ts: 't', prompt: 'p', said: '', ...fields });
   assert.equal(pileOf(ex({ interrupted: 'plain' })), 'interrupt');
