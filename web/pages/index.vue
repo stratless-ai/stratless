@@ -87,7 +87,7 @@ useHead({
       <!-- The signature IS the hero headline; the lede below gives it its context. -->
       <h1>Made for your AI.<br />Meant for you.</h1>
       <p class="lede">
-        stratless reads your chats and teaches your AI who you are, <br />so it stops talking over your
+        Stratless reads your chats and teaches your AI who you are, <br />so it stops talking over your
         head or under it.
       </p>
 
@@ -196,8 +196,8 @@ useHead({
       <h2>The conversation was always there.</h2>
       <p>
         No cloud. No training. No separate bill. Claude Code already keeps your chats in
-        <code>~/.claude/projects</code>, and <strong>probably nobody reads them.</strong><br>stratless reads
-        what you did, and the things you'd do again and again.
+        <code>~/.claude/projects</code>, and <strong>probably nobody reads them.</strong><br>
+        Stratless reads what you did and the things you'd do again and again.
       </p>
 
       <!-- THE BOUNDARY DIAGRAM — the privacy claim, drawn instead of stated. Everything happens
@@ -236,7 +236,7 @@ useHead({
       <!-- "Minutes" stays a ballpark word, never a typed figure: the measured build time moves
            release to release and would rot here. Exact numbers live where they are computed —
            init's consent door quotes cost and time on the person's own archive before spending. -->
-      <p class="quiet reveal-cap"><strong>Derived, not pre-matched.</strong> Minutes to build. <NuxtLink to="/docs/how-it-works">how it works →</NuxtLink></p>
+      <p class="quiet reveal-cap"><strong>Derived, not pre-matched. Minutes to build. </strong><NuxtLink to="/docs/how-it-works">how it works →</NuxtLink></p>
     </div>
   </section>
 
@@ -244,7 +244,7 @@ useHead({
   <section class="section roadmap">
     <div class="container narrow">
       <p class="eyebrow center">Built on Claude Code</p>
-      <h2 class="rm-h">One file. Every assistant that reads it gets to know you.</h2>
+      <h2 class="rm-h">One file for your AI coding assistants to get to know you.</h2>
     </div>
     <div class="marquee" aria-hidden="true">
       <div class="marquee-track">
