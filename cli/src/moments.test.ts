@@ -77,6 +77,31 @@ test('a moment with no assistant text has neither head nor tail — an opener, a
   const toolOnly = toMoment(ex[1]);
   assert.equal(toolOnly.aiTail, undefined, 'the assistant only ran a tool — no words to record');
   assert.deepEqual(toolOnly.tools, ['Edit'], 'but what it was DOING is carried');
+  assert.equal(toolOnly.aiTerms, undefined, 'the topic channel rides the same gate — silence has no subject');
+  assert.equal(toolOnly.saidLen, undefined);
+});
+
+test('the topic channel reads the FULL answer — a mid-turn subject the card windows never see', () => {
+  // The subject sits past the 300-char head and before the 300-char tail: invisible to aiHead and
+  // aiTail, visible only because extraction ran on the uncapped text at collect.
+  const long = `THE-OPENING ${'yyy '.repeat(300)}midturn-subject ${'zzz '.repeat(300)}THE-CONCLUSION`;
+  const ex = parseExchanges(join(roots('terms', [u('explain it'), a(long), u('ok')]), 'terms.jsonl'));
+  const m = toMoment(ex[1]);
+  assert.ok(!m.aiHead!.includes('midturn-subject') && !m.aiTail!.includes('midturn-subject'), 'the windows missed it');
+  assert.ok(m.aiTerms!.includes('midturn-subject'), 'the topic channel caught it');
+  assert.equal(m.saidLen, long.length, 'and the true answer size is kept — the caps would hide it');
+});
+
+test('a shape bump re-derives the same keys — the rebuild cannot orphan a single assignment', () => {
+  const rdir = roots('keys', [u('one'), a('an answer about caching'), u('two')]);
+  const file = join(dir, 'keys.jsonl');
+  buildMoments({ roots: [rdir], file });
+  const before = new Set(loadMoments(file).map((m) => m.key));
+  writeFileSync(`${file}.v`, '2\n'); // an old-shape pile, as every machine has on the day of the bump
+  buildMoments({ roots: [rdir], file });
+  const rebuilt = loadMoments(file);
+  assert.deepEqual(new Set(rebuilt.map((m) => m.key)), before, 'identity is the content hash — the new fields sit outside it');
+  assert.ok(rebuilt.some((m) => m.aiTerms?.includes('caching')), 'and the rebuilt pile carries the topic channel');
 });
 
 test('a refused tool is NAMED on the moment — denied travels from the raw denial to the pile', () => {

@@ -29,6 +29,7 @@ import { loadAssignments } from './assign.js';
 import { loadMoments, type Moment } from './moments.js';
 import { join, tally, LIFT_CUT, type Labelled, type CategoryStat } from './count.js';
 import { openRiders, type Rider } from './rules.js';
+import { knowledgePrint, type KnowledgePrint } from './knowledge.js';
 import { signatures, type Signature } from './shorthand.js';
 
 /** The whole file targets this size; Frame + Judge always ship in full, Register fills the rest by
@@ -58,6 +59,8 @@ export interface ProfileMeta {
   shorthand: number;
   /** gap riders attached to their host rows (LIFT never gets a section of its own) */
   rules: number;
+  /** temporary knowledge rows shipped at the end of the talk section (same doctrine: no section) */
+  knowledge: number;
 }
 
 /** Up to 5 quote candidates for a category: readable length, least-overlapping (most specific to
@@ -259,6 +262,7 @@ export function assemble(
   prov: { sessions: number; moments: number; from: string; to: string },
   decode?: { sigs: Signature[]; signals: Map<string, string> },
   riders?: Map<string, Rider>,
+  knowledge?: KnowledgePrint,
 ): { text: string; meta: ProfileMeta } | null {
   const entries: Entry[] = stats
     .filter((s) => s.scope !== 'project' && s.count > 0)
@@ -293,7 +297,11 @@ export function assemble(
     const m = riders!.get(n)!.rider.match(/^when\s+([^,]+),\s*(.+)$/i);
     if (m) situations.push(`- ${m[1].trim()} → ${m[2].trim().replace(/\.\s*$/, '')}`);
   }
-  const keyLines = [...decodeLines, ...situations];
+  // THE KNOWLEDGE KEY LINES (2026-07-29) — the leg's templated reader instructions (the meta line,
+  // and the delegated line when delegated zones exist). Code-templated upstream, never voiced; a
+  // third bucket after the situations, same grammar (state → move).
+  const knowledgeKey = (knowledge?.rows.length ? knowledge.keyLines : []).map((l) => `- ${l}`);
+  const keyLines = [...decodeLines, ...situations, ...knowledgeKey];
 
   const head: string[] = [
     `Derived from ${prov.sessions} of this person's own conversations with an AI assistant, ${prov.from} to ${prov.to}. Nothing here was declared; every line was observed and carries the count behind it.${attached.length ? ' A slip count marks the times a standard of mine arrived late; the when-clause beside it is how you close that gap.' : ''}`,
@@ -305,7 +313,7 @@ export function assemble(
     head.push(
       '## In the moment',
       '',
-      situations.length
+      situations.length || knowledgeKey.length
         ? 'Their shorthand, and the situations to catch unprompted. Recognise these live; the detail is in the sections below.'
         : 'Their shorthand. Recognise these live; the detail is in the sections below.',
       '',
@@ -341,16 +349,35 @@ export function assemble(
     }
     text += '\n';
   }
+  // The talk section hosts two kinds of rows: register entries, then THE TEMPORARY KNOWLEDGE ROWS
+  // (2026-07-29) at its tail — both inside the same budget (which may honestly drop the second
+  // knowledge row). A knowledge row's text is voiced-once, verbatim; its receipt is the mint
+  // evidence, and NO trend word ever rides it — the row's disappearance on `learned` IS the trend
+  // surface. The file thins as the person gets better. Assembled locally so a section whose every
+  // row was budget-dropped never ships a bare heading.
   let shippedReg = 0;
-  if (register.length) {
-    text += ['## How to talk to me', '', 'The register I work in. Match it rather than smoothing it over.', '', ''].join('\n');
+  let shippedKnow = 0;
+  const kRows = knowledge?.rows ?? [];
+  if (register.length || kRows.length) {
+    let sect = ['## How to talk to me', '', 'The register I work in. Match it rather than smoothing it over.', '', ''].join('\n');
+    let sectRiders = 0;
     for (const e of register) {
       const rd = riderFor(e.stat.name);
       const row = block(e.v.line, e.stat, 'register', rd);
-      if (text.length + row.length > CHAR_BUDGET) break;
-      if (rd) attachedPrinted++;
-      text += row;
+      if (text.length + sect.length + row.length > CHAR_BUDGET) break;
+      if (rd) sectRiders++;
+      sect += row;
       shippedReg++;
+    }
+    for (const k of kRows) {
+      const row = `- ${k.row.replace(/\s+/g, ' ').trim().replace(/\.\s*$/, '')} (asked ${k.askCount}× across ${k.askSessions} conversations)\n`;
+      if (text.length + sect.length + row.length > CHAR_BUDGET) break;
+      sect += row;
+      shippedKnow++;
+    }
+    if (shippedReg || shippedKnow) {
+      text += sect;
+      attachedPrinted += sectRiders;
     }
   }
 
@@ -366,6 +393,7 @@ export function assemble(
       register: shippedReg,
       shorthand: decodeLines.length,
       rules: attachedPrinted,
+      knowledge: shippedKnow,
     },
   };
 }
@@ -420,5 +448,6 @@ export function buildProfile(): { text: string; meta: ProfileMeta } | null {
     },
     { sigs, signals },
     openRiders(),
+    knowledgePrint(),
   );
 }

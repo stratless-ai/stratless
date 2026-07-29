@@ -9,6 +9,7 @@ import { test } from 'node:test';
 
 import type { CategoryStat } from './count.js';
 import { assemble, looksLikeProfile, type Voiced, type Section } from './write.js';
+import { META_LINE, DELEGATED_LINE } from './knowledge.js';
 
 const stat = (over: Pick<CategoryStat, 'name' | 'lift' | 'count'> & Partial<CategoryStat>): CategoryStat => ({
   description: `does ${over.name}`,
@@ -209,6 +210,70 @@ test("assemble: a behaviour routed to 'none' is left out, not jammed into a sect
   assert.ok(built.text.includes('offer a plan first'), 'the routed one ships');
   assert.ok(!built.text.includes('fits no section'), "'none' is left out despite the larger count");
   assert.equal(built.meta.frame, 1);
+});
+
+test('assemble: knowledge rows ride the tail of the talk section — temporary, receipted, never trended', () => {
+  const stats = [
+    stat({ name: 'plan', lift: 1, count: 300, scope: 'person' }),
+    stat({ name: 'terse', lift: 1, count: 100, scope: 'person' }),
+  ];
+  const voiced = new Map<string, Voiced>([
+    ['plan', v('frame', 'q', 'offer a plan first')],
+    ['terse', v('register', 'sure', 'talk plainly')],
+  ]);
+  const knowledge = {
+    rows: [{ row: 'talk caching mechanism-first, in layman, for me', askCount: 14, askSessions: 4 }],
+    keyLines: [META_LINE, DELEGATED_LINE],
+  };
+  const built = assemble(stats, voiced, prov, undefined, undefined, knowledge)!;
+  const t = built.text;
+  assert.ok(
+    t.includes('- talk caching mechanism-first, in layman, for me (asked 14× across 4 conversations)\n'),
+    'the voiced row prints verbatim with its mint evidence as the receipt — no trend word, ever',
+  );
+  assert.ok(t.indexOf('talk plainly') < t.indexOf('talk caching'), 'knowledge rows sit at the tail, after register rows');
+  assert.ok(t.includes(`- ${META_LINE}\n`), 'the meta line lands in the decode key');
+  assert.ok(t.includes(`- ${DELEGATED_LINE}`), 'and the delegated line beside it');
+  assert.ok(t.includes('and the situations to catch unprompted'), 'the key subtitle widens — a knowledge trigger IS a situation');
+  assert.ok(t.indexOf(`- ${META_LINE}`) < t.indexOf('## What to offer me'), 'key lines sit in the head, above the sections');
+  assert.ok(!t.includes('## How to grow') && !t.includes('## Knowledge'), 'LIFT never gets a heading');
+  assert.equal(built.meta.knowledge, 1);
+});
+
+test('assemble: knowledge rows alone still earn the talk heading — and none leave no trace', () => {
+  const stats = [stat({ name: 'plan', lift: 1, count: 300, scope: 'person' })];
+  const voiced = new Map<string, Voiced>([['plan', v('frame', 'q', 'offer a plan first')]]);
+  const withRows = assemble(stats, voiced, prov, undefined, undefined, {
+    rows: [{ row: 'talk wrangler grounded for me', askCount: 6, askSessions: 3 }],
+    keyLines: [META_LINE],
+  })!;
+  assert.ok(withRows.text.includes('## How to talk to me'), 'the section prints for a knowledge row even with no register entries');
+  assert.equal(withRows.meta.register, 0);
+  assert.equal(withRows.meta.knowledge, 1);
+
+  const bare = assemble(stats, voiced, prov)!;
+  assert.ok(!bare.text.includes(META_LINE) && !bare.text.includes('asked '), 'no knowledge → no ink anywhere');
+  assert.equal(bare.meta.knowledge, 0);
+});
+
+test('assemble: knowledge rows respect the char budget — the second row may honestly drop', () => {
+  const stats: CategoryStat[] = [stat({ name: 'number', lift: 3, count: 999, scope: 'person' })];
+  const voiced = new Map<string, Voiced>([['number', v('judge', 'wait what', 'catch numbers')]]);
+  for (let i = 0; i < 40; i++) {
+    const name = `r${i}`;
+    stats.push(stat({ name, lift: 1, count: 100 - i, scope: 'person' }));
+    voiced.set(name, v('register', 'q', `register trait number ${i} that is fairly wordy ${'x'.repeat(150)}`));
+  }
+  const knowledge = {
+    rows: [
+      { row: 'talk caching mechanism-first for me', askCount: 14, askSessions: 4 },
+      { row: 'talk wrangler grounded in what each piece does', askCount: 6, askSessions: 3 },
+    ],
+    keyLines: [META_LINE],
+  };
+  const built = assemble(stats, voiced, prov, undefined, undefined, knowledge)!;
+  assert.ok(built.text.length <= 5800, 'the ceiling holds with knowledge rows in the mix');
+  assert.ok(built.meta.knowledge < 2, 'a full budget drops knowledge rows rather than bursting the file');
 });
 
 test('looksLikeProfile: yes for a real profile, no for chatter', () => {

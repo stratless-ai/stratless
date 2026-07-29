@@ -158,8 +158,11 @@ export async function embedAll(texts: string[], onProgress?: (done: number, tota
   // TEST SEAM. The end-to-end worker tests (kill-safety, stop, the consent gate) exercise the real
   // pipeline and must not download 40MB or reach the network to do it. This returns deterministic
   // vectors derived from the text itself — same text, same vector; similar text, similar vector —
-  // which is every property the stages downstream actually depend on.
-  if (process.env.STRATLESS_FAKE_EMBED === '1') return texts.map(fakeVector);
+  // which is every property the stages downstream actually depend on. (The lambda matters:
+  // `texts.map(fakeVector)` fed map's INDEX into fakeVector's `dims` and every fake vector had a
+  // different dimensionality — unnoticed until the topic discriminator became the first consumer
+  // to depend on the fake geometry, 2026-07-29.)
+  if (process.env.STRATLESS_FAKE_EMBED === '1') return texts.map((t) => fakeVector(t));
   // THE POOL. Big jobs (cold builds, migrations) fan out across up to POOL_MAX workers, each with
   // its own single-threaded runtime, each fingerprinting one text at a time. SAFE ONLY BECAUSE OF
   // BATCH=1: fingerprints are grouping-independent, so sharding cannot change a single bit —

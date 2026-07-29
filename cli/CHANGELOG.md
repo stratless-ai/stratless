@@ -22,6 +22,22 @@ and each version matches its `cli-v*` git tag.
   honest count, not a shortage.
 - The person-layer schema marker steps to `humanmd/v3` (the rider clause, the slip receipt, and the
   situation triggers are a schema change).
+- **The engine now knows what topic it's in — because your questions already told it.** Every
+  assistant answer's salient terms ride the moment record (the topic channel), and each flush
+  threads your own explanation-asks across sessions by those terms. A topic your asks keep
+  circling — asked enough, across enough conversations, with explanations that came straight back
+  ("i don't understand") and were re-delivered near-identically — earns at most **two temporary
+  rows** at the tail of "How to talk to me", worded once in YOUR OWN delivery spec (mined from
+  your ask modifiers — "in layman", or whatever yours is; never defaulted), with the mint evidence
+  as the receipt: *(asked 14× across 4 conversations)*. The rows instruct delivery, never grade
+  knowledge — and each retires ITSELF when your asks fade while the topic stays in your work
+  (absorbed, not abandoned: both hands are measured). The decode key gains one templated line —
+  *my questions circle one subject → drop a level and ground it in mechanism* — and, where zones
+  of chosen outsourcing exist, a second: a topic you never enter is **delegated, not unknown**,
+  and the assistant must not volunteer teaching there. Everything that decides what exists is
+  arithmetic against your own corpus (the ask detector is mined per person from adjacency, the
+  re-teaching verdict is relative to your archive's own baseline); the model's one job is wording
+  each row, once, at birth.
 
 ### Changed
 - **A fading offer/catch row is now checked against what the assistant actually did before it
@@ -35,8 +51,17 @@ and each version matches its `cli-v*` git tag.
   Measured on the reference archive before the code was written: the plan-first row that shipped as
   "fading" was in truth met — asks fell to 0.55× while plan-mode actions held at 1.20×, with zero
   refusals of plan mode in 103 uses.
+- **Moment shape v3** (supersedes the v2 note below in the same unreleased cycle): the moment
+  record gains the topic channel — the assistant answer's salient candidate terms and its true
+  length. Existing history re-derives itself from your transcripts on the next quiet refresh —
+  free, no model, nothing leaves the machine, and your paid assignments are untouched.
 - **Moment shape v2.** Existing history re-derives itself from your transcripts on the next quiet
   refresh — free, no model, nothing leaves the machine, and your paid assignments are untouched.
+
+### Fixed
+- The offline test seam's stand-in fingerprints all carried different dimensionalities (a `map`
+  argument leak), which no consumer noticed until the topic discriminator became the first code to
+  depend on the fake geometry. Test-only; real fingerprints were never affected.
 
 ## [0.6.2] · 2026-07-27 · many hands, same fingerprints
 

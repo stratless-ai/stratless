@@ -60,6 +60,13 @@ Who you are working with              (stratless · read from your own history)
 Not a rules sheet you wrote. A brief on a person, derived from your real history and nothing you
 declared, and it sharpens as that history grows.
 
+It also thins. A when-clause and its slip count disappear once the gap they mark closes. And when
+your own questions keep circling one topic — asked across sessions, explanations coming straight
+back — the talk section can gain up to two temporary rows telling your assistant how to deliver
+explanations *in that topic's moments*, worded in your own delivery spec, each retiring itself
+when your questions fade while the topic stays in your work. A topic you never enter is read as
+delegated, not unknown: your assistant is told not to volunteer teaching there.
+
 ## The commands
 
 One note first: `npx` runs stratless without installing it, so after `npx stratless init` the bare

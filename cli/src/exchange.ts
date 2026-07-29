@@ -16,6 +16,7 @@ import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { basename } from 'node:path';
 import { DEFAULT_ROOTS, PASTE_BOUND, dayKey, readSessions, turnsOfFile, type Turn } from './reader.js';
+import { termsOf } from './terms.js';
 
 /** One (AI turn → human reaction) pair. */
 export interface Exchange {
@@ -106,6 +107,15 @@ export interface Exchange {
   denied?: string[];
   /** last exchange of its session — "ended it here" is an act, and it was invisible */
   lastOfSession?: boolean;
+  /**
+   * THE TOPIC CHANNEL — salient candidate terms of the assistant's FULL answer, extracted here
+   * because this is the only place the whole answer exists as one string (the caps below keep a
+   * head and a tail; the card keeps less again). Candidates, not topics: which of these are rare
+   * for THIS person, and whether they thread across sessions, is downstream arithmetic (terms.ts
+   * has the doctrine — including why the v2 judge's `topic` tombstone above does not apply).
+   * Absent when the assistant said nothing, like `saidHead`.
+   */
+  aiTerms?: string[];
   /**
    * THE SHAPE OF THE MOMENT — true character counts, taken BEFORE the CAP truncation, so a genuine
    * wall of text reports its real size.
@@ -235,6 +245,8 @@ export function exchangesOfTurns(turns: Turn[], session: string): Exchange[] {
     if (t.text) {
       const p = prompt.slice(0, CAP);
       const r = t.text.slice(0, CAP);
+      // The topic channel reads the UNCAPPED answer — the one string the caps are about to shred.
+      const aiTerms = saidRaw ? termsOf(saidRaw) : [];
       out.push({
         prompt: p,
         said: saidText,
@@ -245,6 +257,7 @@ export function exchangesOfTurns(turns: Turn[], session: string): Exchange[] {
         // The head is a fact, outside the hash — the same slice discipline as `said`, from the other
         // end. Absent when the assistant said nothing at all.
         ...(saidRaw ? { saidHead: saidRaw.slice(0, SAID_HEAD) } : {}),
+        ...(aiTerms.length ? { aiTerms } : {}),
         ...(interrupted ? { interrupted } : {}),
         ...(declined ? { declined } : {}),
         // Facts — outside the hash by construction: hashOf() is called above with the three text

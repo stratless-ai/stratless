@@ -34,6 +34,7 @@ import { loadCategories } from './categories.js';
 import { loadAssignments, pendingMoments } from './assign.js';
 import { join as joinLabelled, scoreboard } from './count.js';
 import { runRules } from './rules.js';
+import { runKnowledge } from './knowledge.js';
 import { buildProfile, looksLikeProfile } from './write.js';
 import { coldBuild, engineReady, grow } from './engine.js';
 import { runtimePresent } from './embed.js';
@@ -305,7 +306,17 @@ export async function runWorker(): Promise<number> {
         if (rr.minted) summary.push(`${rr.minted} lift rule${rr.minted === 1 ? '' : 's'} minted — the counts decided; the model only worded it`);
         if (rr.retired) summary.push(`${rr.retired} lift rule${rr.retired === 1 ? '' : 's'} retired — the gap moved`);
 
-        if (changed || rr.changed || !existsSync(humanMdPath())) {
+        // THE KNOWLEDGE PASS (LIFT layer 3): thread the person's own asks into topics, re-measure
+        // every open topic against its birth baseline, retire what earned an exit, mint what the
+        // gates cleared — the one worded call, already on the paid path. Arithmetic decides what
+        // exists; the model only words each row once. A pre-v3 pile does nothing (refuse, don't lie).
+        const knowStart = Date.now();
+        const kr = await runKnowledge(bin, labelledAll, Date.now());
+        sw.stage('knowledge', Date.now() - knowStart, kr.minted + kr.retired);
+        if (kr.minted) summary.push(`${kr.minted} topic row${kr.minted === 1 ? '' : 's'} minted — their own questions decided; the model only worded it`);
+        if (kr.retired) summary.push(`${kr.retired} topic row${kr.retired === 1 ? '' : 's'} retired — the file thins as they grow`);
+
+        if (changed || rr.changed || kr.changed || !existsSync(humanMdPath())) {
           const writeStart = Date.now();
           const profile = buildProfile();
           sw.stage('write', Date.now() - writeStart, profile ? 1 : 0);
@@ -314,7 +325,7 @@ export async function runWorker(): Promise<number> {
             injectProfile(profile.text, undefined, undefined, builtAt); // writes ~/.claude/HUMAN.md AND points CLAUDE.md at it — the load
             writeRender('profile', { builtAt, sessions: profile.meta.sessions, exchanges: profile.meta.moments, categories: loadCategories().length });
             summary.push(
-              `profile written and loaded · ${profile.meta.frame} to offer + ${profile.meta.judge} to catch + ${profile.meta.register} register${profile.meta.rules ? ` + ${profile.meta.rules} to move` : ''}${profile.meta.shorthand ? ` + ${profile.meta.shorthand} shorthand handles` : ''}`,
+              `profile written and loaded · ${profile.meta.frame} to offer + ${profile.meta.judge} to catch + ${profile.meta.register} register${profile.meta.rules ? ` + ${profile.meta.rules} to move` : ''}${profile.meta.knowledge ? ` + ${profile.meta.knowledge} to ground` : ''}${profile.meta.shorthand ? ` + ${profile.meta.shorthand} shorthand handles` : ''}`,
             );
           } else {
             summary.push('profile not rebuilt — not enough clear evidence yet');
