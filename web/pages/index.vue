@@ -168,7 +168,7 @@ useHead({
   <section id="install" class="section install">
     <div class="container">
       <h2 class="sr-only">Install</h2>
-      <p class="eyebrow center">Try it free · changes nothing</p>
+      <p class="eyebrow center">Try it free · Type into your terminal</p>
       <div class="install-lead">
         <div class="cmd"><code>npx stratless</code></div>
       </div>
