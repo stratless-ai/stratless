@@ -297,10 +297,12 @@ export function assemble(
     const m = riders!.get(n)!.rider.match(/^when\s+([^,]+),\s*(.+)$/i);
     if (m) situations.push(`- ${m[1].trim()} → ${m[2].trim().replace(/\.\s*$/, '')}`);
   }
-  // THE KNOWLEDGE KEY LINES (2026-07-29) — the leg's templated reader instructions (the meta line,
-  // and the delegated line when delegated zones exist). Code-templated upstream, never voiced; a
-  // third bucket after the situations, same grammar (state → move).
-  const knowledgeKey = (knowledge?.rows.length ? knowledge.keyLines : []).map((l) => `- ${l}`);
+  // THE KNOWLEDGE KEY LINES (2026-07-29) — the leg's templated reader instructions: the meta line
+  // (the epistemic signature — it stands on its OWN evidence floor, named row or not; the
+  // founder's call), and the delegated line when delegated zones exist. Code-templated upstream,
+  // never voiced; a third bucket after the situations, same grammar (state → move). knowledgePrint
+  // owns every gating decision — assembly just prints what it was handed.
+  const knowledgeKey = (knowledge?.keyLines ?? []).map((l) => `- ${l}`);
   const keyLines = [...decodeLines, ...situations, ...knowledgeKey];
 
   const head: string[] = [

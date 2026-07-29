@@ -23,21 +23,25 @@ and each version matches its `cli-v*` git tag.
 - The person-layer schema marker steps to `humanmd/v3` (the rider clause, the slip receipt, and the
   situation triggers are a schema change).
 - **The engine now knows what topic it's in — because your questions already told it.** Every
-  assistant answer's salient terms ride the moment record (the topic channel), and each flush
-  threads your own explanation-asks across sessions by those terms. A topic your asks keep
-  circling — asked enough, across enough conversations, with explanations that came straight back
-  ("i don't understand") and were re-delivered near-identically — earns at most **two temporary
-  rows** at the tail of "How to talk to me", worded once in YOUR OWN delivery spec (mined from
-  your ask modifiers — "in layman", or whatever yours is; never defaulted), with the mint evidence
-  as the receipt: *(asked 14× across 4 conversations)*. The rows instruct delivery, never grade
-  knowledge — and each retires ITSELF when your asks fade while the topic stays in your work
-  (absorbed, not abandoned: both hands are measured). The decode key gains one templated line —
-  *my questions circle one subject → drop a level and ground it in mechanism* — and, where zones
+  assistant answer's salient terms ride the moment record (the topic channel), your own ask
+  rituals are mined from adjacency (no shipped phrasebook), and each refresh clusters the answers
+  to your asks into subjects — the same fingerprint-and-pile move the engine is built on, pointed
+  at the assistant's side of the conversation, with its habitual vocabulary dropped so piles form
+  on subjects rather than on its rhetoric. A subject your asks keep circling — asked enough,
+  across enough conversations, with explanations that came straight back ("i don't understand")
+  and were re-delivered near-identically in later sessions — can earn at most **two temporary
+  rows** at the tail of "How to talk to me", and only when the subject TRAVELS across your
+  projects: a project-bound subject never becomes a named row. Rows are worded once in YOUR OWN
+  delivery spec (mined from your ask modifiers; honestly absent when nothing recurs — never
+  defaulted), receipted with the mint evidence (*asked 14× across 4 conversations*), and each
+  retires ITSELF when your asks fade while the subject stays in your work (absorbed, not
+  abandoned: both hands are measured). The decode key gains the leg's main surface — one
+  templated line carrying your epistemic signature with honest counts (*my questions circle a
+  mechanism → drop a level… (541× across 88 conversations, 53 didn't land)*) — and, where zones
   of chosen outsourcing exist, a second: a topic you never enter is **delegated, not unknown**,
   and the assistant must not volunteer teaching there. Everything that decides what exists is
-  arithmetic against your own corpus (the ask detector is mined per person from adjacency, the
-  re-teaching verdict is relative to your archive's own baseline); the model's one job is wording
-  each row, once, at birth.
+  arithmetic and local geometry against your own corpus; the model's one job is wording each
+  named row, once, at birth.
 
 ### Changed
 - **A fading offer/catch row is now checked against what the assistant actually did before it

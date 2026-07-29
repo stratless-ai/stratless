@@ -13,17 +13,19 @@ import {
   readKnowledge,
   writeKnowledge,
   mintable,
+  portable,
   covers,
   nextKnowledgeState,
   deliverySpec,
   knowledgePrint,
   runKnowledge,
-  META_LINE,
+  metaLine,
   DELEGATED_LINE,
   type KnowledgeTopic,
   type KnowledgeHistoryEntry,
+  type MetaEvidence,
 } from './knowledge.js';
-import type { TopicThread } from './topics.js';
+import type { TopicPile } from './topics.js';
 import type { Labelled } from './count.js';
 import type { Moment } from './moments.js';
 
@@ -35,7 +37,7 @@ after(() => rmSync(dir, { recursive: true, force: true }));
 
 // ── fixture builders ────────────────────────────────────────────────────────────────────────────
 
-const thread = (o: Partial<TopicThread> = {}): TopicThread => ({
+const pile = (o: Partial<TopicPile> = {}): TopicPile => ({
   terms: ['caching'],
   slug: 'caching',
   askCount: 6,
@@ -44,8 +46,11 @@ const thread = (o: Partial<TopicThread> = {}): TopicThread => ({
   bounces: 2,
   askKeys: [],
   answerKeys: [],
-  answerSessions: [],
-  simMargin: 0.1,
+  projects: 2,
+  known: 6,
+  dominant: 3,
+  tightness: 0.9,
+  tightMargin: 0.1,
   ...o,
 });
 
@@ -58,11 +63,20 @@ const topic = (o: Partial<KnowledgeTopic> = {}): KnowledgeTopic => ({
   bounces: 2,
   askCount: 6,
   askSessions: 4,
-  simMargin: 0.1,
+  tightMargin: 0.1,
+  projects: 2,
   baseline: { askRate: 0.1, engageRate: 0.05 },
   row: 'talk caching mechanism-first, in layman, for me',
   history: [],
   lifecycle: 'open',
+  ...o,
+});
+
+const meta = (o: Partial<MetaEvidence> = {}): MetaEvidence => ({
+  asks: 48,
+  sessions: 12,
+  bounces: 14,
+  specPhrases: ['in layman'],
   ...o,
 });
 
@@ -112,23 +126,31 @@ test('the voiced row survives the store verbatim — voiced once, never re-worde
 // ── the mint gate ───────────────────────────────────────────────────────────────────────────────
 
 test('the evidence gate: two bounces mint, one bounce needs the re-ask spread, zero bounces never mint', () => {
-  assert.ok(mintable(thread({ bounces: 2, askSessions: 2 })), 'two bounces alone clear it');
-  assert.ok(mintable(thread({ bounces: 1, askSessions: 3 })), 'one bounce plus asks across three sessions clears it');
-  assert.ok(!mintable(thread({ bounces: 1, askSessions: 2 })), 'one bounce without the spread does not');
-  assert.ok(!mintable(thread({ bounces: 0, askSessions: 9 })), 'no bounce, no mint — however often they asked');
+  assert.ok(mintable(pile({ bounces: 2, askSessions: 2 })), 'two bounces alone clear it');
+  assert.ok(mintable(pile({ bounces: 1, askSessions: 3 })), 'one bounce plus asks across three sessions clears it');
+  assert.ok(!mintable(pile({ bounces: 1, askSessions: 2 })), 'one bounce without the spread does not');
+  assert.ok(!mintable(pile({ bounces: 0, askSessions: 9 })), 'no bounce, no mint — however often they asked');
+});
+
+test('the portability gate — a named row may only describe a subject that travels (direction C)', () => {
+  assert.ok(portable(pile()), 'two known projects, no dominance — travels');
+  assert.ok(!portable(pile({ projects: 1, dominant: 6 })), 'one project is project-bound — meta evidence, never a named row');
+  assert.ok(!portable(pile({ projects: 2, known: 6, dominant: 5 })), 'one project dominating is project-bound in practice');
+  assert.ok(!portable(pile({ projects: 2, known: 2, dominant: 1 })), 'unknown provenance blocks — a majority must carry a known project');
+  assert.ok(!mintable(pile({ projects: 1, dominant: 6 })), 'and the mint gate enforces it');
 });
 
 test('an unstamped or low-margin thread cannot mint — the discriminator leg is structural', () => {
-  assert.ok(!mintable(thread({ simMargin: undefined })), 'runtime absent or too few threads → unstamped → unmintable');
-  assert.ok(!mintable(thread({ simMargin: 0.01 })), 'evolving answers (co-construction) sit at or below the median');
-  assert.ok(mintable(thread({ simMargin: 0.05 })), 're-teaching clears the margin');
+  assert.ok(!mintable(pile({ tightness: undefined, tightMargin: undefined })), 'runtime absent or too few piles → unstamped → unmintable');
+  assert.ok(!mintable(pile({ tightMargin: 0.01 })), 'evolving answers (co-construction) sit at or below the median');
+  assert.ok(mintable(pile({ tightMargin: 0.05 })), 're-teaching clears the margin');
 });
 
 test('covered is forever — same slug or a majority of lead terms shared', () => {
   const existing = topic({ slug: 'caching', terms: ['caching', 'rebuilds', 'vectors'] });
-  assert.ok(covers(existing, thread({ slug: 'caching' })), 'same slug');
-  assert.ok(covers(existing, thread({ slug: 'rebuilds-caching', terms: ['rebuilds', 'caching', 'other'] })), 'majority overlap');
-  assert.ok(!covers(existing, thread({ slug: 'agpl', terms: ['agpl', 'license'] })), 'a different topic is not covered');
+  assert.ok(covers(existing, pile({ slug: 'caching' })), 'same slug');
+  assert.ok(covers(existing, pile({ slug: 'rebuilds-caching', terms: ['rebuilds', 'caching', 'other'] })), 'majority overlap');
+  assert.ok(!covers(existing, pile({ slug: 'agpl', terms: ['agpl', 'license'] })), 'a different topic is not covered');
 });
 
 // ── the lifecycle ───────────────────────────────────────────────────────────────────────────────
@@ -193,6 +215,20 @@ test('the delivery spec is DERIVED from their ask modifiers — and honestly emp
   assert.deepEqual(deliverySpec([mo('s1', '2026-07-01T10:00:00Z', 'explain to me how it works')], rituals), [], 'one ask proves no spec — never defaulted');
 });
 
+test('a gram the person uses everywhere is their grammar, not a delivery modifier — ask-share holds', () => {
+  mk = 0;
+  const rituals = new Set(['explain to me']);
+  const rows: Labelled[] = [];
+  for (let i = 0; i < 12; i++) {
+    rows.push(mo(`s${i % 4}`, `2026-07-0${1 + (i % 4)}T10:00:${String(i).padStart(2, '0')}Z`, `explain to me in layman what i want to see here ${i}`));
+    // the same "what i want" grammar, everywhere OUTSIDE asks too
+    rows.push(mo(`s${i % 4}`, `2026-07-0${1 + (i % 4)}T10:01:${String(i).padStart(2, '0')}Z`, `ok so what i want to do next is ship piece ${i}`));
+  }
+  const spec = deliverySpec(rows, rituals);
+  assert.ok(spec.some((d) => d.phrase === 'in layman'), 'the ask-exclusive modifier survives');
+  assert.ok(!spec.some((d) => d.phrase.includes('want')), 'the everywhere-grammar is excluded — measured junk on the real archive');
+});
+
 // ── the run ─────────────────────────────────────────────────────────────────────────────────────
 
 test('refuse, don\'t lie — a pre-v3 pile runs nothing and touches nothing', async () => {
@@ -232,7 +268,7 @@ test('the run re-measures open topics and retires what earned an exit — withou
 
 // ── the print surface ───────────────────────────────────────────────────────────────────────────
 
-test('at most two rows print, bounce-heaviest first, with the templated key lines they earn', () => {
+test('at most two rows print, bounce-heaviest first, with the key lines the evidence earns', () => {
   const p = join(dir, 'print.json');
   writeKnowledge(
     {
@@ -243,18 +279,29 @@ test('at most two rows print, bounce-heaviest first, with the templated key line
         topic({ id: 'd', slug: 'ddd', bounces: 9, row: 'talk ddd grounded for me', lifecycle: 'learned' }),
       ],
       delegatedZones: 4,
+      meta: meta(),
     },
     p,
   );
   const print = knowledgePrint(p);
   assert.deepEqual(print.rows.map((r) => r.row), ['talk bbb grounded for me', 'talk ccc grounded for me'], 'capped at two, bounce-heaviest, retired rows gone — the file thins');
-  assert.deepEqual(print.keyLines, [META_LINE, DELEGATED_LINE], 'the meta line and, with delegated zones present, the delegated line');
+  assert.deepEqual(print.keyLines, [metaLine(meta()), DELEGATED_LINE], 'the meta line and, with delegated zones present, the delegated line');
 });
 
-test('no open rows, no key lines — the leg leaves no trace when it has nothing to say', () => {
+test('the meta line is THE C SURFACE — it stands on its own evidence, named row or not', () => {
+  const p = join(dir, 'metaonly.json');
+  writeKnowledge({ topics: [], delegatedZones: 2, meta: meta({ bounces: 14 }) }, p);
+  const print = knowledgePrint(p);
+  assert.deepEqual(print.rows, [], 'no portable topic qualified — no named row');
+  assert.equal(print.keyLines.length, 2, 'the signature and the delegated line still print (the founder\'s call, 2026-07-29)');
+  assert.ok(print.keyLines[0].includes('in layman'), 'the person\'s own derived delivery phrase is embedded');
+  assert.ok(print.keyLines[0].includes("14 didn't land"), 'and the receipt is the measured evidence');
+});
+
+test('below the meta floor the leg leaves no trace — a couple of stray bounces is not a signature', () => {
   const p = join(dir, 'empty.json');
-  writeKnowledge({ topics: [topic({ lifecycle: 'learned' })], delegatedZones: 3 }, p);
+  writeKnowledge({ topics: [topic({ lifecycle: 'learned' })], delegatedZones: 3, meta: meta({ bounces: 2 }) }, p);
   const print = knowledgePrint(p);
   assert.deepEqual(print.rows, []);
-  assert.deepEqual(print.keyLines, [], 'a key line may not gesture at rows the file does not host');
+  assert.deepEqual(print.keyLines, [], 'no rows, evidence under the floor → nothing prints, delegated line included');
 });

@@ -9,7 +9,8 @@ import { test } from 'node:test';
 
 import type { CategoryStat } from './count.js';
 import { assemble, looksLikeProfile, type Voiced, type Section } from './write.js';
-import { META_LINE, DELEGATED_LINE } from './knowledge.js';
+import { DELEGATED_LINE } from './knowledge.js';
+const META_LINE = "my questions circle a mechanism → drop a level: in layman, mechanism before number (48× across 12 conversations, 14 didn't land)";
 
 const stat = (over: Pick<CategoryStat, 'name' | 'lift' | 'count'> & Partial<CategoryStat>): CategoryStat => ({
   description: `does ${over.name}`,

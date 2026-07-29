@@ -3,10 +3,13 @@
  *
  * The ledger of topics this person's own questions circle, and what to do about them: at most two
  * temporary rows in the talk section, worded in the person's OWN delivery spec, expiring on their
- * own evidence. What exists is decided by arithmetic (topics.ts: the thread bar, the bounce gate,
- * the relative discriminator); the model's only job is wording each row ONCE, at mint — the
- * rules.ts discipline, verbatim. The row instructs the assistant's DELIVERY in that topic's
- * moments; it never states, implies, or grades what the person doesn't know.
+ * own evidence — plus THE META SURFACE (direction C, 2026-07-29), the leg's main product: one
+ * templated line carrying the person's epistemic signature, distilled from every qualifying pile,
+ * project-bound ones included. What exists is decided by arithmetic and geometry (topics.ts: the
+ * pile bar, the bounce gate, cross-session tightness, the portability gate); the model's only job
+ * is wording each named row ONCE, at mint — the rules.ts discipline, verbatim. A row instructs
+ * the assistant's DELIVERY in that topic's moments; it never states, implies, or grades what the
+ * person doesn't know.
  *
  * THE THREE-STATE MAP the gates stand on (measured before built, Phase 0b):
  *   · thin      — they ask and bounce. The only mintable state.
@@ -34,19 +37,17 @@ import { readFileSync } from 'node:fs';
 import { atomicWriteFileSync } from './atomic.js';
 import { runClaude } from './claude.js';
 import { loadEngine } from './engine.js';
-import { runtimePresent } from './embed.js';
 import { adjacencyOf, type Labelled, type Adjacency } from './count.js';
 import { norm, allStop, isMachineArtifact } from './shorthand.js';
 import {
   topicsRead,
+  topicPiles,
   topicSpanRead,
   topicWindowRead,
   walkAnswers,
   askRituals,
-  discriminate,
   isAsk,
-  DISC_BASELINE_MIN,
-  type TopicThread,
+  type TopicPile,
 } from './topics.js';
 
 const knowledgePath = (): string => process.env.STRATLESS_KNOWLEDGE || join(homedir(), '.stratless', 'knowledge.json');
@@ -58,9 +59,17 @@ const knowledgePath = (): string => process.env.STRATLESS_KNOWLEDGE || join(home
 const BOUNCE_MIN = 2;
 /** …or one bounce plus asks across this many sessions (LOCKED). */
 const REASK_SESS_MIN = 3;
-/** the discriminator floor: a thread mints only this far above the corpus's own answer-similarity
- *  median — re-teaching, not co-construction. (MEASURE-THEN-LOCK: the cache-vs-strategy gap.) */
-const DISC_MARGIN = 0.04;
+/** the tightness floor: a pile mints only this far above the corpus's own cross-session
+ *  answer-similarity median — the same lesson re-delivered, not work moving forward.
+ *  (MEASURE-THEN-LOCK in pile-space; the thread-space 0.04 does not carry over unmeasured.) */
+const TIGHT_MARGIN = 0.04;
+/** THE PORTABILITY GATE (direction C, Sun's call 2026-07-29): a named row may only describe a
+ *  subject that travels — its answers span at least two known projects and no single project
+ *  dominates. A majority of the pile must carry a KNOWN project at all: unknown provenance can
+ *  block portability, never argue for it. Project-bound piles are not discarded — they are the
+ *  EVIDENCE for the meta surface below. */
+const PORT_PROJECTS_MIN = 2;
+const PORT_FRAC = 0.7;
 /** at most this many knowledge rows print — the leg's own cap, not the gap leg's. */
 export const KNOWLEDGE_PRINT_CAP = 2;
 /** a window must hold this many moments before its rates may retire a topic — a quiet stretch
@@ -94,17 +103,22 @@ export interface KnowledgeHistoryEntry {
 export interface KnowledgeTopic {
   id: string;
   bornAt: string;
-  /** display + covered-set identity, from the thread's lead terms */
+  /** display + covered-set identity, from the pile's lead terms */
   slug: string;
-  /** the thread's self-naming terms — how later windows find the topic again */
+  /** the pile's salient terms — how later windows find the topic again (term-based on purpose:
+   *  retirement never needs the runtime; no centroid is stored — the AI-common drop set drifts
+   *  with the corpus, so frozen pile geometry would decay exactly the way engine.ts's
+   *  frozen-vocab note warns; identity across flushes is `covers()` term overlap) */
   terms: string[];
-  /** the embedding pipeline the discriminator's margin was measured in */
+  /** the embedding pipeline the tightness margin was measured in */
   pipeline: string;
   /** birth evidence, verbatim from the gates — the receipt and the audit trail */
   bounces: number;
   askCount: number;
   askSessions: number;
-  simMargin: number;
+  tightMargin: number;
+  /** distinct known projects at birth — the portability audit */
+  projects: number;
   /** birth-window rates — every later build's rates are judged against these */
   baseline: { askRate: number; engageRate: number };
   /** the voiced row — written once at mint, never re-rolled */
@@ -117,17 +131,32 @@ export interface KnowledgeTopic {
   deliveryFeedback?: true;
 }
 
+/** THE META SURFACE's stored evidence (direction C: the leg's main product). A snapshot fact,
+ *  refreshed each flush from the qualifying piles — portable AND project-bound alike, because the
+ *  person-level truth (how grounding must arrive) is distilled FROM the project-bound asks. The
+ *  printed line is a code template over these numbers plus the person's own derived delivery
+ *  phrases — never voiced, so it cannot wobble; the counts move each flush like every receipt. */
+export interface MetaEvidence {
+  asks: number;
+  sessions: number;
+  bounces: number;
+  /** the person's own recurring ask modifiers ("in layman"), derived — possibly empty, never defaulted */
+  specPhrases: string[];
+}
+
 interface KnowledgeStore {
   topics: KnowledgeTopic[];
   /** how many delegated zones the last run saw — the delegated key line's trigger. A snapshot
    *  fact refreshed each flush (the zones themselves are recomputed, never stored). */
   delegatedZones?: number;
+  /** the meta surface's evidence — absent until a run has measured it */
+  meta?: MetaEvidence;
 }
 
 /** Defensive read — corrupt input degrades to empty, never throws (the renders.json discipline). */
 export function readKnowledge(file: string = knowledgePath()): KnowledgeStore {
   try {
-    const raw = JSON.parse(readFileSync(file, 'utf8')) as { topics?: unknown; delegatedZones?: unknown };
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as { topics?: unknown; delegatedZones?: unknown; meta?: unknown };
     if (!Array.isArray(raw.topics)) return { topics: [] };
     const topics: KnowledgeTopic[] = [];
     for (const t of raw.topics) {
@@ -145,7 +174,8 @@ export function readKnowledge(file: string = knowledgePath()): KnowledgeStore {
         bounces: typeof o.bounces === 'number' ? o.bounces : 0,
         askCount: typeof o.askCount === 'number' ? o.askCount : 0,
         askSessions: typeof o.askSessions === 'number' ? o.askSessions : 0,
-        simMargin: typeof o.simMargin === 'number' ? o.simMargin : 0,
+        tightMargin: typeof o.tightMargin === 'number' ? o.tightMargin : 0,
+        projects: typeof o.projects === 'number' ? o.projects : 0,
         baseline: { askRate: typeof b.askRate === 'number' ? b.askRate : 0, engageRate: typeof b.engageRate === 'number' ? b.engageRate : 0 },
         ...(typeof o.row === 'string' ? { row: o.row } : {}),
         ...(Array.isArray(o.deliveryPhrases) ? { deliveryPhrases: o.deliveryPhrases.filter((x): x is string => typeof x === 'string') } : {}),
@@ -154,7 +184,20 @@ export function readKnowledge(file: string = knowledgePath()): KnowledgeStore {
         ...(o.deliveryFeedback === true ? { deliveryFeedback: true } : {}),
       });
     }
-    return { topics, ...(typeof raw.delegatedZones === 'number' ? { delegatedZones: raw.delegatedZones } : {}) };
+    const m = typeof raw.meta === 'object' && raw.meta !== null ? (raw.meta as Record<string, unknown>) : undefined;
+    const meta: MetaEvidence | undefined = m
+      ? {
+          asks: typeof m.asks === 'number' ? m.asks : 0,
+          sessions: typeof m.sessions === 'number' ? m.sessions : 0,
+          bounces: typeof m.bounces === 'number' ? m.bounces : 0,
+          specPhrases: Array.isArray(m.specPhrases) ? m.specPhrases.filter((x): x is string => typeof x === 'string') : [],
+        }
+      : undefined;
+    return {
+      topics,
+      ...(typeof raw.delegatedZones === 'number' ? { delegatedZones: raw.delegatedZones } : {}),
+      ...(meta ? { meta } : {}),
+    };
   } catch {
     return { topics: [] };
   }
@@ -164,19 +207,29 @@ export function writeKnowledge(store: KnowledgeStore, file: string = knowledgePa
   atomicWriteFileSync(file, JSON.stringify(store, null, 1));
 }
 
-/* ——— the mint gate ——— */
+/* ——— the mint gates ——— */
 
-/** The evidence gate over a thread that already cleared the LOCKED bar in topics.ts. The
- *  discriminator leg is structural: an unstamped thread (runtime absent, too few threads for a
- *  baseline) can never mint — refuse, don't lie. */
-export function mintable(t: TopicThread): boolean {
+/** Does this pile's subject TRAVEL? A majority of its answers must carry a known project at all
+ *  (unknown provenance blocks, never enables), those must span at least two projects, and no
+ *  single one may dominate. A pile that fails is not discarded — it feeds the meta surface. */
+export function portable(t: TopicPile): boolean {
+  if (t.known * 2 < t.askCount) return false;
+  if (t.projects < PORT_PROJECTS_MIN) return false;
+  return t.dominant / t.known <= PORT_FRAC;
+}
+
+/** The evidence gate over a pile that already cleared the LOCKED bar in topics.ts. The tightness
+ *  leg is structural: an unstamped pile (runtime absent, one conversation, too few piles for a
+ *  baseline) can never mint — refuse, don't lie. Direction C: only a PORTABLE subject may become
+ *  a named row. */
+export function mintable(t: TopicPile): boolean {
   const evidence = t.bounces >= BOUNCE_MIN || (t.bounces >= 1 && t.askSessions >= REASK_SESS_MIN);
-  return evidence && typeof t.simMargin === 'number' && t.simMargin >= DISC_MARGIN;
+  return evidence && typeof t.tightMargin === 'number' && t.tightMargin >= TIGHT_MARGIN && portable(t);
 }
 
 /** One entry per topic, EVER — a retired topic's axis does not silently re-mint (the rules.ts
  *  doctrine). Identity is the slug, or a majority of lead terms shared. */
-export function covers(existing: KnowledgeTopic, t: TopicThread): boolean {
+export function covers(existing: KnowledgeTopic, t: TopicPile): boolean {
   if (existing.slug === t.slug) return true;
   const a = new Set(existing.terms.slice(0, 5));
   const lead = t.terms.slice(0, 5);
@@ -230,6 +283,10 @@ export function nextKnowledgeState(topic: KnowledgeTopic, nowMs: number): Knowle
 const DELIV_MIN = 10;
 const DELIV_SESS = 3;
 const DELIV_TOP = 3;
+/** A delivery modifier lives in ASKS: the gram must be near-exclusive to ask replies. Measured on
+ *  the real archive (2026-07-29): without this, generic person grammar ("want to", "what i")
+ *  cleared the count floors while the true modifier ("in layman") is ask-exclusive. */
+const DELIV_ASK_SHARE = 0.7;
 
 /**
  * The person's OWN ask modifiers: recurring interior n-grams of their ask replies ("in layman",
@@ -240,9 +297,16 @@ const DELIV_TOP = 3;
  */
 export function deliverySpec(labelled: Labelled[], rituals: Set<string>): { phrase: string; count: number }[] {
   const count = new Map<string, { n: number; sessions: Set<string> }>();
+  const elsewhere = new Map<string, number>();
   for (const l of labelled) {
-    if (!isAsk(l.moment.reply, rituals)) continue;
     const words = norm(l.moment.reply).split(' ').filter(Boolean);
+    if (!isAsk(l.moment.reply, rituals)) {
+      // The contrast corpus: a gram the person uses everywhere is their grammar, not a modifier.
+      const grams = new Set<string>();
+      for (const n of [2, 3]) for (let i = 0; i + n <= words.length; i++) grams.add(words.slice(i, i + n).join(' '));
+      for (const g of grams) elsewhere.set(g, (elsewhere.get(g) ?? 0) + 1);
+      continue;
+    }
     // Grams start AFTER the matched ritual prefix: the ritual's own tail ("to me") recurs exactly
     // as often as any real modifier and would pollute the spec with fragments of the ask itself.
     let start = 1;
@@ -254,8 +318,14 @@ export function deliverySpec(labelled: Labelled[], rituals: Set<string>): { phra
     for (const n of [2, 3]) {
       for (let i = start; i + n <= words.length; i++) grams.add(words.slice(i, i + n).join(' '));
     }
+    // The person's own ritual vocabulary: a gram made entirely of it (plus stopwords) is a
+    // fragment of HOW they ask ("it mean"), not of how they want it answered — ask-exclusive by
+    // construction, which is exactly why the ask-share test cannot catch it.
+    const ritualVocab = new Set<string>();
+    for (const r of rituals) for (const w of r.split(' ')) ritualVocab.add(w);
+    const ritualFragment = (g: string): boolean => g.split(' ').every((w) => ritualVocab.has(w) || allStop(w));
     for (const g of grams) {
-      if (allStop(g) || isMachineArtifact(g) || rituals.has(g)) continue;
+      if (allStop(g) || isMachineArtifact(g) || rituals.has(g) || ritualFragment(g)) continue;
       let cur = count.get(g);
       if (!cur) {
         cur = { n: 0, sessions: new Set() };
@@ -266,7 +336,7 @@ export function deliverySpec(labelled: Labelled[], rituals: Set<string>): { phra
     }
   }
   const kept = [...count.entries()]
-    .filter(([, c]) => c.n >= DELIV_MIN && c.sessions.size >= DELIV_SESS)
+    .filter(([g, c]) => c.n >= DELIV_MIN && c.sessions.size >= DELIV_SESS && c.n / (c.n + (elsewhere.get(g) ?? 0)) >= DELIV_ASK_SHARE)
     .sort((a, b) => b[1].n - a[1].n || a[0].localeCompare(b[0]));
   // Keep the canonical short form: drop a gram when a kept shorter gram is contained in it.
   const out: { phrase: string; count: number }[] = [];
@@ -299,16 +369,16 @@ const SAMPLE_CAP = 5;
 const SAMPLE_CHARS = 240;
 
 export interface KnowledgeVoiceJob {
-  thread: TopicThread;
+  pile: TopicPile;
   askQuotes: string[];
   bounceQuotes: string[];
   delivery: { phrase: string; count: number }[];
 }
 
-/** Per-session ask quotes for a thread — the voicer sees how the person actually asks. */
+/** Per-session ask quotes for a pile — the voicer sees how the person actually asks. */
 export function knowledgeVoiceJobs(
   labelled: Labelled[],
-  threads: TopicThread[],
+  piles: TopicPile[],
   delivery: { phrase: string; count: number }[],
   adj: Adjacency,
 ): KnowledgeVoiceJob[] {
@@ -337,8 +407,8 @@ export function knowledgeVoiceJobs(
     }
     return out;
   };
-  return threads.map((t) => ({
-    thread: t,
+  return piles.map((t) => ({
+    pile: t,
     askQuotes: quotesOf(t.askKeys, false),
     bounceQuotes: quotesOf(t.askKeys, true),
     delivery,
@@ -355,8 +425,8 @@ export function voiceTopics(bin: string, jobs: KnowledgeVoiceJob[]): Map<string,
   const body = jobs
     .map((j) => {
       const parts = [
-        `TOPIC ${j.thread.slug}: the subject their questions keep circling, in its own words: ${j.thread.terms.slice(0, 5).join(', ')}`,
-        `asked ${j.thread.askCount} times across ${j.thread.askSessions} conversations; ${j.thread.bounces} explanations came straight back`,
+        `TOPIC ${j.pile.slug}: the subject their questions keep circling, in its own words: ${j.pile.terms.slice(0, 5).join(', ')}`,
+        `asked ${j.pile.askCount} times across ${j.pile.askSessions} conversations; ${j.pile.bounces} explanations came straight back`,
         `how they ask:`,
         ...j.askQuotes.map((q) => `  · "${q}"`),
       ];
@@ -395,7 +465,7 @@ export function voiceTopics(bin: string, jobs: KnowledgeVoiceJob[]): Map<string,
     const m = reply.match(/\{[\s\S]*\}/);
     if (!m) return out;
     const parsed = JSON.parse(m[0]) as { rows?: { slug?: string; row?: string }[] };
-    const known = new Set(jobs.map((j) => j.thread.slug));
+    const known = new Set(jobs.map((j) => j.pile.slug));
     for (const r of parsed.rows ?? []) {
       if (!r.slug || !known.has(r.slug) || !r.row) continue;
       out.set(r.slug, r.row.trim());
@@ -470,36 +540,58 @@ export async function runKnowledge(
     changed = true; // the delegated key line may appear or vanish
   }
 
-  // 4. The discriminator — over ALL candidate threads (the widest honest baseline), only when it
-  //    can run honestly: the runtime must already be here (a background path never fetches).
-  const canEmbed = process.env.STRATLESS_FAKE_EMBED === '1' || runtimePresent();
-  if (canEmbed && read.threads.length >= DISC_BASELINE_MIN) {
-    await discriminate(read.threads, walk.heads);
+  // 4. The pile construction — subjects as regions of answer-space. Guards its own honesty
+  //    (runtime absent → [], a background path never fetches; margins stamped only against a
+  //    real baseline).
+  const piles = await topicPiles(read.events, labelled, walk);
+  const delivery = deliverySpec(labelled, rituals);
+
+  // 5. The meta surface's evidence (direction C, Sun's call 2026-07-29): EVERY bar-clearing pile
+  //    feeds it — the project-bound piles are exactly where the bounces live, and the person-level
+  //    truth they carry is how grounding must arrive, which travels. Refreshed each flush.
+  const askKeys = new Set<string>();
+  const metaSessions = new Set<string>();
+  let metaBounces = 0;
+  for (const p of piles) {
+    for (const k of p.askKeys) askKeys.add(k);
+    metaBounces += p.bounces;
+  }
+  for (const e of read.events) if (askKeys.has(e.key)) metaSessions.add(e.session);
+  const meta: MetaEvidence = {
+    asks: askKeys.size,
+    sessions: metaSessions.size,
+    bounces: metaBounces,
+    specPhrases: delivery.map((d) => d.phrase),
+  };
+  if (JSON.stringify(store.meta) !== JSON.stringify(meta)) {
+    store.meta = meta;
+    storeMoved = true;
+    changed = true; // the meta line's receipt moved (or the line appears/vanishes at the floor)
   }
 
-  // 5. Mint: gate-clearing threads not already covered, voiced in one batched call.
-  const candidates = read.threads.filter((t) => mintable(t) && !store.topics.some((k) => covers(k, t)));
+  // 6. Mint: gate-clearing PORTABLE piles not already covered, voiced in one batched call.
+  const candidates = piles.filter((t) => mintable(t) && !store.topics.some((k) => covers(k, t)));
   let minted = 0;
   if (bin && candidates.length) {
-    const delivery = deliverySpec(labelled, rituals);
     const jobs = knowledgeVoiceJobs(labelled, candidates, delivery, adj);
     const voiced = voiceTopics(bin, jobs);
     const pipeline = loadEngine()?.pipeline ?? '';
     for (const j of jobs) {
-      const row = voiced.get(j.thread.slug);
+      const row = voiced.get(j.pile.slug);
       if (!row) continue; // no voiced row, no mint — retry next flush
-      const span = topicSpanRead(labelled, j.thread.terms, j.thread.askKeys, adj, rituals);
+      const span = topicSpanRead(labelled, j.pile.terms, j.pile.askKeys, adj, rituals);
       if (span.askRate <= 0) continue; // unfalsifiable — cannot exist (alive by construction, guarded anyway)
       store.topics.push({
-        id: `${builtAt}·${j.thread.slug}`,
+        id: `${builtAt}·${j.pile.slug}`,
         bornAt: builtAt,
-        slug: j.thread.slug,
-        terms: j.thread.terms,
+        slug: j.pile.slug,
+        terms: j.pile.terms,
         pipeline,
-        bounces: j.thread.bounces,
-        askCount: j.thread.askCount,
-        askSessions: j.thread.askSessions,
-        simMargin: j.thread.simMargin!,
+        bounces: j.pile.bounces,
+        askCount: j.pile.askCount,
+        askSessions: j.pile.askSessions,
+        tightMargin: j.pile.tightMargin!,
+        projects: j.pile.projects,
         baseline: { askRate: span.askRate, engageRate: span.engageRate },
         row,
         ...(delivery.length ? { deliveryPhrases: delivery.map((d) => d.phrase) } : {}),
@@ -524,11 +616,25 @@ export async function runKnowledge(
  * delegated line. The templates are CODE, not model output: they are generic reader instructions
  * (like headings), and a template cannot wobble. */
 
-/** The meta line: evidence-backed, prints only when at least one knowledge row prints. */
-export const META_LINE = 'my questions circle one subject → drop a level and ground it in mechanism';
+/** THE META SURFACE prints only above this much bounce evidence — a couple of stray bounces is
+ *  noise, not a signature. (MEASURE-THEN-LOCK.) */
+const META_FLOOR = 10;
+
+/** The meta line — THE C SURFACE (Sun's call, 2026-07-29): it prints on its own evidence, named
+ *  row or not, because the person-level truth it carries (how grounding must arrive) is distilled
+ *  from every qualifying pile, project-bound ones included. A code template over measured
+ *  numbers and the person's own derived phrases — never voiced, so it cannot wobble. The exact
+ *  wording is felt-gate material at acceptance. */
+export function metaLine(meta: MetaEvidence): string {
+  const spec = meta.specPhrases.length ? `${meta.specPhrases.slice(0, 2).join(', ')}, ` : '';
+  return `my questions circle a mechanism → drop a level: ${spec}mechanism before number (${meta.asks}× across ${meta.sessions} conversations, ${meta.bounces} didn't land)`;
+}
+
 /** The delegated line: prints only when the leg is active and delegated zones exist. Names no
- *  topic, ever — naming would grade the choice it protects. */
-export const DELEGATED_LINE = "a topic I never enter is delegated, not unknown → don't volunteer teaching there";
+ *  topic, ever — naming would grade the choice it protects. Worded at the felt gate (2026-07-29):
+ *  the first draft ("delegated, not unknown") BOUNCED with the founder — design vocabulary
+ *  leaking into the file, the exact sin the rider section died for — and was re-worded plain. */
+export const DELEGATED_LINE = "where I never ask questions, I don't want lessons → just do the work, skip the teaching";
 
 export interface KnowledgeRow {
   /** the voiced-once row, verbatim — assembly never re-words */
@@ -543,8 +649,9 @@ export interface KnowledgePrint {
   keyLines: string[];
 }
 
-/** Open topics as printable rows, bounce-heaviest first, capped — plus the templated key lines
- *  their presence earns. */
+/** Open topics as printable rows, bounce-heaviest first, capped — plus the key lines the leg's
+ *  evidence earns. The meta line stands on its own floor; the delegated line requires the leg to
+ *  be visibly active (a key line may not gesture at machinery the file shows nothing of). */
 export function knowledgePrint(file: string = knowledgePath()): KnowledgePrint {
   const store = readKnowledge(file);
   const rows = store.topics
@@ -553,7 +660,8 @@ export function knowledgePrint(file: string = knowledgePath()): KnowledgePrint {
     .slice(0, KNOWLEDGE_PRINT_CAP)
     .map((t) => ({ row: t.row!, askCount: t.askCount, askSessions: t.askSessions }));
   const keyLines: string[] = [];
-  if (rows.length) keyLines.push(META_LINE);
-  if (rows.length && (store.delegatedZones ?? 0) > 0) keyLines.push(DELEGATED_LINE);
+  const metaQualifies = !!store.meta && store.meta.bounces >= META_FLOOR;
+  if (metaQualifies) keyLines.push(metaLine(store.meta!));
+  if ((rows.length || metaQualifies) && (store.delegatedZones ?? 0) > 0) keyLines.push(DELEGATED_LINE);
   return { rows, keyLines };
 }
