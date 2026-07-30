@@ -287,27 +287,36 @@ export function gapCandidates(labelled: Labelled[], categories: Category[], adj:
 }
 
 /** One build's re-measurement of a rule's gap, over the trailing window. `sample` says how much
- *  recent evidence the rates stand on — a quiet stretch must not read as a closed gap. */
+ *  recent evidence the rates stand on — a quiet stretch must not read as a closed gap. `chances`
+ *  is the shadow rule's unit (pre-registered 2026-07-30): the distinct sessions where the
+ *  situation AROSE at all — absence without opportunity is silence, not success. */
 export function gapWindowRead(
   labelled: Labelled[],
   name: string,
   nowMs: number,
   days = RECENT_DAYS,
-): { slipRate: number; stumbleSessions: number; reach: number; sample: number } {
+): { slipRate: number; stumbleSessions: number; reach: number; sample: number; chances: number } {
   const cut = nowMs - days * 24 * 3600_000;
   const win = labelled.filter((l) => {
     const t = Date.parse(l.moment.ts);
     return Number.isFinite(t) && t >= cut && t <= nowMs;
   });
-  if (!win.length) return { slipRate: 0, stumbleSessions: 0, reach: 0, sample: 0 };
+  if (!win.length) return { slipRate: 0, stumbleSessions: 0, reach: 0, sample: 0, chances: 0 };
   const adj = adjacencyOf(win);
-  const slip = win.filter((l) => l.kinds.includes(name) && isNegative(l.moment));
-  const reach = win.filter((l) => l.kinds.includes(name) && l.moment.pile === 'ordinary').length;
+  const carry = win.filter((l) => l.kinds.includes(name));
+  const slip = carry.filter((l) => isNegative(l.moment));
+  const reach = carry.filter((l) => l.moment.pile === 'ordinary').length;
   let stumbles = 0;
   for (const sess of new Set(slip.map((l) => l.moment.session))) {
     if (stumbled(adj.bySession.get(sess) ?? [], name)) stumbles++;
   }
-  return { slipRate: slip.length / win.length, stumbleSessions: stumbles, reach, sample: win.length };
+  return {
+    slipRate: slip.length / win.length,
+    stumbleSessions: stumbles,
+    reach,
+    sample: win.length,
+    chances: new Set(carry.map((l) => l.moment.session)).size,
+  };
 }
 
 /** True when a single ISO week holds at least half a category's moments — concentrated in a bad

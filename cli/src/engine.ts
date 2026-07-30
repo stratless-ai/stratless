@@ -23,7 +23,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { appendCategories } from './categories.js';
+import { appendCategories, loadCategories, retireCategories } from './categories.js';
 import { buildPiles, join as nearest, type Pile } from './cluster.js';
 import { MODEL, embedAll, runtimePresent } from './embed.js';
 import { MODEL_WEIGHTS_SHA256, RUNTIME_VERSION } from './fetch.js';
@@ -153,6 +153,12 @@ export async function coldBuild(bin: string, opts: {
  *  its project-filter as a dead-man switch that nothing trips. */
 function freeze(moments: Moment[], piles: Pile[], named: Named[], vocab: Set<string>): BuildResult {
   const at = new Date().toISOString();
+  // A cold build REPLACES every assignment below, so the outgoing generation is retired first —
+  // otherwise every versioned rebuild stacks ~30 ghost categories that nothing carries (measured:
+  // three rebuilds left 90 born, 0 retired). Tombstones keep the log auditable; the live set
+  // folds to this build's generation only. A crash between retire and born leaves an empty live
+  // set, which routes the next run back down the cold path — safe, never half-alive.
+  retireCategories(loadCategories().map((c) => c.name), { at });
   appendCategories(named.map((n) => ({ name: n.name, description: n.description })), { at });
 
   // A pile that no behaviour claimed contributes nothing — its moments get an empty `kinds`, which is

@@ -46,7 +46,7 @@ const storePath = (): string => process.env.STRATLESS_MOMENTS || join(homedir(),
  * shape could not re-derive. Independent of the assignment and discovery versions on purpose: a
  * change to what a moment IS should not throw away paid-for assignments, and vice versa.
  */
-export const MOMENTS_V = 3; // 3: `aiTerms` + `saidLen` added — the topic channel (topics/knowledge read them)
+export const MOMENTS_V = 3; // 3: `aiTerms` + `saidLen` added — the answer channel (asks/lift read them)
 
 /** The reply is stored capped — enough to read and to quote from, not the whole paste. The TRUE
  *  length rides alongside in `replyLen`, because size is itself a signal and the cap would hide it. */
@@ -85,9 +85,9 @@ export interface Moment {
   aiHead?: string;
   /** the ENDING of the assistant's turn — what the reply answered. Absent when it said nothing. */
   aiTail?: string;
-  /** salient candidate terms of the assistant's FULL answer — the topic channel. Extracted at
+  /** salient candidate terms of the assistant's FULL answer — the answer channel. Extracted at
    *  collect (exchange.ts holds the whole answer; the caps here keep 300+300), rarity and
-   *  threading decided downstream against the whole pile (topics.ts). Absent when it said nothing. */
+   *  salience judged downstream against the whole corpus (asks.ts). Absent when it said nothing. */
   aiTerms?: string[];
   /** the TRUE length of the assistant's turn, before any cap — the explanation-shape signal the
    *  ask detector reads (mirrors replyLen: size is itself a signal and the caps would hide it).
@@ -123,7 +123,7 @@ export function toMoment(ex: Exchange): Moment {
   // nothing (an opener, a tool-only turn), which is honest — there was no opening move to record.
   if (ex.said) m.aiTail = ex.said.slice(-TAIL);
   if (ex.saidHead) m.aiHead = ex.saidHead.slice(0, HEAD);
-  // The topic channel rides the same gate: absent exactly when the assistant said nothing.
+  // The answer channel rides the same gate: absent exactly when the assistant said nothing.
   if (ex.aiTerms?.length) m.aiTerms = ex.aiTerms;
   if (ex.said) m.saidLen = ex.shape?.said ?? ex.said.length;
   return m;

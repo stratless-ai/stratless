@@ -22,26 +22,21 @@ and each version matches its `cli-v*` git tag.
   honest count, not a shortage.
 - The person-layer schema marker steps to `humanmd/v3` (the rider clause, the slip receipt, and the
   situation triggers are a schema change).
-- **The engine now knows what topic it's in — because your questions already told it.** Every
-  assistant answer's salient terms ride the moment record (the topic channel), your own ask
-  rituals are mined from adjacency (no shipped phrasebook), and each refresh clusters the answers
-  to your asks into subjects — the same fingerprint-and-pile move the engine is built on, pointed
-  at the assistant's side of the conversation, with its habitual vocabulary dropped so piles form
-  on subjects rather than on its rhetoric. A subject your asks keep circling — asked enough,
-  across enough conversations, with explanations that came straight back ("i don't understand")
-  and were re-delivered near-identically in later sessions — can earn at most **two temporary
-  rows** at the tail of "How to talk to me", and only when the subject TRAVELS across your
-  projects: a project-bound subject never becomes a named row. Rows are worded once in YOUR OWN
-  delivery spec (mined from your ask modifiers; honestly absent when nothing recurs — never
-  defaulted), receipted with the mint evidence (*asked 14× across 4 conversations*), and each
-  retires ITSELF when your asks fade while the subject stays in your work (absorbed, not
-  abandoned: both hands are measured). The decode key gains the leg's main surface — one
-  templated line carrying your epistemic signature with honest counts (*my questions circle a
-  mechanism → drop a level… (541× across 88 conversations, 53 didn't land)*) — and, where zones
-  of chosen outsourcing exist, a second: a topic you never enter is **delegated, not unknown**,
-  and the assistant must not volunteer teaching there. Everything that decides what exists is
-  arithmetic and local geometry against your own corpus; the model's one job is wording each
-  named row, once, at birth.
+- **The tuning-service loop.** Your profile is the tune your AI reads; the engine now runs one
+  loop that keeps it true: wherever the AI measurably failed YOU — moving before your plan was
+  down, explaining denser than you could absorb — a patch enters the tune, worded once, tested
+  against its own birth baseline on every refresh, and **deleted the moment the failure stops.
+  The file gets shorter as the pairing gets better.** Two failure modes are live. *Wrong time*
+  prints as the when-clause riders and slip receipts above. *Wrong altitude* reads your own ask
+  rituals (mined from your history — no shipped phrasebook) and the explanations that came
+  straight back ("i don't understand"), and prints two lines in the decode key: your
+  comprehension signature with its honest counts (*my questions circle a mechanism → drop a
+  level… (563× across 88 conversations, 52 didn't land)*), and — where zones of chosen
+  outsourcing exist — *where I never ask questions, I don't want lessons*. No topic is ever
+  named, nothing about you is ever graded: **every patch records a failure of the AI, never a
+  state of you.** Everything that decides what exists is arithmetic against your own corpus; the
+  model's one job is wording each patch, once, at birth. (The moment record carries the answer
+  channel that makes this readable: every assistant answer's salient terms and true length.)
 
 ### Changed
 - **A fading offer/catch row is now checked against what the assistant actually did before it
@@ -56,9 +51,9 @@ and each version matches its `cli-v*` git tag.
   "fading" was in truth met — asks fell to 0.55× while plan-mode actions held at 1.20×, with zero
   refusals of plan mode in 103 uses.
 - **Moment shape v3** (supersedes the v2 note below in the same unreleased cycle): the moment
-  record gains the topic channel — the assistant answer's salient candidate terms and its true
-  length. Existing history re-derives itself from your transcripts on the next quiet refresh —
-  free, no model, nothing leaves the machine, and your paid assignments are untouched.
+  record gains the answer channel — the assistant answer's salient terms and its true length.
+  Existing history re-derives itself from your transcripts on the next quiet refresh — free, no
+  model, nothing leaves the machine, and your paid assignments are untouched.
 - **Moment shape v2.** Existing history re-derives itself from your transcripts on the next quiet
   refresh — free, no model, nothing leaves the machine, and your paid assignments are untouched.
 

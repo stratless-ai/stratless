@@ -557,8 +557,8 @@ async function status(rest: string[] = []): Promise<void> {
   // cold run: shape, fingerprint, cluster, name) and `grow` (placing new moments — free). Anyone who
   // ran a previous version still has that spend on their meter, and it must keep a readable label
   // rather than disappearing or printing a raw key.
-  const RETIRED = new Set(['judge', 'synthesis', 'miner', 'audit', 'grade', 'discover', 'assign']);
-  const STAGE_LABEL: Record<string, string> = { build: 'building', grow: 'placing', name: 'naming', write: 'writing', rules: 'rule voicing', knowledge: 'topic voicing' };
+  const RETIRED = new Set(['judge', 'synthesis', 'miner', 'audit', 'grade', 'discover', 'assign', 'rules', 'knowledge']);
+  const STAGE_LABEL: Record<string, string> = { build: 'building', grow: 'placing', name: 'naming', write: 'writing', lift: 'patch voicing' };
   let retiredUsd = 0;
   const stageParts: string[] = [];
   for (const [f, t] of Object.entries(u.byFeature)) {

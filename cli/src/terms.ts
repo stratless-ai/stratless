@@ -1,5 +1,5 @@
 /**
- * TERMS — the topic channel's collect-time half. What subject an assistant answer was about, as
+ * TERMS — the answer channel's collect-time half. What subject an assistant answer was about, as
  * candidate terms, extracted mechanically while the full text still exists (exchange.ts holds the
  * whole answer for one moment; the caps then keep 800 head + 8000 tail, and the card 300 + 300).
  *
@@ -9,7 +9,7 @@
  *     card scored against "the corpus as of today" would depend on when it was written — a rebuild
  *     and an append would produce different cards from the same archive. Candidates keep the store's
  *     own doctrine (same exchange → same card, forever); which candidates are RARE, and whether they
- *     thread across sessions, is decided downstream against the whole pile (topics.ts), where the
+ *     thread across sessions, is decided downstream against the whole pile (asks.ts), where the
  *     answer is re-derivable and deterministic.
  *
  *   · THE 99.5% GHOST, argued past: the v2 judge had a `topic` field and it was cut — a model's

@@ -21,10 +21,12 @@
  *      retired removes. Unknown event kinds are ignored, so a newer writer never breaks an older
  *      reader.
  *
- * WRITERS only ever emit `born` today (the seed script, and the engine at cold build). `revised` and
- * `retired` are recognised on read so the format is settled ahead of any writer — but nothing emits
- * them yet: cold start ships only the survivors, so a pruned category is never written, never a
- * tombstone. A writer arrives when steady-state revision does.
+ * WRITERS emit `born` (the seed script, and the engine at cold build) and — since 2026-07-30 —
+ * `retired`: a cold rebuild REPLACES every assignment, so it retires the entire outgoing
+ * generation before appending its own. Without that, every versioned rebuild stacked ~30 ghost
+ * categories that nothing carried (measured on the reference machine: three rebuilds, 90 born,
+ * 0 retired, 89 "live"). `revised` is recognised on read; its writer arrives with steady-state
+ * revision.
  *
  * NO MODEL CALLS. Everything here is code. Cost is zero.
  */
@@ -120,6 +122,21 @@ export function appendCategories(
       ...(c.scope ? { scope: c.scope } : {}),
     } as CategoryEvent),
   );
+  if (!lines.length) return 0;
+  mkdirSync(dirname(file), { recursive: true });
+  appendFileSync(file, lines.join('\n') + '\n');
+  return lines.length;
+}
+
+/**
+ * Append `retired` tombstones. The cold build calls this for the whole outgoing generation before
+ * appending its own `born` events — the log keeps every tombstone (auditability), the live set
+ * folds to only the current generation. Returns how many were written.
+ */
+export function retireCategories(names: string[], opts: { file?: string; at?: string } = {}): number {
+  const file = opts.file ?? storePath();
+  const at = opts.at ?? new Date().toISOString();
+  const lines = names.map((name) => JSON.stringify({ event: 'retired', name, description: '', at } as CategoryEvent));
   if (!lines.length) return 0;
   mkdirSync(dirname(file), { recursive: true });
   appendFileSync(file, lines.join('\n') + '\n');

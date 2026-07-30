@@ -108,7 +108,7 @@ export interface Exchange {
   /** last exchange of its session — "ended it here" is an act, and it was invisible */
   lastOfSession?: boolean;
   /**
-   * THE TOPIC CHANNEL — salient candidate terms of the assistant's FULL answer, extracted here
+   * THE ANSWER CHANNEL — salient candidate terms of the assistant's FULL answer, extracted here
    * because this is the only place the whole answer exists as one string (the caps below keep a
    * head and a tail; the card keeps less again). Candidates, not topics: which of these are rare
    * for THIS person, and whether they thread across sessions, is downstream arithmetic (terms.ts
@@ -245,7 +245,7 @@ export function exchangesOfTurns(turns: Turn[], session: string): Exchange[] {
     if (t.text) {
       const p = prompt.slice(0, CAP);
       const r = t.text.slice(0, CAP);
-      // The topic channel reads the UNCAPPED answer — the one string the caps are about to shred.
+      // The answer channel reads the UNCAPPED answer — the one string the caps are about to shred.
       const aiTerms = saidRaw ? termsOf(saidRaw) : [];
       out.push({
         prompt: p,

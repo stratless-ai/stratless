@@ -28,8 +28,7 @@ import { loadCategories } from './categories.js';
 import { loadAssignments } from './assign.js';
 import { loadMoments, type Moment } from './moments.js';
 import { join, tally, LIFT_CUT, type Labelled, type CategoryStat } from './count.js';
-import { openRiders, type Rider } from './rules.js';
-import { knowledgePrint, type KnowledgePrint } from './knowledge.js';
+import { liftPrint, type Clause, type LiftPrint } from './lift.js';
 import { signatures, type Signature } from './shorthand.js';
 
 /** The whole file targets this size; Frame + Judge always ship in full, Register fills the rest by
@@ -57,10 +56,8 @@ export interface ProfileMeta {
   register: number;
   /** lines in the "In the moment" decode key */
   shorthand: number;
-  /** gap riders attached to their host rows (LIFT never gets a section of its own) */
+  /** when-clauses attached to their host rows (LIFT is dynamics, never surface — no section of its own) */
   rules: number;
-  /** temporary knowledge rows shipped at the end of the talk section (same doctrine: no section) */
-  knowledge: number;
 }
 
 /** Up to 5 quote candidates for a category: readable length, least-overlapping (most specific to
@@ -206,7 +203,7 @@ ${body}`;
  * carried. The quote still EXISTS for register rows — voice() must pick one or the row drops — it is
  * the quality gate proving the line is demonstrable, not display.
  */
-function block(claim: string, stat: CategoryStat, sec: Section, rd?: Rider): string {
+function block(claim: string, stat: CategoryStat, sec: Section, cl?: Clause): string {
   // THE COMPACT RECEIPT (2026-07-26). The row is an instruction with a terse marker, not a claim
   // followed by an evidence SENTENCE — "338 times across 77 conversations" on its own line was
   // written for a human auditor, and the AI gains nothing from the prose. The count itself stays:
@@ -228,8 +225,8 @@ function block(claim: string, stat: CategoryStat, sec: Section, rd?: Rider): str
   if (stat.direction && (sec === 'register' || stat.verified)) bits.push(stat.direction);
   if (stat.burst) bits.push('comes in bursts');
   const base = claim.replace(/\s+/g, ' ').trim();
-  const c = rd ? `${base.replace(/\s*\.\s*$/, '')} — and ${rd.rider.replace(/\s*\.\s*$/, '').replace(/\s+/g, ' ').trim()}.` : base;
-  const slipBit = rd ? ` · slip ${rd.slip}×${rd.trend ? ', ' + rd.trend : ''}` : '';
+  const c = cl ? `${base.replace(/\s*\.\s*$/, '')} — and ${cl.clause.replace(/\s*\.\s*$/, '').replace(/\s+/g, ' ').trim()}.` : base;
+  const slipBit = cl ? ` · slip ${cl.slip}×${cl.trend ? ', ' + cl.trend : ''}` : '';
   return `- ${c} (${stat.count}×${bits.length ? ', ' + bits.join(', ') : ''}${slipBit})\n`;
 }
 
@@ -261,8 +258,7 @@ export function assemble(
   voiced: Map<string, Voiced>,
   prov: { sessions: number; moments: number; from: string; to: string },
   decode?: { sigs: Signature[]; signals: Map<string, string> },
-  riders?: Map<string, Rider>,
-  knowledge?: KnowledgePrint,
+  lift?: LiftPrint,
 ): { text: string; meta: ProfileMeta } | null {
   const entries: Entry[] = stats
     .filter((s) => s.scope !== 'project' && s.count > 0)
@@ -281,12 +277,13 @@ export function assemble(
   // notes still has a profile worth loading.
   if (!frame.length && !judge.length && !register.length) return null;
 
-  // Riders attach only to categories that earned a row — a rule whose category has no entry stays
+  // Riders attach only to categories that earned a row — a patch whose home has no entry stays
   // invisible, key line and all (the file may not gesture at something it cannot host). Attachment
   // is judged pre-budget; in the rare case a register host is later budget-dropped, its key line
   // still stands — a true trigger without its detail row, which the key's own subtitle allows.
-  const riderFor = (name: string): Rider | undefined => riders?.get(name);
-  const attached = [...(riders?.keys() ?? [])].filter((n) => entries.some((e) => e.stat.name === n));
+  const clauses = lift?.clauses;
+  const clauseFor = (name: string): Clause | undefined => clauses?.get(name);
+  const attached = [...(clauses?.keys() ?? [])].filter((n) => entries.some((e) => e.stat.name === n));
 
   const decodeLines = decode ? decodeKey(decode) : [];
   // THE SITUATION TRIGGERS — the gap's live recognizer. Phrase triggers are states the person
@@ -294,16 +291,15 @@ export function assemble(
   // no gap). Derived mechanically from the rider's when-clause; an unparseable rider casts none.
   const situations: string[] = [];
   for (const n of attached) {
-    const m = riders!.get(n)!.rider.match(/^when\s+([^,]+),\s*(.+)$/i);
+    const m = clauses!.get(n)!.clause.match(/^when\s+([^,]+),\s*(.+)$/i);
     if (m) situations.push(`- ${m[1].trim()} → ${m[2].trim().replace(/\.\s*$/, '')}`);
   }
-  // THE KNOWLEDGE KEY LINES (2026-07-29) — the leg's templated reader instructions: the meta line
-  // (the epistemic signature — it stands on its OWN evidence floor, named row or not; the
-  // founder's call), and the delegated line when delegated zones exist. Code-templated upstream,
-  // never voiced; a third bucket after the situations, same grammar (state → move). knowledgePrint
-  // owns every gating decision — assembly just prints what it was handed.
-  const knowledgeKey = (knowledge?.keyLines ?? []).map((l) => `- ${l}`);
-  const keyLines = [...decodeLines, ...situations, ...knowledgeKey];
+  // THE LOOP'S KEY LINES (2026-07-29) — mode 2's templated trigger patches: the signature line
+  // (it stands on its OWN evidence floor — the founder's call) and the delegated line. Templated
+  // upstream, never voiced; a third bucket after the situations, same grammar (state → move).
+  // liftPrint owns every gating decision — assembly just prints what it was handed.
+  const loopKey = (lift?.keyLines ?? []).map((l) => `- ${l}`);
+  const keyLines = [...decodeLines, ...situations, ...loopKey];
 
   const head: string[] = [
     `Derived from ${prov.sessions} of this person's own conversations with an AI assistant, ${prov.from} to ${prov.to}. Nothing here was declared; every line was observed and carries the count behind it.${attached.length ? ' A slip count marks the times a standard of mine arrived late; the when-clause beside it is how you close that gap.' : ''}`,
@@ -315,7 +311,7 @@ export function assemble(
     head.push(
       '## In the moment',
       '',
-      situations.length || knowledgeKey.length
+      situations.length || loopKey.length
         ? 'Their shorthand, and the situations to catch unprompted. Recognise these live; the detail is in the sections below.'
         : 'Their shorthand. Recognise these live; the detail is in the sections below.',
       '',
@@ -336,50 +332,31 @@ export function assemble(
   if (frame.length) {
     text += ['## What to offer me before I ask', '', 'Set these up or hand them over before I ask. Offering them unprompted is the point, not overstepping.', '', ''].join('\n');
     for (const e of frame) {
-      const rd = riderFor(e.stat.name);
-      if (rd) attachedPrinted++;
-      text += block(e.v.line, e.stat, 'frame', rd);
+      const cl = clauseFor(e.stat.name);
+      if (cl) attachedPrinted++;
+      text += block(e.v.line, e.stat, 'frame', cl);
     }
     text += '\n';
   }
   if (judge.length) {
     text += ['## What to catch for me', '', 'What I reliably challenge or refuse. Pre-empt these, so I do not have to catch them myself.', '', ''].join('\n');
     for (const e of judge) {
-      const rd = riderFor(e.stat.name);
-      if (rd) attachedPrinted++;
-      text += block(e.v.line, e.stat, 'judge', rd);
+      const cl = clauseFor(e.stat.name);
+      if (cl) attachedPrinted++;
+      text += block(e.v.line, e.stat, 'judge', cl);
     }
     text += '\n';
   }
-  // The talk section hosts two kinds of rows: register entries, then THE TEMPORARY KNOWLEDGE ROWS
-  // (2026-07-29) at its tail — both inside the same budget (which may honestly drop the second
-  // knowledge row). A knowledge row's text is voiced-once, verbatim; its receipt is the mint
-  // evidence, and NO trend word ever rides it — the row's disappearance on `learned` IS the trend
-  // surface. The file thins as the person gets better. Assembled locally so a section whose every
-  // row was budget-dropped never ships a bare heading.
   let shippedReg = 0;
-  let shippedKnow = 0;
-  const kRows = knowledge?.rows ?? [];
-  if (register.length || kRows.length) {
-    let sect = ['## How to talk to me', '', 'The register I work in. Match it rather than smoothing it over.', '', ''].join('\n');
-    let sectRiders = 0;
+  if (register.length) {
+    text += ['## How to talk to me', '', 'The register I work in. Match it rather than smoothing it over.', '', ''].join('\n');
     for (const e of register) {
-      const rd = riderFor(e.stat.name);
-      const row = block(e.v.line, e.stat, 'register', rd);
-      if (text.length + sect.length + row.length > CHAR_BUDGET) break;
-      if (rd) sectRiders++;
-      sect += row;
+      const cl = clauseFor(e.stat.name);
+      const row = block(e.v.line, e.stat, 'register', cl);
+      if (text.length + row.length > CHAR_BUDGET) break;
+      if (cl) attachedPrinted++;
+      text += row;
       shippedReg++;
-    }
-    for (const k of kRows) {
-      const row = `- ${k.row.replace(/\s+/g, ' ').trim().replace(/\.\s*$/, '')} (asked ${k.askCount}× across ${k.askSessions} conversations)\n`;
-      if (text.length + sect.length + row.length > CHAR_BUDGET) break;
-      sect += row;
-      shippedKnow++;
-    }
-    if (shippedReg || shippedKnow) {
-      text += sect;
-      attachedPrinted += sectRiders;
     }
   }
 
@@ -395,7 +372,6 @@ export function assemble(
       register: shippedReg,
       shorthand: decodeLines.length,
       rules: attachedPrinted,
-      knowledge: shippedKnow,
     },
   };
 }
@@ -449,7 +425,6 @@ export function buildProfile(): { text: string; meta: ProfileMeta } | null {
       to: (times[times.length - 1] ?? '').slice(0, 10),
     },
     { sigs, signals },
-    openRiders(),
-    knowledgePrint(),
+    liftPrint(),
   );
 }

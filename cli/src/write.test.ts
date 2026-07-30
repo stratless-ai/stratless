@@ -9,8 +9,10 @@ import { test } from 'node:test';
 
 import type { CategoryStat } from './count.js';
 import { assemble, looksLikeProfile, type Voiced, type Section } from './write.js';
-import { DELEGATED_LINE } from './knowledge.js';
+// Key lines are opaque strings to the assembler — liftPrint owns their gating and wording, so the
+// fixtures here use frozen literals rather than importing the templates.
 const META_LINE = "my questions circle a mechanism → drop a level: in layman, mechanism before number (48× across 12 conversations, 14 didn't land)";
+const DELEGATED_LINE = "where I never ask questions, I don't want lessons → just do the work, skip the teaching";
 
 const stat = (over: Pick<CategoryStat, 'name' | 'lift' | 'count'> & Partial<CategoryStat>): CategoryStat => ({
   description: `does ${over.name}`,
@@ -116,7 +118,7 @@ test('assemble: which trend words ride in the receipt depends on the section', (
   assert.ok(built.text.includes('- offer burst (10×, comes in bursts)'), 'burst rides in the receipt');
 });
 
-test('assemble: a gap rider deepens its host row — no section of its own, ever', () => {
+test('assemble: a when-clause deepens its host row — no section of its own, ever', () => {
   const stats: CategoryStat[] = [
     stat({ name: 'plan', lift: 1, count: 234, scope: 'person', direction: 'met', verified: true }),
     stat({ name: 'verify', lift: 5, count: 99, scope: 'person' }),
@@ -127,25 +129,25 @@ test('assemble: a gap rider deepens its host row — no section of its own, ever
     ['verify', v('judge', 'q2', 'catch unshown work')],
     ['terse', v('register', 'sure', 'talk plainly')],
   ]);
-  const riders = new Map([
-    ['plan', { rider: "when work is starting and I haven't set a plan yet, stop and plan first.", slip: 25, trend: 'opening' as const }],
-    ['ghost', { rider: 'when something, do something', slip: 9 }], // no host row → invisible, key line and all
+  const clauses = new Map([
+    ['plan', { clause: "when work is starting and I haven't set a plan yet, stop and plan first.", slip: 25, trend: 'opening' as const }],
+    ['ghost', { clause: 'when something, do something', slip: 9 }], // no host row → invisible, key line and all
   ]);
-  const built = assemble(stats, voiced, prov, undefined, riders)!;
+  const built = assemble(stats, voiced, prov, undefined, { clauses, keyLines: [] })!;
   const t = built.text;
   assert.ok(
     t.includes("- offer to enter plan mode first — and when work is starting and I haven't set a plan yet, stop and plan first. (234×, met · slip 25×, opening)\n"),
-    'the rider joins the host row; the receipt carries both sides and the gap trend',
+    'the clause joins the host row; the receipt carries both sides and the gap trend',
   );
   assert.ok(!t.includes('How to move me forward'), 'LIFT never gets a heading');
   assert.ok(t.includes("- work is starting and I haven't set a plan yet → stop and plan first\n"), 'the situation trigger lands in the decode key');
   assert.ok(t.includes('and the situations to catch unprompted'), 'the key subtitle widens when a situation is present');
   assert.ok(t.includes('A slip count marks the times a standard of mine arrived late'), 'the preamble explains the slip count');
-  assert.ok(!t.includes('do something'), 'a rider with no host row prints nothing at all');
-  assert.equal(built.meta.rules, 1, 'only attached riders count');
+  assert.ok(!t.includes('do something'), 'a clause with no host row prints nothing at all');
+  assert.equal(built.meta.rules, 1, 'only attached clauses count');
 
   const bare = assemble(stats, voiced, prov)!;
-  assert.ok(!bare.text.includes('slip'), 'no riders → no slip ink anywhere');
+  assert.ok(!bare.text.includes('slip'), 'no clauses → no slip ink anywhere');
   assert.ok(!bare.text.includes('situations to catch'), 'and the plain subtitle stands');
   assert.equal(bare.meta.rules, 0);
 });
@@ -159,12 +161,12 @@ test('assemble: register fills only to the char budget', () => {
     // the LINE carries the bulk — quotes are no longer printed, so only the line can hit the budget
     voiced.set(name, v('register', 'q', `register trait number ${i} that is fairly wordy ${'x'.repeat(150)}`));
   }
-  // a rider rides the always-shipped judge row, so its ink is spent before register fills — the
+  // a clause rides the always-shipped judge row, so its ink is spent before register fills — the
   // budget check on register absorbs it and the whole file still lands under the ceiling.
-  const riders = new Map([['number', { rider: 'when a number arrives unsourced, show the breakdown first', slip: 25 }]]);
-  const built = assemble(stats, voiced, prov, undefined, riders)!;
+  const clauses = new Map([['number', { clause: 'when a number arrives unsourced, show the breakdown first', slip: 25 }]]);
+  const built = assemble(stats, voiced, prov, undefined, { clauses, keyLines: [] })!;
   assert.equal(built.meta.judge, 1, 'the judge entry always ships');
-  assert.equal(built.meta.rules, 1, 'the rider ships with its host');
+  assert.equal(built.meta.rules, 1, 'the clause ships with its host');
   assert.ok(built.meta.register > 0 && built.meta.register < 40, 'register truncated by the budget');
   assert.ok(built.text.length <= 5800, 'stays within the char budget');
 });
@@ -213,7 +215,7 @@ test("assemble: a behaviour routed to 'none' is left out, not jammed into a sect
   assert.equal(built.meta.frame, 1);
 });
 
-test('assemble: knowledge rows ride the tail of the talk section — temporary, receipted, never trended', () => {
+test('assemble: the loop\'s key lines print in the decode key — and no lift means no ink', () => {
   const stats = [
     stat({ name: 'plan', lift: 1, count: 300, scope: 'person' }),
     stat({ name: 'terse', lift: 1, count: 100, scope: 'person' }),
@@ -222,59 +224,16 @@ test('assemble: knowledge rows ride the tail of the talk section — temporary, 
     ['plan', v('frame', 'q', 'offer a plan first')],
     ['terse', v('register', 'sure', 'talk plainly')],
   ]);
-  const knowledge = {
-    rows: [{ row: 'talk caching mechanism-first, in layman, for me', askCount: 14, askSessions: 4 }],
-    keyLines: [META_LINE, DELEGATED_LINE],
-  };
-  const built = assemble(stats, voiced, prov, undefined, undefined, knowledge)!;
+  const built = assemble(stats, voiced, prov, undefined, { clauses: new Map(), keyLines: [META_LINE, DELEGATED_LINE] })!;
   const t = built.text;
-  assert.ok(
-    t.includes('- talk caching mechanism-first, in layman, for me (asked 14× across 4 conversations)\n'),
-    'the voiced row prints verbatim with its mint evidence as the receipt — no trend word, ever',
-  );
-  assert.ok(t.indexOf('talk plainly') < t.indexOf('talk caching'), 'knowledge rows sit at the tail, after register rows');
-  assert.ok(t.includes(`- ${META_LINE}\n`), 'the meta line lands in the decode key');
+  assert.ok(t.includes(`- ${META_LINE}\n`), 'the signature line lands in the decode key');
   assert.ok(t.includes(`- ${DELEGATED_LINE}`), 'and the delegated line beside it');
-  assert.ok(t.includes('and the situations to catch unprompted'), 'the key subtitle widens — a knowledge trigger IS a situation');
+  assert.ok(t.includes('and the situations to catch unprompted'), 'the key subtitle widens — a loop trigger IS a situation');
   assert.ok(t.indexOf(`- ${META_LINE}`) < t.indexOf('## What to offer me'), 'key lines sit in the head, above the sections');
   assert.ok(!t.includes('## How to grow') && !t.includes('## Knowledge'), 'LIFT never gets a heading');
-  assert.equal(built.meta.knowledge, 1);
-});
-
-test('assemble: knowledge rows alone still earn the talk heading — and none leave no trace', () => {
-  const stats = [stat({ name: 'plan', lift: 1, count: 300, scope: 'person' })];
-  const voiced = new Map<string, Voiced>([['plan', v('frame', 'q', 'offer a plan first')]]);
-  const withRows = assemble(stats, voiced, prov, undefined, undefined, {
-    rows: [{ row: 'talk wrangler grounded for me', askCount: 6, askSessions: 3 }],
-    keyLines: [META_LINE],
-  })!;
-  assert.ok(withRows.text.includes('## How to talk to me'), 'the section prints for a knowledge row even with no register entries');
-  assert.equal(withRows.meta.register, 0);
-  assert.equal(withRows.meta.knowledge, 1);
 
   const bare = assemble(stats, voiced, prov)!;
-  assert.ok(!bare.text.includes(META_LINE) && !bare.text.includes('asked '), 'no knowledge → no ink anywhere');
-  assert.equal(bare.meta.knowledge, 0);
-});
-
-test('assemble: knowledge rows respect the char budget — the second row may honestly drop', () => {
-  const stats: CategoryStat[] = [stat({ name: 'number', lift: 3, count: 999, scope: 'person' })];
-  const voiced = new Map<string, Voiced>([['number', v('judge', 'wait what', 'catch numbers')]]);
-  for (let i = 0; i < 40; i++) {
-    const name = `r${i}`;
-    stats.push(stat({ name, lift: 1, count: 100 - i, scope: 'person' }));
-    voiced.set(name, v('register', 'q', `register trait number ${i} that is fairly wordy ${'x'.repeat(150)}`));
-  }
-  const knowledge = {
-    rows: [
-      { row: 'talk caching mechanism-first for me', askCount: 14, askSessions: 4 },
-      { row: 'talk wrangler grounded in what each piece does', askCount: 6, askSessions: 3 },
-    ],
-    keyLines: [META_LINE],
-  };
-  const built = assemble(stats, voiced, prov, undefined, undefined, knowledge)!;
-  assert.ok(built.text.length <= 5800, 'the ceiling holds with knowledge rows in the mix');
-  assert.ok(built.meta.knowledge < 2, 'a full budget drops knowledge rows rather than bursting the file');
+  assert.ok(!bare.text.includes('my questions circle'), 'no lift → no ink anywhere');
 });
 
 test('looksLikeProfile: yes for a real profile, no for chatter', () => {
