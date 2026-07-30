@@ -17,21 +17,12 @@
  * links get their pointed-at file created) and copies the existing file's mode onto the temp
  * before the rename. We replace CONTENT, never identity.
  *
- * Which stores throw and which stay fail-open is a per-store call, made where each store lives.
- * Today every live store reads fail-open (a damaged file costs one rebuild or a meter line, not
- * the pile); CorruptStoreError remains the refusal path for any spend cache that must never be
- * silently re-billed — the throwers went with the v1 caches, the posture did not.
+ * Every store reads fail-open: a damaged file costs one rebuild or a meter line, never the pile —
+ * the v3 engine made every artifact cheap to re-derive, so refusal (the v1-era CorruptStoreError)
+ * retired with the $24 caches it protected.
  */
 import { chmodSync, mkdirSync, readlinkSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
-
-/** A store exists on disk but cannot be read. Callers surface it as a refusal, never as "empty". */
-export class CorruptStoreError extends Error {
-  constructor(public readonly file: string) {
-    super(`${file} is damaged (not the JSON stratless wrote)`);
-    this.name = 'CorruptStoreError';
-  }
-}
 
 /** Where a write should actually land: through every symlink to the real file. A dangling link
  *  resolves one hop to its pointed-at path (the write CREATES that file, as write-through would);

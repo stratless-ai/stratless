@@ -25,7 +25,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CorruptStoreError } from './atomic.js';
 import { findAssistant } from './claude.js';
 import { buildMoments, loadMoments } from './moments.js';
 import { driftCheck } from './reader.js';
@@ -325,14 +324,6 @@ export async function runWorker(): Promise<number> {
     writeProgress({ phase: 'done', ok: true, startedAt, summary, ...(spent ? { spend: spent } : {}) });
     return 0;
   } catch (err) {
-    if (err instanceof CorruptStoreError) {
-      // C2's refusal keeps its remedy even when the corruption is found INSIDE the worker.
-      fail([
-        `refused: ${err.file} is damaged — and re-reading your whole history over it would re-bill you`,
-        `nothing was read or spent past it; move it aside, then rerun: mv ${err.file} ${err.file}.damaged`,
-      ]);
-      return 1;
-    }
     fail([`the worker hit an unexpected error: ${err instanceof Error ? err.message : String(err)}`]);
     return 1;
   } finally {

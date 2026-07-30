@@ -21,7 +21,6 @@ import { loadRecentExchanges } from './exchange.js';
 import { removeProfile, humanMdPath, claudeMdPath } from './load.js';
 import { readRenders, requestColdBuild, coldBuildRequested, readState, setFlushCadence, type FlushCadence } from './state.js';
 import { readUsage } from './usage.js';
-import { CorruptStoreError } from './atomic.js';
 import { readLock, lockIsStale, stopWorker, spawnDetached, resolveBinPath } from './worker.js';
 import { runWorker, installedVersion, JUDGE_WINDOW } from './loop.js';
 import { readProgress, type Progress } from './progress.js';
@@ -815,29 +814,16 @@ async function main(): Promise<void> {
   // flags above still print the full list, so nothing is unreachable.
   if (!cmd) return mirror([]);
 
-  // C2's command-layer half: a damaged spend-cache surfaces as ONE clear refusal, wherever it was
-  // hit. Reading corruption as "empty" would re-bill the person's whole history without a word.
-  try {
-    if (cmd === '__worker') {
-      // hidden: the doorbells spawn this — the worker process's whole life is runWorker()
-      process.exitCode = await runWorker();
-      return;
-    }
-    if (cmd === 'mirror') return await mirror(args.slice(1));
-    if (cmd === 'status') return await status(args.slice(1));
-    if (cmd === 'profile') return await profiler(args.slice(1));
-    if (cmd === 'update') return await update(args.slice(1));
-    if (cmd === 'stop') return await stop();
-  } catch (err) {
-    if (err instanceof CorruptStoreError) {
-      console.error(`\n  ${C.bad('stratless cannot read its own cache — and will not re-bill you over it.')}`);
-      console.error(`  ${C.dim(`${err.file} is damaged. Everything in it was paid for on your claude; reading it`)}`);
-      console.error(`  ${C.dim('as empty would silently re-spend your whole history. Move it aside, then rerun:')}`);
-      console.error(`\n    mv ${err.file} ${err.file}.damaged\n`);
-      process.exit(1);
-    }
-    throw err;
+  if (cmd === '__worker') {
+    // hidden: the doorbells spawn this — the worker process's whole life is runWorker()
+    process.exitCode = await runWorker();
+    return;
   }
+  if (cmd === 'mirror') return await mirror(args.slice(1));
+  if (cmd === 'status') return await status(args.slice(1));
+  if (cmd === 'profile') return await profiler(args.slice(1));
+  if (cmd === 'update') return await update(args.slice(1));
+  if (cmd === 'stop') return await stop();
 
   // A mistyped COMMAND gets the same courtesy as a mistyped flag (0.3.5): name the nearest one,
   // never just reject. The user-facing verbs, in help order.

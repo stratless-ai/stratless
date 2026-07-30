@@ -16,7 +16,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { test, before, after } from 'node:test';
 
-import { atomicWriteFileSync, CorruptStoreError } from './atomic.js';
+import { atomicWriteFileSync } from './atomic.js';
 import { acquireLock, releaseLock, readLock, lockIsStale, spawnDetached } from './worker.js';
 import { summarizeTurns, appendRun, stageRates, etaMs, startRun, STOPWATCH_KEEP } from './stopwatch.js';
 import { runStreamBatch, isTransientFailure } from './stream.js';
@@ -52,12 +52,6 @@ test('C2: atomicWriteFileSync creates parents, writes whole, replaces whole', ()
   assert.equal(readFileSync(f, 'utf8'), '{"gen":1}');
   atomicWriteFileSync(f, '{"gen":2}');
   assert.equal(readFileSync(f, 'utf8'), '{"gen":2}', 'replaced in place');
-});
-
-test('C2: CorruptStoreError names the damaged file — the refusal can say what to move aside', () => {
-  const err = new CorruptStoreError('/tmp/x/judgments.json');
-  assert.equal(err.file, '/tmp/x/judgments.json');
-  assert.ok(err.message.includes('/tmp/x/judgments.json'));
 });
 
 test('C2: kill -9 mid-write leaves a parseable store — old version or new, never torn', async () => {
