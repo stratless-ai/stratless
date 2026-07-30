@@ -17,10 +17,10 @@
  * links get their pointed-at file created) and copies the existing file's mode onto the temp
  * before the rename. We replace CONTENT, never identity.
  *
- * Which stores throw and which stay fail-open is a per-store call, made where each store lives:
- * the spend caches (judgments.json, patterns.json) throw CorruptStoreError; the bookkeeping files
- * (state.json, usage.json, renders.json) still read as empty — their loss costs one synthesis or
- * a meter line, not the pile.
+ * Which stores throw and which stay fail-open is a per-store call, made where each store lives.
+ * Today every live store reads fail-open (a damaged file costs one rebuild or a meter line, not
+ * the pile); CorruptStoreError remains the refusal path for any spend cache that must never be
+ * silently re-billed — the throwers went with the v1 caches, the posture did not.
  */
 import { chmodSync, mkdirSync, readlinkSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';

@@ -50,7 +50,7 @@ export interface Pile {
   centroid: Float32Array;
 }
 
-/** Exported for the rules store's re-anchoring (rules.ts): every vector in play is unit-length,
+/** Exported for the patch ledger's re-homing (lift.ts): every vector in play is unit-length,
  *  so a dot product IS cosine — no separate cosine helper exists on purpose. */
 export const dot = (a: ArrayLike<number>, b: ArrayLike<number>): number => {
   let s = 0;

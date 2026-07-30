@@ -16,14 +16,13 @@ import { join as joinLabelled, misfitRate } from './count.js';
 import { findAssistant, onPath } from './claude.js';
 import { init as doInit, ARCHIVE, PROJECTS, stopRefresh, refreshArmed, type InitResult } from './init.js';
 import { runtimeDir, runtimeInstalled, ensureRuntime, runtimePresent, modelPresent, modelDir } from './embed.js';
-import { dailyCheck, fetchLatest, newerThan } from './notify.js';
+import { fetchLatest, newerThan } from './notify.js';
 import { loadRecentExchanges } from './exchange.js';
-import { removeProfile, humanMdPath, claudeMdPath } from './sink.js';
-import { readRenders, requestColdBuild, coldBuildRequested, readState, setFlushCadence, type FlushCadence, type RenderMeta } from './state.js';
+import { removeProfile, humanMdPath, claudeMdPath } from './load.js';
+import { readRenders, requestColdBuild, coldBuildRequested, readState, setFlushCadence, type FlushCadence } from './state.js';
 import { readUsage } from './usage.js';
-import { atomicWriteFileSync, CorruptStoreError } from './atomic.js';
-import { acquireLock, releaseLock, readLock, lockFilePath, lockIsStale, stopWorker, spawnDetached, resolveBinPath } from './worker.js';
-import { startRun, type Stopwatch } from './stopwatch.js';
+import { CorruptStoreError } from './atomic.js';
+import { readLock, lockIsStale, stopWorker, spawnDetached, resolveBinPath } from './worker.js';
 import { runWorker, installedVersion, JUDGE_WINDOW } from './loop.js';
 import { readProgress, type Progress } from './progress.js';
 import { makePalette } from './palette.js';
@@ -33,7 +32,6 @@ import { estimateBuild, estimateFromMessages, estimateLine } from './estimate.js
 import { loadMoments } from './moments.js';
 import { loadCategories } from './categories.js';
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
-import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
 
@@ -184,37 +182,6 @@ function lookFooter(): void {
 }
 
 /**
- * THE LOCK AT THE DOOR (C4): every spending command holds the one lock while it works — the
- * after-session hook and a hand-run `update` firing together used to race read-modify-write over
- * judgments.json, the last writer silently discarding the other's paid-for judgments. A second
- * runner says so and leaves; the hook case simply catches up on the next session.
- */
-function claimLockOrSay(): boolean {
-  if (acquireLock()) {
-    // Release on ANY exit — including the refusal paths that call process.exit(1), which skip
-    // `finally` blocks. releaseLock only unlinks its own pid, so double-release is a no-op.
-    process.once('exit', () => releaseLock());
-    return true;
-  }
-  const holder = readLock();
-  console.log(
-    `\n  ${C.it('another stratless run is active')}${holder ? C.dim(` (pid ${holder.pid})`) : ''} ${C.dim('— nothing was spent; try again when it finishes.')}`,
-  );
-  // The honest remedy for a wedged lock (a recycled PID can hold it hostage) — named, not hidden.
-  console.log(`  ${C.dim(`stuck, with no stratless actually running? remove the lock: rm ${lockFilePath()}`)}\n`);
-  return false;
-}
-
-/** The pre-spend disclosure — the person hears the bill BEFORE the first fresh call, never after.
- *  Only when fresh > 0; dim; stderr (it's messaging, not output). */
-function preSpend(pending: number): void {
-  if (pending <= 0) return;
-  process.stderr.write(
-    `\n  ${CE.dim(`about to read ${pending} new exchange${pending === 1 ? '' : 's'} on your own claude (each read once, cached forever)`)}\n  ${CE.dim(`the meter: ${hint('stratless status')}`)}\n`,
-  );
-}
-
-/**
  * The profiler — LOOKING IS FREE (Sun's design decision, and it is now literal).
  *
  * `profile` prints the LAST BUILT rendering instantly, at zero spend, under a header carrying that
@@ -261,11 +228,9 @@ async function profiler(_rest: string[] = []): Promise<void> {
 /**
  * UPDATE — the after-session refresh: read what's new, and rebuild + LOAD the profile when it's DUE.
  *
- * This is what the silent Stop hook runs, so it must be cheap by default. Judging a session's new
- * exchanges costs cents; the SYNTHESIS is the expensive read (~32 judge calls' worth — measured,
- * 2026-07-16), so it is gated: sessions accumulate judgments, the profile consumes them in batches.
- * Due = enough new evidence (synthEvery) · a stale profile with anything new at all (the backstop)
- * · no profile on disk yet · the cache was reset. A gated skip still guarantees an
+ * This is what the silent Stop hook runs, so it must be cheap by default. Collecting new moments is
+ * free and happens every run; the flush (tag + count + rebuild) waits out the cadence cooldown
+ * (flushDue), and a hand-typed `update` beats the cooldown. A gated skip still guarantees an
  * existing profile is loaded (covers `update` after `stop`) — the skip is invisible, only the cost
  * is missing.
  */
@@ -599,7 +564,7 @@ async function status(rest: string[] = []): Promise<void> {
   // WHICH build is loaded, not just whether. The file's own `# built` stamp is compared to the
   // latest build's — they diverge only when a rebuild never loaded, a `stop` unloaded, or the file
   // was replaced by hand: exactly the states a bare "yes" would hide. Same stamp formula on both
-  // sides (sink.ts writes it, builtStamp renders it), so agreement is exact, never fuzzy.
+  // sides (load.ts writes it, builtStamp renders it), so agreement is exact, never fuzzy.
   const loadedStamp = loaded ? loadedBuiltStamp() : undefined;
   const latestStamp = builds.length ? builtStamp(builds[0].builtAt) : undefined;
   if (loaded && loadedStamp && latestStamp && loadedStamp !== latestStamp) {

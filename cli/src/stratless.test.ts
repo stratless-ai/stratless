@@ -13,14 +13,13 @@ import { test, before, after } from 'node:test';
 
 import { runStreamBatch } from './stream.js';
 import { makePalette } from './palette.js';
-import { shouldCheck, newerThan, dailyCheck, readNotify, writeNotify } from './notify.js';
+import { shouldCheck, newerThan, dailyCheck, readNotify } from './notify.js';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parseExchanges, loadRecentExchanges, findExchange, markFirstOfDay, projectOf, type Exchange } from './exchange.js';
-import { injectProfile, removeProfile, ensureLoaded } from './sink.js';
-import { readState, writeState, synthesisDue, readRenders, writeRender, readBuildCorpus, writeBuildCorpus } from './state.js';
+import { injectProfile, removeProfile, ensureLoaded } from './load.js';
+import { readRenders, writeRender, readBuildCorpus, writeBuildCorpus } from './state.js';
 import { readUsage, recordUsage } from './usage.js';
-import { CorruptStoreError } from './atomic.js';
 import { parseJsonResult } from './claude.js';
 import { installStopHook, readSettings } from './init.js';
 
@@ -449,7 +448,7 @@ test('a piped `status` run emits zero escape bytes (the audit gap, closed for re
   assert.ok(out.includes('stratless status'), 'and the content itself still arrives');
 });
 
-// ── the streaming Brain (0.3.1): one harness, many verdicts — and never its own exhaust ────────
+// ── the streaming call harness (0.3.1): one harness, many verdicts — and never its own exhaust ──
 
 /** A fake `claude` that speaks the stream-json protocol — executable, shebang'd, argv-ignoring. */
 const mockBrain = (name: string, dieAfter = -1): string => {
@@ -550,7 +549,7 @@ test('HUMAN.md carries the person-layer schema marker (v3: the conductor brief +
 
 // ── the promise layer: a wrong frequency is a lie wearing precision ───────────────────────────
 
-// ── sink: the load step ─────────────────────────────────────────────────────────────────────
+// ── load: the load step ─────────────────────────────────────────────────────────────────────
 //
 // The load writes the profile to the canonical HUMAN.md and points CLAUDE.md at it with an @import.
 // It owns ONLY the text between its two markers in CLAUDE.md — a wrong upsert would silently eat

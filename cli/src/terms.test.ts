@@ -1,5 +1,5 @@
 /**
- * TERMS — the topic channel's collect-time guarantees, pinned. The one that matters most: the
+ * TERMS — the answer channel's collect-time guarantees, pinned. The one that matters most: the
  * function is pure over the answer text alone (same answer → same card, forever), because that is
  * what lets a rebuild and an append produce identical piles from the same archive.
  */

@@ -1,6 +1,10 @@
 /**
  * COUNT — the adder-upper. Pure arithmetic over the checkmarks; no model, no cost.
  *
+ * THE DOCTRINE (adopted 2026-07-29): **LIFT grades the AI, never the human.** The mode-1 witness
+ * lives here — a fading ask is re-read against the assistant's own actions, so what gets graded
+ * is the AI's supply, never the person's asking.
+ *
  * This is what v1 paid a model to do (mine → audit → grade, $24 and 84% of its evidence lost).
  * Once the labels exist, everything the profile needs is counting:
  *
@@ -34,7 +38,7 @@ export const MIN_CONVERSATIONS = 3;
 /** Not enough evidence to claim a trend under this many carrying moments. */
 const MIN_FOR_TREND = 6;
 const RISE = 1.3;
-/** Exported: the rules lifecycle (rules.ts) reuses the same steady/fading boundary. */
+/** Exported: the patch lifecycle (lift.ts) reuses the same steady/fading boundary. */
 export const FADE = 0.7;
 const WEEK_MS = 7 * 24 * 3600 * 1000;
 

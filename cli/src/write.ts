@@ -1,9 +1,11 @@
 /**
  * WRITE — the file. Assembles HUMAN.md from the scored pile: the person, in their own counts and
- * quotes. Code-assembled — nothing here a model invents — save for ONE call, which for each category
- * picks the demonstrating quote AND re-voices it into a conductor's instruction (0.5.0). The counts and
- * ordering are arithmetic; which real line best SHOWS a behaviour, which section it serves, and how to
- * phrase the instruction, are judgements — and that is the one thing worth a model call.
+ * quotes. Code-assembled — nothing here a model invents — save for ONE call, which voices each NEW
+ * category once (picks the demonstrating quote, routes the section, words the instruction) and is
+ * skipped entirely when the voice cache already covers the pile (voiced.ts — a steady-state rebuild
+ * is $0). The counts and ordering are arithmetic; which real line best SHOWS a behaviour, which
+ * section it serves, and how to phrase the instruction, are judgements — the one thing worth a
+ * model call, paid once per category, not per build.
  *
  * THE SECTIONS — the conductor's brief (positioning.md): "What to offer me before I ask" (Frame),
  * "What to catch for me" (Judge), "How to talk to me" (Register). The model routes each category to
@@ -19,8 +21,8 @@
  * null. Demanding that a person HAVE a section would be declaring, which is the one thing the whole
  * pipeline exists to avoid.
  *
- * The text produced here starts at the provenance line: `injectProfile` (sink.ts) adds the
- * `# Who you are working with` header and the humanmd/v2 marker when it installs, so repeating the
+ * The text produced here starts at the provenance line: `injectProfile` (load.ts) adds the
+ * `# Who you are working with` header and the humanmd/v3 marker when it installs, so repeating the
  * header here would double it.
  */
 import { findAssistant, runClaude } from './claude.js';
@@ -223,7 +225,7 @@ function block(claim: string, stat: CategoryStat, sec: Section, cl?: Clause): st
   // supply agrees with). A one-sided word on a demand row taught sabotage: the plan row's
   // `fading` told every assistant to ease off the very behaviour that was working.
   //
-  // THE RIDER (2026-07-28). A gap rule prints as a when-clause on the row its category already
+  // THE WHEN-CLAUSE (2026-07-28). A mode-1 patch prints as a when-clause on the row its category already
   // earned — never a section of its own (the founder's read killed that: a separate section was
   // the design's internal schema leaking into the file). The receipt then carries both sides:
   // the row's own count and the gap's slip count, with any trend word on the gap itself.
@@ -283,7 +285,7 @@ export function assemble(
   // notes still has a profile worth loading.
   if (!frame.length && !judge.length && !register.length) return null;
 
-  // Riders attach only to categories that earned a row — a patch whose home has no entry stays
+  // Clauses attach only to categories that earned a row — a patch whose home has no entry stays
   // invisible, key line and all (the file may not gesture at something it cannot host). Attachment
   // is judged pre-budget; in the rare case a register host is later budget-dropped, its key line
   // still stands — a true trigger without its detail row, which the key's own subtitle allows.
@@ -294,7 +296,7 @@ export function assemble(
   const decodeLines = decode ? decodeKey(decode) : [];
   // THE SITUATION TRIGGERS — the gap's live recognizer. Phrase triggers are states the person
   // announces; a gap's trigger is the state they don't (if they had announced it, there would be
-  // no gap). Derived mechanically from the rider's when-clause; an unparseable rider casts none.
+  // no gap). Derived mechanically from the patch's when-clause; an unparseable clause casts none.
   const situations: string[] = [];
   for (const n of attached) {
     const m = clauses!.get(n)!.clause.match(/^when\s+([^,]+),\s*(.+)$/i);
@@ -404,7 +406,7 @@ export function looksLikeProfile(text: string): boolean {
  * their generation, or a register row whose quote-proof aged out. In steady state that is ZERO
  * categories and the whole rebuild is free arithmetic: counts, trends, met/slip, clauses and key
  * lines re-stamp fresh while the wording never moves — which also ends the write-side wobble.
- * Null when there is nothing worth shipping. `injectProfile` (sink.ts) installs the text.
+ * Null when there is nothing worth shipping. `injectProfile` (load.ts) installs the text.
  */
 export function buildProfile(): { text: string; meta: ProfileMeta } | null {
   const cats = loadCategories().filter((c) => !CIRCULAR.has(c.name));

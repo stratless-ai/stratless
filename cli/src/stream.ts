@@ -1,5 +1,5 @@
 /**
- * STREAM — the streaming Brain: one harness, many verdicts (0.3.1).
+ * STREAM — the streaming call harness: one harness, many verdicts (0.3.1).
  *
  * Every one-shot `claude -p` call re-boots the whole Claude Code harness: ~30.1k tokens and ~10s of
  * startup for a ~250-token question (measured, 0.3.0 dogfood — 99.2% luggage). This module runs a

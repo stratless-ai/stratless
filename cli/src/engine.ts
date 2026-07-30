@@ -5,7 +5,7 @@
  *                (free)   (free)    (free)   (cents)          (what count/write already read)
  *
  * The whole cost of a build now sits in one small naming call. Everything before it is arithmetic on
- * this machine: $13.27 and ~40 minutes became ~$0.20 and ~5.
+ * this machine: $13.27 and ~40 minutes became ~$0.25 and under 3 (measured, 0.6.2).
  *
  * TWO PATHS, and the difference between them is the whole reason a profile can be rebuilt daily
  * without churning:

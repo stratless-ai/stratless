@@ -126,16 +126,16 @@ useHead({
   <span class="t-b">WHO YOU'RE WORKING WITH</span>
 
   <span class="t-d">##</span> <span class="t-b">What to offer me before I ask</span>
-  - offer a quick sketch of the idea before building it
-    out, then ask them to validate it. <span class="t-d">(218×)</span>
+  - offer to confirm a specific bounded starting scope
+    before expanding further <span class="t-d">(257×)</span>
 
   <span class="t-d">##</span> <span class="t-b">What to catch for me</span>
-  - catch the urge to patch symptoms, they want the
-    actual bug found and fixed first. <span class="t-d">(156×)</span>
+  - catch unverified output and double check the work
+    before accepting it as done <span class="t-d">(99×)</span>
 
   <span class="t-d">##</span> <span class="t-b">How to talk to me</span>
-  - talk in short go-ahead bursts, they approve with a
-    brief word and expect you to keep moving. <span class="t-d">(159×, rising)</span>
+  - talk tersely and execute the brief low-context
+    instruction without asking for more detail <span class="t-d">(262×, rising)</span>
 
   <span class="t-d">not loaded yet · load it into your assistant: stratless update</span>
 

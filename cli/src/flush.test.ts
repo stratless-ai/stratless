@@ -40,7 +40,7 @@ test('a session ended but within the cooldown — collect and wait (no more per-
 test('waited past the daily cooldown — flush', () => {
   const d = flushDue([w('s1', 30 * H)], iso(NOW - 25 * H), NOW, false);
   assert.equal(d.flush, true);
-  assert.equal(d.reason, 'the daily rebuild');
+  assert.equal(d.reason, 'the scheduled rebuild');
 });
 
 test('within the cooldown — collect and wait', () => {

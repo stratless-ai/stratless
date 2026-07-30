@@ -31,16 +31,16 @@
   <text x="36" y="106" class="w">WHO YOU'RE WORKING WITH</text>
 
   <text x="36" y="142"><tspan class="d">##</tspan> <tspan class="w">What to offer me before I ask</tspan></text>
-  <text x="36" y="163">- offer a quick sketch of the idea before building it</text>
-  <text x="52" y="184">out, then ask them to validate it. <tspan class="d">(218×)</tspan></text>
+  <text x="36" y="163">- offer to confirm a specific bounded starting scope</text>
+  <text x="52" y="184">before expanding further <tspan class="d">(257×)</tspan></text>
 
   <text x="36" y="224"><tspan class="d">##</tspan> <tspan class="w">What to catch for me</tspan></text>
-  <text x="36" y="245">- catch the urge to patch symptoms, they want the</text>
-  <text x="52" y="266">actual bug found and fixed first. <tspan class="d">(156×)</tspan></text>
+  <text x="36" y="245">- catch unverified output and double check the work</text>
+  <text x="52" y="266">before accepting it as done <tspan class="d">(99×)</tspan></text>
 
   <text x="36" y="306"><tspan class="d">##</tspan> <tspan class="w">How to talk to me</tspan></text>
-  <text x="36" y="327">- talk in short go-ahead bursts, they approve with a</text>
-  <text x="52" y="348">brief word and expect you to keep moving. <tspan class="d">(159×, rising)</tspan></text>
+  <text x="36" y="327">- talk tersely and execute the brief low-context</text>
+  <text x="52" y="348">instruction without asking for more detail <tspan class="d">(262×, rising)</tspan></text>
 
   <text x="36" y="390" class="d">not loaded yet · load it into your assistant: stratless update</text>
 
