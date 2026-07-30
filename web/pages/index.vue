@@ -104,20 +104,20 @@ useHead({
 
   <span class="t-b">You and your AI, measured</span>
 
-    <span class="t-d">you and your assistant</span>    5,912 messages · 49 active days
-    <span class="t-d">a median day</span>              123 messages
-    <span class="t-d">span</span>                      2026-06-09 → 2026-07-27
-                              · longest streak 49 days
+    <span class="t-d">you and your assistant</span>    6,159 messages · 52 active days
+    <span class="t-d">a median day</span>              122 messages
+    <span class="t-d">span</span>                      2026-06-09 → 2026-07-30
+                              · longest streak 52 days
     <span class="t-d">how you write</span>             median 17 words · 8% four words
                               or fewer · 42% questions
-    <span class="t-d">what you keep typing</span>      "go" 20× · "continue" 18× · "sure" 11×
-    <span class="t-d">screenshots sent</span>          205
-    <span class="t-d">course corrections</span>        2.49 / 100 messages
-    <span class="t-d">tool declines</span>             51
-    <span class="t-d">friction days</span>             44 of 49 active days
-    <span class="t-d">not counted against you</span>   63 permission stops · 33 system blocks
-    <span class="t-d">busiest repo</span>              stratless · across 6 repos · 50 branches
-    <span class="t-d">tools it ran for you</span>      27,661 calls · Bash 38% · Edit 26%
+    <span class="t-d">what you keep typing</span>      "go" 23× · "continue" 18× · "sure" 11×
+    <span class="t-d">screenshots sent</span>          210
+    <span class="t-d">course corrections</span>        2.45 / 100 messages
+    <span class="t-d">tool declines</span>             57
+    <span class="t-d">friction days</span>             47 of 52 active days
+    <span class="t-d">not counted against you</span>   69 permission stops · 34 system blocks
+    <span class="t-d">busiest repo</span>              stratless · across 6 repos · 51 branches
+    <span class="t-d">tools it ran for you</span>      28,982 calls · Bash 38% · Edit 26%
 
   <span class="t-d">Nothing was changed on your machine.</span>
 
@@ -126,16 +126,16 @@ useHead({
   <span class="t-b">WHO YOU'RE WORKING WITH</span>
 
   <span class="t-d">##</span> <span class="t-b">What to offer me before I ask</span>
-  - offer to confirm a specific bounded starting scope
-    before expanding further <span class="t-d">(257×)</span>
+  - offer to confirm a specific bounded starting
+    scope back to them before proceeding. <span class="t-d">(268×)</span>
 
   <span class="t-d">##</span> <span class="t-b">What to catch for me</span>
-  - catch unverified output and double check the work
-    before accepting it as done <span class="t-d">(99×)</span>
+  - catch any unmeasured cost claim, they want the
+    real cost measured before it's trusted. <span class="t-d">(96×)</span>
 
   <span class="t-d">##</span> <span class="t-b">How to talk to me</span>
-  - talk tersely and execute the brief low-context
-    instruction without asking for more detail <span class="t-d">(262×, rising)</span>
+  - talk in short exchanges, since a quick 'yes go ahead'
+    means proceed now without re-explaining the plan. <span class="t-d">(149×)</span>
 
   <span class="t-d">not loaded yet · load it into your assistant: stratless update</span>
 
