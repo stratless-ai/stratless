@@ -92,6 +92,15 @@ export interface Mirror {
     /** one unit: one tool_use block in an assistant reply */
     toolMix: { name: string; calls: number; share: number }[];
     toolCalls: number;
+    /** one unit: one spawn of another agent (a `Task`/`Agent` call), named or not */
+    agentRuns: number;
+    /** the NAMED share of those runs, by agent type. Unnamed spawns count in `agentRuns` and
+     *  appear nowhere here — the mix describes what it can name, never the remainder. */
+    agentMix: { name: string; runs: number; share: number }[];
+    /** one unit: one skill load (a `Skill` call), whoever asked for it */
+    skillUses: number;
+    /** the NAMED share of those loads. Same rule as `agentMix`: what it can name, never more. */
+    skillMix: { name: string; uses: number; share: number }[];
   };
   rhythm: {
     /** submitted messages per clock hour, local time, 24 bins */
@@ -185,6 +194,8 @@ export function mirrorOf(turns: Iterable<Turn>, titles: { aiTitle: string; sessi
   const rawPairs: [string, string][] = [];
   const branchNames = new Set<string>();
   const tools = new Map<string, number>();
+  const agents = new Map<string, number>();
+  const skills = new Map<string, number>();
   const events: FrictionEvent[] = [];
   const sessions = new Set<string>();
 
@@ -205,6 +216,8 @@ export function mirrorOf(turns: Iterable<Turn>, titles: { aiTitle: string; sessi
 
     if (t.role === 'assistant') {
       for (const name of t.tools ?? []) tools.set(name, (tools.get(name) ?? 0) + 1);
+      for (const kind of t.delegations ?? []) agents.set(kind, (agents.get(kind) ?? 0) + 1);
+      for (const name of t.skills ?? []) skills.set(name, (skills.get(name) ?? 0) + 1);
       continue;
     }
 
@@ -274,6 +287,10 @@ export function mirrorOf(turns: Iterable<Turn>, titles: { aiTitle: string; sessi
   for (const [dir, branch] of rawPairs) branchPairs.add((rootOf.get(dir) ?? dir) + ' ' + branch);
 
   const totalToolCalls = [...tools.values()].reduce((a, b) => a + b, 0);
+  // The run count comes from the SPAWNS, not the named types: a spawn whose type we cannot read
+  // is still work handed off, and dropping it would undercount the fleet.
+  const totalAgentRuns = (tools.get('Task') ?? 0) + (tools.get('Agent') ?? 0);
+  const totalSkillUses = tools.get('Skill') ?? 0;
   const spanDays = first && last ? Math.round((Date.parse(last) - Date.parse(first)) / 86_400_000) + 1 : 0;
 
   return {
@@ -322,6 +339,14 @@ export function mirrorOf(turns: Iterable<Turn>, titles: { aiTitle: string; sessi
         .map(([name, calls]) => ({ name, calls, share: totalToolCalls ? calls / totalToolCalls : 0 }))
         .sort((a, b) => b.calls - a.calls),
       toolCalls: totalToolCalls,
+      agentRuns: totalAgentRuns,
+      agentMix: [...agents.entries()]
+        .map(([name, runs]) => ({ name, runs, share: totalAgentRuns ? runs / totalAgentRuns : 0 }))
+        .sort((a, b) => b.runs - a.runs),
+      skillUses: totalSkillUses,
+      skillMix: [...skills.entries()]
+        .map(([name, uses]) => ({ name, uses, share: totalSkillUses ? uses / totalSkillUses : 0 }))
+        .sort((a, b) => b.uses - a.uses),
     },
     rhythm: {
       byHour,

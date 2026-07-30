@@ -115,6 +115,42 @@ test('tool mix counts tool_use blocks, not assistant turns', () => {
   assert.deepEqual(m.work.toolMix[0], { name: 'Bash', calls: 3, share: 0.75 });
 });
 
+test('delegation: runs count every spawn, the mix names only what the spawn named', () => {
+  const m = mirrorOf([
+    // three spawns in one turn: two named, one the transcript never labelled.
+    turn({ role: 'assistant', tools: ['Task', 'Task', 'Task', 'Bash'], delegations: ['Explore', 'Explore'] }),
+    turn({ role: 'assistant', tools: ['Agent'], delegations: ['Plan'] }),
+    turn({ role: 'assistant', tools: ['Bash'] }),
+  ]);
+  assert.equal(m.work.agentRuns, 4, 'four spawns — the unnamed one is still work handed off');
+  assert.deepEqual(m.work.agentMix[0], { name: 'Explore', runs: 2, share: 0.5 });
+  assert.ok(!m.work.agentMix.some((a) => a.name === ''), 'an unnamed spawn is never given a label');
+  assert.equal(m.work.toolCalls, 6, 'spawns remain ordinary tool calls in the tool tally');
+});
+
+test('delegation: a person who never delegates has no runs and no mix', () => {
+  const m = mirrorOf([turn({ role: 'assistant', tools: ['Bash', 'Edit'] })]);
+  assert.equal(m.work.agentRuns, 0);
+  assert.deepEqual(m.work.agentMix, []);
+});
+
+test('skills: loads count from the tally, the mix names only what named itself', () => {
+  const m = mirrorOf([
+    turn({ role: 'assistant', tools: ['Skill', 'Skill', 'Skill'], skills: ['research', 'research'] }),
+    turn({ role: 'assistant', tools: ['Skill', 'Bash'], skills: ['push'] }),
+    turn({ role: 'assistant', tools: ['Bash'] }),
+  ]);
+  assert.equal(m.work.skillUses, 4, 'four loads — the unnamed one still happened');
+  assert.deepEqual(m.work.skillMix[0], { name: 'research', uses: 2, share: 0.5 });
+  assert.ok(!m.work.skillMix.some((s) => s.name === ''), 'an unnamed load is never given a label');
+});
+
+test('skills: an archive with no skill loads reports none', () => {
+  const m = mirrorOf([turn({ role: 'assistant', tools: ['Bash'] })]);
+  assert.equal(m.work.skillUses, 0);
+  assert.deepEqual(m.work.skillMix, []);
+});
+
 test('hours-to-cover has no parameter to tune and is stable under relabelling', () => {
   // 80 messages in one hour, 20 spread over four others.
   const at = (h: number, c: number) =>

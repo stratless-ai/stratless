@@ -104,20 +104,22 @@ useHead({
 
   <span class="t-b">You and your AI, measured</span>
 
-    <span class="t-d">you and your assistant</span>    6,159 messages · 52 active days
+    <span class="t-d">you and your assistant</span>    6,177 messages · 52 active days
     <span class="t-d">a median day</span>              122 messages
     <span class="t-d">span</span>                      2026-06-09 → 2026-07-30
                               · longest streak 52 days
     <span class="t-d">how you write</span>             median 17 words · 8% four words
                               or fewer · 42% questions
-    <span class="t-d">what you keep typing</span>      "go" 23× · "continue" 18× · "sure" 11×
+    <span class="t-d">what you keep typing</span>      "go" 23× · "continue" 19× · "sure" 11×
     <span class="t-d">screenshots sent</span>          210
-    <span class="t-d">course corrections</span>        2.45 / 100 messages
+    <span class="t-d">course corrections</span>        2.44 / 100 messages
     <span class="t-d">tool declines</span>             57
     <span class="t-d">friction days</span>             47 of 52 active days
     <span class="t-d">not counted against you</span>   69 permission stops · 34 system blocks
-    <span class="t-d">busiest repo</span>              stratless · across 6 repos · 51 branches
-    <span class="t-d">tools it ran for you</span>      28,982 calls · Bash 38% · Edit 26%
+    <span class="t-d">busiest repo</span>              stratless · across 6 repos · 52 branches
+    <span class="t-d">tools it ran for you</span>      29,101 calls · Bash 38% · Edit 27%
+    <span class="t-d">work it handed off</span>        636 agent runs · Explore 46%
+    <span class="t-d">skills it loaded</span>          54 times · research 17%
 
   <span class="t-d">Nothing was changed on your machine.</span>
 

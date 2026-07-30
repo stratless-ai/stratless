@@ -104,6 +104,14 @@ export interface Turn {
   gitBranch?: string;
   /** assistant turns only: tool names invoked here */
   tools?: string[];
+  /** assistant turns only: the agent types this turn handed work to. One entry per NAMED spawn;
+   *  the run count comes from the `Task`/`Agent` tally in `tools`, so an unnamed spawn still
+   *  counts without us inventing a label for it. */
+  delegations?: string[];
+  /** assistant turns only: the skills loaded here, by name. A skill reaches the transcript the
+   *  same way whether the PERSON typed `/name` or the assistant chose it — the record cannot tell
+   *  them apart, so nothing downstream may claim this was the person's reach. */
+  skills?: string[];
   /** 'user-rejected' (the person declined) or 'automode-blocked' (the SYSTEM blocked — not them) */
   denial?: string;
   /** WHICH tools that denial refused — the record's tool_result ids resolved against the tool_use
@@ -195,16 +203,41 @@ function imagesOf(d: RawRecord): number {
   return Array.isArray(d.imagePasteIds) ? d.imagePasteIds.length : 0;
 }
 
-function toolUsesOf(content: unknown): { name: string; id?: string }[] {
+function toolUsesOf(content: unknown): { name: string; id?: string; input?: unknown }[] {
   if (!Array.isArray(content)) return [];
   return content
-    .filter((b): b is { type: string; name?: string; id?: string } => typeof b === 'object' && b !== null)
+    .filter((b): b is { type: string; name?: string; id?: string; input?: unknown } => typeof b === 'object' && b !== null)
     .filter((b) => b.type === 'tool_use' && typeof b.name === 'string')
-    .map((b) => ({ name: b.name as string, ...(typeof b.id === 'string' ? { id: b.id } : {}) }));
+    .map((b) => ({ name: b.name as string, ...(typeof b.id === 'string' ? { id: b.id } : {}), ...(b.input !== undefined ? { input: b.input } : {}) }));
 }
 
 function toolsOf(content: unknown): string[] | undefined {
   const names = toolUsesOf(content).map((u) => u.name);
+  return names.length ? names : undefined;
+}
+
+/** The tools that hand work to another agent. Both names ship in the harness; a transcript may
+ *  carry either, so the reader knows both rather than guessing from one. */
+const AGENT_TOOLS = new Set(['Task', 'Agent']);
+
+/** Which agent types a turn handed work to — read from the spawn's own `subagent_type`, never
+ *  inferred. An unnamed spawn contributes nothing here (it is still counted as a run via `tools`),
+ *  because a delegation we cannot name is a delegation we must not label. */
+function delegationsOf(content: unknown): string[] | undefined {
+  const types = toolUsesOf(content)
+    .filter((u) => AGENT_TOOLS.has(u.name))
+    .map((u) => (u.input as { subagent_type?: unknown } | undefined)?.subagent_type)
+    .filter((t): t is string => typeof t === 'string' && t.trim() !== '');
+  return types.length ? types : undefined;
+}
+
+/** Which skills a turn loaded — read from the load's own `skill` argument. Same rule as
+ *  delegations: a load that names nothing is counted (via the `Skill` tally) but never labelled. */
+function skillsOf(content: unknown): string[] | undefined {
+  const names = toolUsesOf(content)
+    .filter((u) => u.name === 'Skill')
+    .map((u) => (u.input as { skill?: unknown } | undefined)?.skill)
+    .filter((s): s is string => typeof s === 'string' && s.trim() !== '');
   return names.length ? names : undefined;
 }
 
@@ -308,6 +341,8 @@ export function turnsOfFile(path: string, seen: Set<string> = new Set()): Turn[]
         cwd: d.cwd,
         gitBranch: d.gitBranch,
         tools,
+        delegations: d.type === 'assistant' ? delegationsOf(d.message?.content) : undefined,
+        skills: d.type === 'assistant' ? skillsOf(d.message?.content) : undefined,
         denial: d.toolDenialKind,
         deniedTools: d.toolDenialKind ? deniedOf(d.message?.content, toolIds) : undefined,
         images: imagesOf(d),
