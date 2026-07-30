@@ -74,7 +74,7 @@ export interface SynthState {
    *  worker's env. Its presence always traces to an explicit yes, so it can never cause surprise spend. */
   buildRequestedAt?: string;
   /** how often the worker may auto-rebuild on its own — set with `stratless update --daily|--weekly`.
-   *  Absent = daily, the default. `stratless update` always rebuilds now regardless of this. */
+   *  Absent = weekly, the default. `stratless update` always rebuilds now regardless of this. */
   flushCadence?: FlushCadence;
 }
 

@@ -29,6 +29,7 @@ import { loadAssignments } from './assign.js';
 import { loadMoments, type Moment } from './moments.js';
 import { join, tally, LIFT_CUT, type Labelled, type CategoryStat } from './count.js';
 import { liftPrint, type Clause, type LiftPrint } from './lift.js';
+import { readVoiced, rememberVoiced, voicingPlan, type VoicedRow } from './voiced.js';
 import { signatures, type Signature } from './shorthand.js';
 
 /** The whole file targets this size; Frame + Judge always ship in full, Register fills the rest by
@@ -172,9 +173,14 @@ ${body}`;
       const name = typeof p.name === 'string' ? p.name : '';
       const w = byName.get(name);
       if (!w) continue;
-      // 'none' is a REAL answer, not a parse failure: the router said this behaviour is not an offer,
-      // a catch, or a register note, so it is left out of the brief. It lands as undefined here and
-      // takes the same path as a malformed value — dropped — which is the correct outcome for both.
+      // 'none' is a REAL answer, not a parse failure: the router said this behaviour is not an
+      // offer, a catch, or a register note. It is RETURNED (and cached — a rejected category
+      // stays rejected; re-asking would re-bill forever) and assemble routes it into no section.
+      // Only a malformed value is dropped, so the model can be re-asked next flush.
+      if (p.section === 'none') {
+        out.set(name, { section: 'none', quote: '', line: '', signal: '' });
+        continue;
+      }
       const section: Section | undefined =
         p.section === 'judge' ? 'judge' : p.section === 'register' ? 'register' : p.section === 'frame' ? 'frame' : undefined;
       const line = typeof p.line === 'string' ? p.line.replace(/\s+/g, ' ').trim() : '';
@@ -392,9 +398,13 @@ export function looksLikeProfile(text: string): boolean {
 }
 
 /**
- * Build the whole profile from the live stores: tally the scores, then in one model call route each
- * person-scoped category to its section, re-voice it, and pick a demonstrating quote; assemble the
- * three sections. Null when there is nothing worth shipping. `injectProfile` (sink.ts) installs the text.
+ * Build the whole profile from the live stores — VOICE ONCE, RE-STAMP FOREVER (2026-07-30).
+ * Every category's voice (section routing, instruction line, decode signal, register quote-gate)
+ * is read from the cache first; the model is asked only for categories with no stored voice for
+ * their generation, or a register row whose quote-proof aged out. In steady state that is ZERO
+ * categories and the whole rebuild is free arithmetic: counts, trends, met/slip, clauses and key
+ * lines re-stamp fresh while the wording never moves — which also ends the write-side wobble.
+ * Null when there is nothing worth shipping. `injectProfile` (sink.ts) installs the text.
  */
 export function buildProfile(): { text: string; meta: ProfileMeta } | null {
   const cats = loadCategories().filter((c) => !CIRCULAR.has(c.name));
@@ -408,8 +418,34 @@ export function buildProfile(): { text: string; meta: ProfileMeta } | null {
     .filter((s) => s.scope !== 'project' && s.count > 0)
     .map((s) => ({ name: s.name, description: s.description, lift: s.lift, cands: candidatesFor(s.name, labelled) }))
     .filter((w) => w.cands.length);
+
+  const bornOf = new Map(cats.map((c) => [c.name, c.bornAt]));
+  const plan = voicingPlan(
+    work.map((w) => ({ name: w.name, bornAt: bornOf.get(w.name) ?? '', candidateReplies: w.cands.map((m) => m.reply) })),
+    readVoiced(),
+  );
+  const missingWork = work.filter((w) => plan.missing.includes(w.name));
   const bin = findAssistant();
-  const voiced = bin && work.length ? pickAndVoice(bin, work) : new Map<string, Voiced>();
+  const fresh = bin && missingWork.length ? pickAndVoice(bin, missingWork) : new Map<string, Voiced>();
+  if (fresh.size) {
+    const voicedAt = new Date().toISOString();
+    rememberVoiced(
+      [...fresh].map(([name, v]): VoicedRow => ({
+        name,
+        bornAt: bornOf.get(name) ?? '',
+        section: v.section,
+        line: v.line,
+        signal: v.signal,
+        quote: v.section === 'register' ? v.quote : '',
+        voicedAt,
+      })),
+      cats.map((c) => ({ name: c.name, bornAt: c.bornAt })),
+    );
+  }
+
+  const voiced = new Map<string, Voiced>();
+  for (const [name, row] of plan.reuse) voiced.set(name, { section: row.section, line: row.line, signal: row.signal, quote: row.quote });
+  for (const [name, v] of fresh) voiced.set(name, v);
   const signals = new Map<string, string>();
   for (const [name, v] of voiced) if (v.signal) signals.set(name, v.signal);
   const sigs = signatures(labelled, cats);

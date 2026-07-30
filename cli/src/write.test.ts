@@ -185,6 +185,23 @@ test('assemble: null only when NOTHING earns a place', () => {
   assert.equal(assemble(stats, voiced, prov), null, 'nothing left → null');
 });
 
+test("assemble: a cache-shaped 'none' entry (all fields empty) is inert next to live rows", () => {
+  // The voice cache stores the router's 'none' verdict as {line:'', quote:'', signal:''} so a
+  // rejected category is never re-billed. Assembly must treat that row as absent, not as damage.
+  const stats = [
+    stat({ name: 'kept', lift: 2, count: 80, scope: 'person' }),
+    stat({ name: 'rejected', lift: 3, count: 90, scope: 'person' }),
+  ];
+  const voiced = new Map<string, Voiced>([
+    ['kept', v('judge', 'q', 'catch kept')],
+    ['rejected', v('none', '', '')],
+  ]);
+  const built = assemble(stats, voiced, prov);
+  assert.ok(built, 'the live row still builds the file');
+  assert.equal(built!.meta.judge, 1);
+  assert.ok(!built!.text.includes('rejected'), 'the none row leaves no trace');
+});
+
 test('assemble: a register-only profile is valid — no section is guaranteed', () => {
   // A person with no "what to catch" entries still has a profile. That says they do not
   // systematically catch things, which is a finding rather than a failure.

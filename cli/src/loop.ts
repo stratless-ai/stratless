@@ -87,7 +87,7 @@ export function installedVersion(): string {
  */
 
 /** The effective auto-rebuild cooldown: the env override wins, else the person's stored cadence
- *  (`update --daily|--weekly`), else daily. */
+ *  (`update --daily|--weekly`), else weekly. */
 const flushMaxAgeMs = (): number => flushCooldownMs(readState().flushCadence);
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));

@@ -39,6 +39,14 @@ and each version matches its `cli-v*` git tag.
   channel that makes this readable: every assistant answer's salient terms and true length.)
 
 ### Changed
+- **Your profile's wording is voiced once, then re-stamped forever.** Every rebuild used to phone
+  the model to re-route and re-word all your rows — the cost that priced daily refreshes out, and
+  the reason an unchanged row could flip sections or reword itself between two builds on
+  near-identical history. Now the words freeze the first time they are written (cached locally in
+  `voiced.json`, keyed to the category generation they voiced), and every later rebuild is pure
+  arithmetic: counts, trends, and slip receipts stay alive while the wording never moves. A
+  steady-state `stratless update --daily` costs nothing; the model is asked again only for a
+  genuinely new category — or after a full re-discovery, where naming already pays.
 - **A fading offer/catch row is now checked against what the assistant actually did before it
   prints.** The moment record already knew every tool the assistant ran; it now also records which
   tools you refused (`denied`, resolved from the denial record itself — nothing guessed). When your
