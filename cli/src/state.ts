@@ -1,11 +1,9 @@
 /**
  * STATE — stratless's own tiny memory between runs.
  *
- * One JSON file recording when the profile was last SYNTHESIZED and how many judgments existed at
- * that moment. `update` reads it to decide whether a rebuild is due — the synthesis is the expensive
- * read (~32 judge calls' worth, measured 2026-07-16), so sessions accumulate judgments and the
- * profile consumes them in batches. Missing or corrupt state reads as "never synthesized", which
- * fails OPEN: one possibly-unneeded synthesis, never a stuck-stale profile.
+ * One JSON file recording when the profile was last flushed and the person's chosen cadence, so
+ * the worker can decide whether a rebuild is due. Missing or corrupt state reads as "never
+ * flushed", which fails OPEN: one possibly-unneeded rebuild, never a stuck-stale profile.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -16,16 +14,6 @@ import { atomicWriteFileSync } from './atomic.js';
 function statePath(): string {
   return process.env.STRATLESS_STATE || join(homedir(), '.stratless', 'state.json');
 }
-
-/** The gate default: a rebuild is due after this many fresh judgments accumulate. */
-export const SYNTH_EVERY = 25;
-
-/**
- * The backstop: even under the gate, a profile older than this refreshes if ANYTHING new arrived —
- * a light user (a few exchanges a week) must not sit on a weeks-stale profile just because they
- * never reach the gate. Time alone never triggers it: no new evidence = the same profile, so skip.
- */
-export const SYNTH_MAX_AGE_DAYS = 7;
 
 // ── the stopwatch's shapes (C8) — declared here so state.ts owns everything it persists ────────
 
@@ -74,7 +62,7 @@ export interface SynthState {
    *  worker's env. Its presence always traces to an explicit yes, so it can never cause surprise spend. */
   buildRequestedAt?: string;
   /** how often the worker may auto-rebuild on its own — set with `stratless update --daily|--weekly`.
-   *  Absent = daily, the default. `stratless update` always rebuilds now regardless of this. */
+   *  Absent = weekly, the default. `stratless update` always rebuilds now regardless of this. */
   flushCadence?: FlushCadence;
 }
 
@@ -297,53 +285,14 @@ export function writeBuildCorpus(b: BuildCorpus, file: string = buildCorpusPath(
   }
 }
 
-export interface GateDecision {
-  due: boolean;
-  /** the honest one-phrase why, for the receipt ('' when not due) */
-  reason: string;
-  /** fresh judgments since the last synthesis — the progress toward the gate */
-  newSince: number;
-}
-
-/**
- * Is a synthesis due? Pure — all inputs passed in, so the whole gate is unit-testable.
- *
- * Due when: there has never been a build · the judgment count went BACKWARDS (the cache was reset —
- * rebuild rather than trust a stale portrait of a pile that no longer exists) · K new judgments
- * accumulated · or the profile is past the backstop age with anything new at all.
- */
-export function synthesisDue(
-  state: SynthState,
-  judgedNow: number,
-  now: Date,
-  opts: { every?: number; maxAgeDays?: number } = {},
-): GateDecision {
-  const every = opts.every ?? SYNTH_EVERY;
-  const maxAgeDays = opts.maxAgeDays ?? SYNTH_MAX_AGE_DAYS;
-
-  if (!state.lastSynthesisAt) return { due: true, reason: 'first build', newSince: judgedNow };
-
-  const at = state.judgmentsAtLastSynthesis ?? 0;
-  if (judgedNow < at) return { due: true, reason: 'judgment cache was reset', newSince: judgedNow };
-
-  const newSince = judgedNow - at;
-  if (newSince >= every) return { due: true, reason: `${newSince} new judgments`, newSince };
-
-  const ageMs = now.getTime() - new Date(state.lastSynthesisAt).getTime();
-  if (Number.isFinite(ageMs) && ageMs > maxAgeDays * 24 * 3600 * 1000 && newSince > 0) {
-    return { due: true, reason: `profile ${Math.floor(ageMs / 86_400_000)} days old`, newSince };
-  }
-
-  return { due: false, reason: '', newSince };
-}
-
 // ── the flush gate (the per-turn-rebuild fix) ───────────────────────────────────────────────────
 
 /**
- * The auto-rebuild COOLDOWN — at most ONE automatic profile rebuild per this interval (default once a
- * day). The pile collects every turn for free; this only governs how often the worker phones the
- * assistant to score and rewrite. `stratless update` bypasses it entirely. Checked at nudge time,
- * never on a clock: there is no daemon to wake. Override with STRATLESS_FLUSH_MAX_AGE_MS.
+ * The COOLDOWN UNIT — one day in ms; the named cadences below are multiples of it. The pile
+ * collects every turn for free; the cooldown only governs how often the worker re-tags and
+ * rebuilds (usually $0 — wording is voiced once and re-stamped, voiced.ts). `stratless update`
+ * bypasses it entirely. Checked at nudge time, never on a clock: there is no daemon to wake.
+ * Override with STRATLESS_FLUSH_MAX_AGE_MS.
  */
 export const FLUSH_MAX_AGE_MS = 24 * 3600 * 1000;
 
@@ -380,7 +329,7 @@ export interface FlushDecision {
  * every nudge regardless; this decides only whether to PHONE THE ASSISTANT this run.
  *
  * Flush when: the run is MANUAL (`stratless update` typed by hand — it beats the cooldown) · or the
- * last flush was longer ago than the cooldown (default 24h, so at most one automatic rebuild a day).
+ * last flush was longer ago than the cooldown (the person's cadence — weekly by default).
  * Otherwise collect and wait. A finished session no longer forces a rebuild on its own: rebuilding on
  * every session boundary was near-identical work for cents each, and the profile barely moves between
  * sessions. Want it fresh now? `stratless update`.
@@ -399,16 +348,16 @@ export function flushDue(
   if (manual) return { flush: true, reason: 'you asked' };
   if (!waiting.length) return { flush: false, reason: '' };
 
-  // A COOLDOWN, not a per-session trigger: auto-rebuild at most once per interval (default 24h). A
-  // finished session no longer flushes on its own — rebuilding on every session boundary was near-
-  // identical work for cents each, and the profile barely moves between sessions. The pile still
-  // collects every turn for free; it just gets scored and written on the daily tick, or the instant
-  // you run `stratless update`.
+  // A COOLDOWN, not a per-session trigger: auto-rebuild at most once per cadence interval (weekly
+  // by default). A finished session no longer flushes on its own — rebuilding on every session
+  // boundary was near-identical work for the same profile, which barely moves between sessions.
+  // The pile still collects every turn for free; it just gets scored and written on the next
+  // scheduled tick, or the instant you run `stratless update`.
   const cooldownMs = opts.maxAgeMs ?? FLUSH_MAX_AGE_MS;
   // A missing OR unreadable stamp fails OPEN (age = Infinity → flush), never wedges the profile shut.
   const last = lastFlushAt ? Date.parse(lastFlushAt) : NaN;
   const ageMs = Number.isNaN(last) ? Infinity : now - last;
-  if (ageMs >= cooldownMs) return { flush: true, reason: Number.isNaN(last) ? 'first flush' : 'the daily rebuild' };
+  if (ageMs >= cooldownMs) return { flush: true, reason: Number.isNaN(last) ? 'first flush' : 'the scheduled rebuild' };
 
   return { flush: false, reason: '' };
 }

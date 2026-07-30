@@ -6,6 +6,14 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+## [0.7.0] · 2026-07-30 · the tune keeps itself true
+
+Your profile stops being a snapshot and becomes a tune. One loop now runs on every refresh:
+wherever the AI measurably failed you — in your own recorded words, never our opinion — a patch
+enters the file, tested against its own birth baseline, and **deleted the moment the failure
+stops**. The wording is voiced once and re-stamped forever, so the daily refresh costs nothing.
+The file gets shorter as you get better.
+
 ### Added
 - **A row can now deepen — and then thin itself.** When the engine measures a gap — a standard you
   demonstrably hold (in your own calm words) that sometimes arrives only as a late correction —
@@ -20,14 +28,14 @@ and each version matches its `cli-v*` git tag.
   clause and its slip count disappear. **The file gets shorter as you get better** — an
   accumulating memory cannot say that. Most profiles will carry zero or one of these; that is the
   honest count, not a shortage.
-- The person-layer schema marker steps to `humanmd/v3` (the rider clause, the slip receipt, and the
+- The person-layer schema marker steps to `humanmd/v3` (the when-clause, the slip receipt, and the
   situation triggers are a schema change).
 - **The tuning-service loop.** Your profile is the tune your AI reads; the engine now runs one
   loop that keeps it true: wherever the AI measurably failed YOU — moving before your plan was
   down, explaining denser than you could absorb — a patch enters the tune, worded once, tested
   against its own birth baseline on every refresh, and **deleted the moment the failure stops.
   The file gets shorter as the pairing gets better.** Two failure modes are live. *Wrong time*
-  prints as the when-clause riders and slip receipts above. *Wrong altitude* reads your own ask
+  prints as the when-clauses and slip receipts above. *Wrong altitude* reads your own ask
   rituals (mined from your history — no shipped phrasebook) and the explanations that came
   straight back ("i don't understand"), and prints two lines in the decode key: your
   comprehension signature with its honest counts (*my questions circle a mechanism → drop a
@@ -39,6 +47,14 @@ and each version matches its `cli-v*` git tag.
   channel that makes this readable: every assistant answer's salient terms and true length.)
 
 ### Changed
+- **Your profile's wording is voiced once, then re-stamped forever.** Every rebuild used to phone
+  the model to re-route and re-word all your rows — the cost that priced daily refreshes out, and
+  the reason an unchanged row could flip sections or reword itself between two builds on
+  near-identical history. Now the words freeze the first time they are written (cached locally in
+  `voiced.json`, keyed to the category generation they voiced), and every later rebuild is pure
+  arithmetic: counts, trends, and slip receipts stay alive while the wording never moves. A
+  steady-state `stratless update --daily` costs nothing; the model is asked again only for a
+  genuinely new category — or after a full re-discovery, where naming already pays.
 - **A fading offer/catch row is now checked against what the assistant actually did before it
   prints.** The moment record already knew every tool the assistant ran; it now also records which
   tools you refused (`denied`, resolved from the denial record itself — nothing guessed). When your
@@ -56,6 +72,12 @@ and each version matches its `cli-v*` git tag.
   model, nothing leaves the machine, and your paid assignments are untouched.
 - **Moment shape v2.** Existing history re-derives itself from your transcripts on the next quiet
   refresh — free, no model, nothing leaves the machine, and your paid assignments are untouched.
+
+### Removed
+- The `STRATLESS_SYNTH_EVERY` and `STRATLESS_SYNTH_MODEL` environment knobs. Both had been inert
+  since the flush gate replaced the synthesis counter — the docs promised levers the code no longer
+  read. The real levers are `stratless update --daily|--weekly` and, for the exact interval,
+  `STRATLESS_FLUSH_MAX_AGE_MS`. The models each stage runs on are pinned in code, on purpose.
 
 ### Fixed
 - The offline test seam's stand-in fingerprints all carried different dimensionalities (a `map`

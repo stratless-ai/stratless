@@ -10,7 +10,8 @@
  * the turn before it AND the prompt for the turn after it. So we carry the last human message
  * forward, accumulate what the assistant says, and close a pair the instant the human speaks again.
  *
- * Nothing here is generated. Every field is quoted from the log. The judging lives in judge.ts.
+ * Nothing here is generated. Every field is quoted from the log. Interpretation lives downstream
+ * (moments.ts on).
  */
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
@@ -353,11 +354,6 @@ export function loadRecentExchanges(
   // after the slice would promote it to "first of the day" every single run.
   markFirstOfDay(all);
   return all.slice(-want);
-}
-
-/** How many distinct sessions the exchanges span — a headline stat, free to compute. */
-export function sessionCount(exchanges: Exchange[]): number {
-  return new Set(exchanges.map((e) => e.session)).size;
 }
 
 /**

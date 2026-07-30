@@ -3,14 +3,16 @@
 The published tool (`npm: stratless`). TypeScript, **zero runtime dependencies** (see below), shipped standalone.
 Both matter: the "audit the whole thing in an afternoon" trust argument depends on a small, dep-free surface.
 
-Pipeline: `transcript.ts` (parse raw JSONL) → `moments.ts` (the persisted pile: what you typed and
+Pipeline: `reader.ts` (parse raw JSONL) → `moments.ts` (the persisted pile: what you typed and
 what the assistant was doing) → `shape.ts` (keep the person's own words, drop the subject) →
 `embed.ts` (a fingerprint per moment, local model, free) → `cluster.ts` (k-means, K derived per
-person, overlap-merge, and the join loop) → `name.ts` (**the only stage that spends**: one call that
-names each pile, nothing more — no scope stamp, no merge; those verdicts wobbled and became
-arithmetic) → `count.ts` (pure arithmetic over the checkmarks, no model) →
-`write.ts` (assemble `HUMAN.md` from the scored pile) → `sink.ts` (load it where the assistant reads
-it). `engine.ts` drives it: a cold build freezes the vocabulary and the centroids, and every run
+person, overlap-merge, and the join loop) → `name.ts` (the one paid stage of a cold build: one call
+that names each pile, nothing more — no scope stamp, no merge; those verdicts wobbled and became
+arithmetic) → `count.ts` (pure arithmetic over the checkmarks, no model) → `lift.ts` (the
+self-retune loop: patches, the dyno, one ledger) → `write.ts` (assemble `HUMAN.md`; each NEW
+category is voiced once and cached in `voiced.ts` — a steady-state rebuild spends $0) → `load.ts`
+(put it where the assistant reads it). `engine.ts` drives it: a cold build freezes the vocabulary
+and the centroids, and every run
 after joins new moments to those frozen centres, so piles keep their names. Supporting: `assign.ts`
 (the assignment store — no model calls left in it), `claude.ts` (the borrow), `mirror.ts` (the free,
 zero-side-effect read), `worker.ts`/`loop.ts` (the after-session refresh), `init.ts` (protect history

@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, before, after } from 'node:test';
 
-import { buildMoments, loadMoments, toMoment, pileOf, type Moment } from './moments.js';
+import { buildMoments, loadMoments, toMoment, pileOf } from './moments.js';
 import { parseExchanges, type Exchange } from './exchange.js';
 
 let dir: string;
@@ -29,11 +29,6 @@ const toolAsst = (text: string, tools: string[], ts = '2026-07-01T10:00:05Z') =>
     timestamp: ts,
     message: { content: [{ type: 'text', text }, ...tools.map((name) => ({ type: 'tool_use', name, input: {} }))] },
   });
-const interruptRec = () =>
-  JSON.stringify({ type: 'user', timestamp: '2026-07-01T10:00:03Z', message: { content: '[Request interrupted by user]' } });
-const denyRec = () =>
-  JSON.stringify({ type: 'user', timestamp: '2026-07-01T10:00:03Z', toolDenialKind: 'user-rejected', message: { content: '' } });
-
 /** Write a transcript into a fresh roots dir and return that dir, so buildMoments can walk it. */
 function roots(name: string, lines: string[], mtime?: number): string {
   const rdir = mkdtempSync(join(tmpdir(), `stratless-roots-${name}-`));

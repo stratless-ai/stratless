@@ -23,10 +23,8 @@
  * naming call is synchronous (the stop-latency caveat, flagged for the worker pass).
  */
 import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { atomicWriteFileSync, CorruptStoreError } from './atomic.js';
 import { findAssistant } from './claude.js';
 import { buildMoments, loadMoments } from './moments.js';
 import { driftCheck } from './reader.js';
@@ -38,17 +36,15 @@ import { buildProfile, looksLikeProfile } from './write.js';
 import { coldBuild, engineReady, grow } from './engine.js';
 import { runtimePresent } from './embed.js';
 import { estimateBuild, estimateLine } from './estimate.js';
-import { injectProfile, humanMdPath } from './sink.js';
+import { injectProfile, humanMdPath } from './load.js';
 import { startRun } from './stopwatch.js';
 import { dailyCheck } from './notify.js';
 import { refreshArmed } from './init.js';
-import { readState, writeState, writeRender, SYNTH_EVERY, flushDue, flushCooldownMs, coldBuildRequested, clearColdBuildRequest } from './state.js';
+import { readState, writeState, writeRender, flushDue, flushCooldownMs, coldBuildRequested, clearColdBuildRequest } from './state.js';
 import { readUsage, diffUsage, fmtTokens } from './usage.js';
 import { killActiveSession } from './stream.js';
 import { acquireLock, releaseLock, lockFilePath } from './worker.js';
 import { writeProgress } from './progress.js';
-
-const STRATLESS_DIR = join(homedir(), '.stratless');
 
 /**
  * The profile is built from the most-recent WINDOW exchanges, never the whole backlog. A profile
@@ -56,13 +52,6 @@ const STRATLESS_DIR = join(homedir(), '.stratless');
  * and bounding it keeps every run cheap and SAFE regardless of how deep a history goes.
  */
 export const JUDGE_WINDOW = 200;
-
-/** The synthesis gate size. STRATLESS_SYNTH_EVERY overrides. */
-export const synthEvery = (): number => {
-  const env = Number(process.env.STRATLESS_SYNTH_EVERY);
-  if (Number.isFinite(env) && env > 0) return env;
-  return SYNTH_EVERY;
-};
 
 /** The installed version, read from the package.json that ships next to dist/. */
 export function installedVersion(): string {
@@ -87,7 +76,7 @@ export function installedVersion(): string {
  */
 
 /** The effective auto-rebuild cooldown: the env override wins, else the person's stored cadence
- *  (`update --daily|--weekly`), else daily. */
+ *  (`update --daily|--weekly`), else weekly. */
 const flushMaxAgeMs = (): number => flushCooldownMs(readState().flushCadence);
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -236,9 +225,9 @@ export async function runWorker(): Promise<number> {
           }
         }
       } else {
-        // STEADY STATE: collect always (free, above); only tag + rebuild — phone the assistant — when
-        // a flush is due: you ran `update` by hand, or it has been past the cooldown (default once a
-        // day). Every other nudge just leaves the new moments collected and spends nothing.
+        // STEADY STATE: collect always (free, above); only tag + rebuild when a flush is due: you
+        // ran `update` by hand, or it has been past the cooldown (the person's cadence — weekly by
+        // default). Every other nudge just leaves the new moments collected and spends nothing.
         const waiting = pendingMoments();
         flush = flushDue(waiting, readState().lastFlushAt, Date.now(), manual, { maxAgeMs: flushMaxAgeMs() }).flush;
 
@@ -335,14 +324,6 @@ export async function runWorker(): Promise<number> {
     writeProgress({ phase: 'done', ok: true, startedAt, summary, ...(spent ? { spend: spent } : {}) });
     return 0;
   } catch (err) {
-    if (err instanceof CorruptStoreError) {
-      // C2's refusal keeps its remedy even when the corruption is found INSIDE the worker.
-      fail([
-        `refused: ${err.file} is damaged — and re-reading your whole history over it would re-bill you`,
-        `nothing was read or spent past it; move it aside, then rerun: mv ${err.file} ${err.file}.damaged`,
-      ]);
-      return 1;
-    }
     fail([`the worker hit an unexpected error: ${err instanceof Error ? err.message : String(err)}`]);
     return 1;
   } finally {

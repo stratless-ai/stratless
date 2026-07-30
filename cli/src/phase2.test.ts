@@ -14,11 +14,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test, before, after } from 'node:test';
 
-import { iterateExchangesNewestFirst } from './exchange.js';
 import { stopWorker, readLock } from './worker.js';
 import { readProgress } from './progress.js';
 import { readUsage, diffUsage } from './usage.js';
-import { appendCategories, loadCategories } from './categories.js';
+import { loadCategories } from './categories.js';
 import { loadAssignments } from './assign.js';
 import { loadMoments } from './moments.js';
 import { requestColdBuild, coldBuildRequested } from './state.js';

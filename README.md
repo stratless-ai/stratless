@@ -31,7 +31,7 @@ No account. No API key. No cloud. The reading and the pattern-finding happen on 
 ## What it builds
 
 <p align="center">
-  <img src="assets/profile-hero.svg?v=5" alt="A sample stratless profile printed in a terminal: who you're working with, one instruction per line with its real count. What to offer me before I ask: offer a quick sketch of the idea before building it out, then ask them to validate it, 218 times. What to catch for me: catch the urge to patch symptoms, they want the actual bug found and fixed first, 156 times. How to talk to me: talk in short go-ahead bursts, they approve with a brief word and expect you to keep moving, 159 times, rising. Then stratless update loads it and the assistant talks to a person, not a blank." width="620">
+  <img src="assets/profile-hero.svg?v=6" alt="A sample stratless profile printed in a terminal: who you're working with, one instruction per line with its real count. What to offer me before I ask: offer to confirm a specific bounded starting scope before expanding further, 257 times. What to catch for me: catch unverified output and double check the work before accepting it as done, 99 times. How to talk to me: talk tersely and execute the brief low-context instruction without asking for more detail, 262 times, rising. Then stratless update loads it and the assistant talks to a person, not a blank." width="620">
 </p>
 
 Run `stratless profile` and it shows you the picture above, the one `stratless update` hands to your assistant. Not a rules sheet you wrote, and not a description of you either — a working brief for the AI: what to offer you before you ask, what to catch for you, how to talk to you, and what your shorthand means. Every line carries the real count behind it, and it sharpens as your history grows — a row can even gain a when-clause for a gap the engine measured, then shed it once the gap closes.
@@ -40,14 +40,15 @@ Install and the full command list live in **[cli/README.md](cli/README.md)**.
 
 ## How it works, there's no trick
 
-No server. No training. No inference bill. Four steps, all on your machine — three of them free maths, and only the naming borrows the assistant you already have:
+No server. No training. No inference bill. Five steps, all on your machine — free maths, save for the short calls that name and word what it found, borrowed from the assistant you already have:
 
 | Step | What happens |
 | :--- | :--- |
 | **1 · Read** | Every session is already on your disk in `~/.claude/projects`. stratless walks each one into moments: what you typed, and what the assistant was doing. |
 | **2 · Cluster** | A small open-weights model on your machine turns each moment into a fingerprint, and the recurring kinds of thing you do fall out as groups. Free, offline, a few minutes. Derived, not pre-matched: there is no category list to sort you into. One short call to your own assistant names what the maths found. |
 | **3 · Count** | Each moment is counted: how often, over what span, rising, fading, or met (you stopped asking because the assistant already does it). Every number is counted by code, never guessed. |
-| **4 · Load** | It writes `~/.claude/HUMAN.md` and points your assistant's config at it, so your next session starts already knowing you. `stratless update` refreshes it; `stratless stop` unloads it. |
+| **4 · Tune** | Each refresh runs the loop that keeps the profile true: wherever the assistant measurably failed you, a patch enters the file — and deletes itself the moment the failure stops. The file gets shorter as you get better. |
+| **5 · Load** | It writes `~/.claude/HUMAN.md` and points your assistant's config at it, so your next session starts already knowing you. `stratless update` refreshes it; `stratless stop` unloads it. |
 
 If the assistant can't answer honestly, it writes nothing: a confidently-wrong profile is the one failure that would end this, so silence always beats a guess.
 
@@ -66,7 +67,7 @@ The profile is a plain text file. It's yours: load it into any other assistant, 
 ## What's in here
 
 ```
-cli/    the tool. TypeScript, one runtime dep (the local model). npm: stratless
+cli/    the tool. TypeScript, zero runtime deps (the runtime arrives at init's consent). npm: stratless
 web/    stratless.com. Nuxt, no modules, prerendered to static HTML
 ```
 

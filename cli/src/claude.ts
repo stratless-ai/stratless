@@ -3,10 +3,8 @@
  *
  * No API key, no server, no bill (handover §3). Most people run Claude Code on a subscription and
  * have no ANTHROPIC_API_KEY at all, so a BYO-key requirement would stop the majority at the door —
- * but `claude` is already installed and already authenticated. explain.ts pioneered this for one
- * sentence; the judge and synthesizer reuse it at scale. Their model, their auth, their machine.
- *
- * findAssistant lives in explain.ts; we re-export it so there is exactly one implementation.
+ * but `claude` is already installed and already authenticated. Every paid call — the naming, the
+ * voicing, the patch wording — borrows it through here. Their model, their auth, their machine.
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -30,10 +28,10 @@ export const TOOLLESS_ARGS = ['--tools', ''] as const;
  * asking it directly — it answered YES and quoted context back. THREE sources feed it, and which
  * one answers depends on the working directory:
  *
- *   1. `~/.claude/CLAUDE.md` -> `@~/.claude/HUMAN.md` — OUR OWN PROFILE. The judge reads the file
- *      it is helping to write, so the profile confirms itself: a claim that gets in makes the judge
- *      likelier to see it again, which puts it back in. No stage could catch this; every stage is
- *      downstream of it. Measured direction: toward flattery. The same pile judged with the profile
+ *   1. `~/.claude/CLAUDE.md` -> `@~/.claude/HUMAN.md` — OUR OWN PROFILE. The borrowed call reads
+ *      the file it is helping to write, so the profile confirms itself: a claim that gets in makes
+ *      the reader likelier to see it again, which puts it back in. No stage could catch this; every
+ *      stage is downstream of it. Measured direction: toward flattery. The same pile read with the profile
  *      loaded produced a category quoting HUMAN.md's own wording, and did NOT produce
  *      "reacts with blunt or profane language when confused" — which the blank-slate run did.
  *      A profile that hides where the person got lost fails at exactly the thing it exists for.
@@ -86,10 +84,10 @@ export function findAssistant(): string | undefined {
  *
  * THE PIN IS ABSOLUTE (Sun, 2026-07-18): a pinned call runs on ITS model or it REFUSES — it never
  * silently falls back to the account's default. The old escape-to-default rungs are gone: a pin
- * escape could land the priciest stage (the miner) on the priciest model (a user who defaults to
- * Opus) at frontier rates, invisibly. Always sonnet/haiku unless the user overrides
- * (STRATLESS_SYNTH_MODEL). Compatibility for a CLI without JSON output is kept — but on the SAME
- * pinned model, as plain text.
+ * escape could land the priciest stage on the priciest model (a user who defaults to
+ * Opus) at frontier rates, invisibly. Always sonnet/haiku, pinned in code at each call site.
+ * Compatibility for a CLI without JSON output is kept — but on the SAME pinned model, as plain
+ * text.
  *
  * THE PLAIN RUNG IS METERED AS UNMETERED (C11, Phase 0's B3): it carries no receipt, so the ledger
  * records "a call happened whose cost I cannot see" rather than a confident zero. It also rejects
@@ -138,9 +136,9 @@ export function runClaude(
       const out = execFileSync(bin, args, {
         encoding: 'utf8',
         env: childEnv,
-        timeout: timeoutMs, // sized PER CALL: a one-line judgment needs little; a mining pass over
-        // dozens of judgments legitimately thinks for minutes (dogfood 2026-07-17: the default
-        // 120s made mining structurally impossible — every attempt timed out, silently)
+        timeout: timeoutMs, // sized PER CALL: a one-line answer needs little; a long pass over a
+        // whole pile legitimately thinks for minutes (dogfood 2026-07-17: the default
+        // 120s made the long calls structurally impossible — every attempt timed out, silently)
         stdio: ['ignore', 'pipe', 'ignore'],
         maxBuffer: 8 * 1024 * 1024, // JSON carries metadata on top of the text — give it room
       }).trim();

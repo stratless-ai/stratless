@@ -589,7 +589,7 @@ export function runLift(
 /* ——— what the profile prints ———
  *
  * LIFT is dynamics, never surface: no heading, no section, ever. Mode-1 sharpen patches print as
- * RIDERS on their host rows plus a situation trigger in the decode key (write.ts derives the
+ * WHEN-CLAUSES on their host rows plus a situation trigger in the decode key (write.ts derives the
  * trigger from the clause's when-shape); mode 2 prints its two templated trigger lines. The
  * wording is the stored voiced-once text — assembly never re-words. */
 
