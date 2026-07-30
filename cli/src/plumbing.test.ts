@@ -2,11 +2,9 @@
  * THE PLUMBING TESTS — Phase 1 of the cold-start build (0.3.4).
  *
  * Spec §7: each acceptance criterion is a test, not an aspiration; §12: these passing IS the
- * definition of done. Covered here: C2 (atomic writes + loud corrupt caches), C4 (the lock),
- * C5 (detached survival), C6 (backoff, not death), C8 (the stopwatch exists), C9 (the borrow is
- * tool-less), C10 (recency is right-way-up), C11 (no unmetered call, no pin escape — unsaid).
- * The corrupt-store refusals for the two spend caches are pinned in stratless.test.ts, next to
- * the stores they guard.
+ * definition of done. Covered here: C2 (atomic writes), C4 (the lock), C5 (detached survival),
+ * C8 (the stopwatch exists), C9 (the borrow is tool-less), C10 (recency is right-way-up),
+ * C11 (no unmetered call, no pin escape — unsaid).
  */
 import { strict as assert } from 'node:assert';
 import { chmodSync, existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -19,7 +17,6 @@ import { test, before, after } from 'node:test';
 import { atomicWriteFileSync } from './atomic.js';
 import { acquireLock, releaseLock, readLock, lockIsStale, spawnDetached } from './worker.js';
 import { summarizeTurns, appendRun, stageRates, etaMs, startRun, STOPWATCH_KEEP } from './stopwatch.js';
-import { runStreamBatch, isTransientFailure } from './stream.js';
 import { runClaude, parseJsonResult, CLEAN_ARGS, TOOLLESS_ARGS } from './claude.js';
 import { readState, writeState, type RunRecord } from './state.js';
 import { readUsage, recordUsage } from './usage.js';
@@ -176,134 +173,6 @@ test('C5: a detached child survives its parent dying and finishes its work', asy
   }
   assert.ok(seen, 'the detached worker completed after its parent died');
   assert.equal(readFileSync(out, 'utf8'), 'done');
-});
-
-// ── C6 — backoff, not death: a 429 storm degrades throughput and loses nothing ─────────────────
-
-test('C6: isTransientFailure separates weather from wreckage', () => {
-  for (const t of ['HTTP 429 Too Many Requests', 'rate limit exceeded', 'Overloaded', 'ECONNRESET mid-stream', 'error 529']) {
-    assert.equal(isTransientFailure(t), true, `transient: ${t}`);
-  }
-  for (const f of ['unknown option --tools', 'invalid api key', 'model not found', '']) {
-    assert.equal(isTransientFailure(f), false, `fatal: ${f}`);
-  }
-});
-
-/** The fake streaming claude: answers each stdin turn with a result event; injects failures at
- *  configured GLOBAL turn numbers (counted across invocations via a counter file). */
-function writeStreamBin(): string {
-  return writeBin(
-    'fake-stream-claude',
-    `
-const fs = require('fs');
-if (process.env.FAKE_ARGV) fs.writeFileSync(process.env.FAKE_ARGV, JSON.stringify(process.argv.slice(2)));
-const counter = process.env.FAKE_COUNTER;
-const failAt = (process.env.FAKE_FAIL_AT || '').split(',').filter(Boolean).map(Number);
-const mode = process.env.FAKE_FAIL_MODE || 'transient-exit';
-let buf = '';
-process.stdin.on('data', (d) => {
-  buf += d;
-  let i;
-  while ((i = buf.indexOf('\\n')) >= 0) {
-    const line = buf.slice(0, i); buf = buf.slice(i + 1);
-    if (!line.trim()) continue;
-    let n = 0;
-    try { n = Number(fs.readFileSync(counter, 'utf8')) || 0; } catch {}
-    n++;
-    fs.writeFileSync(counter, String(n));
-    if (failAt.includes(n)) {
-      if (mode === 'transient-exit') { process.stderr.write('429 Too Many Requests: rate limited\\n'); process.exit(1); }
-      if (mode === 'error-event') {
-        process.stdout.write(JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'API 429 rate limit' }) + '\\n');
-        continue; // stay alive; the caller kills the session
-      }
-      if (mode === 'empty-result') {
-        process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: '', usage: {}, total_cost_usd: 0 }) + '\\n');
-        continue; // an empty answer still advances the turn
-      }
-      process.stderr.write('fatal: model exploded\\n'); process.exit(1);
-    }
-    process.stdout.write(JSON.stringify({
-      type: 'result', subtype: 'success', result: 'ok ' + n,
-      usage: { input_tokens: 2, output_tokens: 3, cache_creation_input_tokens: 0, cache_read_input_tokens: 10 },
-      total_cost_usd: 0.001,
-    }) + '\\n');
-  }
-});
-process.stdin.on('end', () => process.exit(0));
-`,
-  );
-}
-
-const streamItems = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `it-${i + 1}`, prompt: `q${i + 1}` }));
-
-test('C6: a 429 storm — the batch completes, retries are counted, zero evidence lost', async () => {
-  const bin = writeStreamBin();
-  const usageFile = join(dir, 'usage-c6a.json');
-  const counter = join(dir, 'counter-a');
-  process.env.STRATLESS_USAGE = usageFile;
-  process.env.STRATLESS_BACKOFF_BASE_MS = '5';
-  process.env.FAKE_COUNTER = counter;
-  process.env.FAKE_FAIL_AT = '3,6'; // two mid-batch rate-limit deaths
-  process.env.FAKE_FAIL_MODE = 'transient-exit';
-  try {
-    const r = await runStreamBatch(bin, { systemPrompt: 'rules', role: 'judge', feature: 'judge', items: streamItems(8) });
-    assert.equal(r.completed, 8, 'every item answered despite two 429 deaths');
-    assert.equal(r.remaining.length, 0, 'nothing left for the fallback ladder');
-    assert.ok(r.retries >= 2, `the backoff rung engaged (${r.retries} retries)`);
-    assert.equal(r.turnsMs.length, 8, 'C8: a wall-clock recorded per completed turn');
-    assert.ok(readUsage(usageFile).calls >= 2, 'each productive session recorded its receipt');
-  } finally {
-    delete process.env.STRATLESS_USAGE;
-    delete process.env.STRATLESS_BACKOFF_BASE_MS;
-    delete process.env.FAKE_COUNTER;
-    delete process.env.FAKE_FAIL_AT;
-    delete process.env.FAKE_FAIL_MODE;
-  }
-});
-
-test('C6: an in-band error result never advances the turn — session ends, retry completes the batch', async () => {
-  const bin = writeStreamBin();
-  const counter = join(dir, 'counter-b');
-  process.env.STRATLESS_USAGE = join(dir, 'usage-c6b.json');
-  process.env.STRATLESS_BACKOFF_BASE_MS = '5';
-  process.env.FAKE_COUNTER = counter;
-  process.env.FAKE_FAIL_AT = '2';
-  process.env.FAKE_FAIL_MODE = 'error-event';
-  try {
-    const r = await runStreamBatch(bin, { systemPrompt: 'rules', role: 'judge', feature: 'judge', items: streamItems(4) });
-    assert.equal(r.completed, 4, 'the erroring turn was retried, not swallowed as an answer');
-    for (const [, text] of r.results) assert.ok(text.startsWith('ok '), 'no error text ever recorded as a verdict');
-    assert.ok(r.retries >= 1);
-  } finally {
-    delete process.env.STRATLESS_USAGE;
-    delete process.env.STRATLESS_BACKOFF_BASE_MS;
-    delete process.env.FAKE_COUNTER;
-    delete process.env.FAKE_FAIL_AT;
-    delete process.env.FAKE_FAIL_MODE;
-  }
-});
-
-test('C6: a FATAL death keeps the 0.3.1 semantics — completed turns kept, remainder to the ladder', async () => {
-  const bin = writeStreamBin();
-  const counter = join(dir, 'counter-c');
-  process.env.STRATLESS_USAGE = join(dir, 'usage-c6c.json');
-  process.env.STRATLESS_BACKOFF_BASE_MS = '5';
-  process.env.FAKE_COUNTER = counter;
-  process.env.FAKE_FAIL_AT = '2';
-  process.env.FAKE_FAIL_MODE = 'fatal-exit';
-  try {
-    const r = await runStreamBatch(bin, { systemPrompt: 'rules', role: 'judge', feature: 'judge', items: streamItems(5) });
-    assert.equal(r.completed, 1, 'the turn before the fatal death survives');
-    assert.equal(r.remaining.length, 4, 'the rest is handed to the per-call ladder, not retried blindly');
-    assert.equal(r.retries, 0, 'no backoff spent on a non-transient failure');
-  } finally {
-    delete process.env.STRATLESS_USAGE;
-    delete process.env.STRATLESS_BACKOFF_BASE_MS;
-    delete process.env.FAKE_COUNTER;
-    delete process.env.FAKE_FAIL_AT;
-    delete process.env.FAKE_FAIL_MODE;
-  }
 });
 
 // ── C8 — the stopwatch exists: fields recorded, rates derived, ETA measured-only ───────────────
@@ -478,43 +347,6 @@ test('the blank slate survives the fallback to the plain-text rung', () => {
   }
 });
 
-test('the streamed session is blank-slate too', async () => {
-  const bin = writeStreamBin();
-  const argvFile = join(dir, 'argv-stream-clean.json');
-  process.env.STRATLESS_USAGE = join(dir, 'usage-stream-clean.json');
-  process.env.FAKE_ARGV = argvFile;
-  process.env.FAKE_COUNTER = join(dir, 'counter-clean');
-  try {
-    const r = await runStreamBatch(bin, { systemPrompt: 'rules', role: 'judge', feature: 'judge', items: streamItems(2) });
-    assert.equal(r.completed, 2);
-    const argv = JSON.parse(readFileSync(argvFile, 'utf8')) as string[];
-    assert.ok(argv.includes('--safe-mode'), 'the stream child carries --safe-mode');
-  } finally {
-    delete process.env.STRATLESS_USAGE;
-    delete process.env.FAKE_ARGV;
-    delete process.env.FAKE_COUNTER;
-  }
-});
-
-test('C9: the streamed session spawns tool-less too', async () => {
-  const bin = writeStreamBin();
-  const argvFile = join(dir, 'argv-stream.json');
-  process.env.STRATLESS_USAGE = join(dir, 'usage-c9s.json');
-  process.env.FAKE_ARGV = argvFile;
-  process.env.FAKE_COUNTER = join(dir, 'counter-c9');
-  try {
-    const r = await runStreamBatch(bin, { systemPrompt: 'rules', role: 'judge', feature: 'judge', items: streamItems(2) });
-    assert.equal(r.completed, 2);
-    const argv = JSON.parse(readFileSync(argvFile, 'utf8')) as string[];
-    const i = argv.indexOf('--tools');
-    assert.ok(i >= 0 && argv[i + 1] === '', 'the stream child is tool-less');
-  } finally {
-    delete process.env.STRATLESS_USAGE;
-    delete process.env.FAKE_ARGV;
-    delete process.env.FAKE_COUNTER;
-  }
-});
-
 
 // ── C11 — no unmetered call, no pin escape, unsaid ─────────────────────────────────────────────
 
@@ -637,43 +469,3 @@ test('review: spawnDetached with a missing binary returns undefined and never cr
   assert.ok(true, 'still alive after the error event fired');
 });
 
-test('review: a hard-down claude is bounded — zero-progress transient retries cap at 2', async () => {
-  const bin = writeStreamBin();
-  const usageFile = join(dir, 'usage-harddown.json');
-  process.env.STRATLESS_USAGE = usageFile;
-  process.env.STRATLESS_BACKOFF_BASE_MS = '5';
-  process.env.FAKE_COUNTER = join(dir, 'counter-harddown');
-  process.env.FAKE_FAIL_AT = '1,2,3,4,5,6,7,8,9,10'; // every turn dies transient — nothing ever completes
-  process.env.FAKE_FAIL_MODE = 'transient-exit';
-  try {
-    const r = await runStreamBatch(bin, { systemPrompt: 'rules', role: 'judge', feature: 'judge', items: streamItems(4) });
-    assert.equal(r.completed, 0);
-    assert.equal(r.remaining.length, 4, 'everything falls to the per-call ladder');
-    assert.ok(r.retries <= 2, `bounded fast (${r.retries} retries) — the fail-fast promise survives the backoff rung`);
-    assert.ok(readUsage(usageFile).unmeteredCalls >= 1, 'the dead sessions that booted are on the meter as unmetered (C11)');
-  } finally {
-    delete process.env.STRATLESS_USAGE;
-    delete process.env.STRATLESS_BACKOFF_BASE_MS;
-    delete process.env.FAKE_COUNTER;
-    delete process.env.FAKE_FAIL_AT;
-    delete process.env.FAKE_FAIL_MODE;
-  }
-});
-
-test('review: an empty answer is not a completed turn — its wall-clock stays out of the rates', async () => {
-  const bin = writeStreamBin();
-  process.env.STRATLESS_USAGE = join(dir, 'usage-empty.json');
-  process.env.FAKE_COUNTER = join(dir, 'counter-empty');
-  process.env.FAKE_FAIL_AT = '2';
-  process.env.FAKE_FAIL_MODE = 'empty-result';
-  try {
-    const r = await runStreamBatch(bin, { systemPrompt: 'rules', role: 'judge', feature: 'judge', items: streamItems(3) });
-    assert.equal(r.turnsMs.length, r.completed, 'one timing sample per COMPLETED turn, exactly');
-    assert.ok(!r.results.has('it-2'), 'the empty answer was not recorded as a verdict');
-  } finally {
-    delete process.env.STRATLESS_USAGE;
-    delete process.env.FAKE_COUNTER;
-    delete process.env.FAKE_FAIL_AT;
-    delete process.env.FAKE_FAIL_MODE;
-  }
-});

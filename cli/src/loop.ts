@@ -22,9 +22,7 @@
  * releases the lock, and exits — a graceful signal is processed between stages, since the in-flight
  * naming call is synchronous (the stop-latency caveat, flagged for the worker pass).
  */
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
 import { findAssistant } from './claude.js';
 import { buildMoments, loadMoments } from './moments.js';
 import { driftCheck } from './reader.js';
@@ -36,13 +34,12 @@ import { buildProfile, looksLikeProfile } from './write.js';
 import { coldBuild, engineReady, grow } from './engine.js';
 import { runtimePresent } from './embed.js';
 import { estimateBuild, estimateLine } from './estimate.js';
-import { injectProfile, humanMdPath } from './load.js';
+import { injectProfile, humanMdPath, installedVersion } from './load.js';
 import { startRun } from './stopwatch.js';
 import { dailyCheck } from './notify.js';
 import { refreshArmed } from './init.js';
 import { readState, writeState, writeRender, flushDue, flushCooldownMs, coldBuildRequested, clearColdBuildRequest } from './state.js';
 import { readUsage, diffUsage, fmtTokens } from './usage.js';
-import { killActiveSession } from './stream.js';
 import { acquireLock, releaseLock, lockFilePath } from './worker.js';
 import { writeProgress } from './progress.js';
 
@@ -52,16 +49,6 @@ import { writeProgress } from './progress.js';
  * and bounding it keeps every run cheap and SAFE regardless of how deep a history goes.
  */
 export const JUDGE_WINDOW = 200;
-
-/** The installed version, read from the package.json that ships next to dist/. */
-export function installedVersion(): string {
-  try {
-    const pkg = join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json');
-    return (JSON.parse(readFileSync(pkg, 'utf8')).version as string) ?? 'unknown';
-  } catch {
-    return 'unknown';
-  }
-}
 
 /**
  * `Rendered` and `buildRendered` lived here: they chose between the flat-pile synthesis and the
@@ -120,7 +107,6 @@ export async function runWorker(): Promise<number> {
   let stopRequested = false;
   const onStop = (): void => {
     stopRequested = true;
-    killActiveSession(); // no-op for the synchronous assign call; meaningful for any active stream
   };
   process.once('SIGTERM', onStop);
   process.once('SIGINT', onStop);

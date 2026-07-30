@@ -18,11 +18,11 @@ import { init as doInit, ARCHIVE, PROJECTS, stopRefresh, refreshArmed, type Init
 import { runtimeDir, runtimeInstalled, ensureRuntime, runtimePresent, modelPresent, modelDir } from './embed.js';
 import { fetchLatest, newerThan } from './notify.js';
 import { loadRecentExchanges } from './exchange.js';
-import { removeProfile, humanMdPath, claudeMdPath } from './load.js';
+import { removeProfile, humanMdPath, claudeMdPath, installedVersion } from './load.js';
 import { readRenders, requestColdBuild, coldBuildRequested, readState, setFlushCadence, type FlushCadence } from './state.js';
 import { readUsage } from './usage.js';
 import { readLock, lockIsStale, stopWorker, spawnDetached, resolveBinPath } from './worker.js';
-import { runWorker, installedVersion, JUDGE_WINDOW } from './loop.js';
+import { runWorker, JUDGE_WINDOW } from './loop.js';
 import { readProgress, type Progress } from './progress.js';
 import { makePalette } from './palette.js';
 import { mirrorOfArchive, mirrorOfArchiveAsync } from './mirror.js';
@@ -208,7 +208,7 @@ async function profiler(_rest: string[] = []): Promise<void> {
     return;
   }
 
-  // Strip HUMAN.md's managed-by header (the `#` lines + the `<!-- humanmd/v1 -->` marker) — plumbing a
+  // Strip HUMAN.md's managed-by header (the `#` lines + the `<!-- format: … -->` marker) — plumbing a
   // person reading their own profile does not need to see.
   const raw = readFileSync(human, 'utf8').split('\n');
   const start = raw.findIndex((l) => l.trim() !== '' && !/^\s*#/.test(l) && !/^\s*<!--/.test(l));

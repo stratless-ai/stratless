@@ -6,12 +6,11 @@
  * come back. A confidently-wrong answer, screenshotted by one stranger, ends this product.
  */
 import { strict as assert } from 'node:assert';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync, utimesSync, chmodSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { test, before, after } from 'node:test';
 
-import { runStreamBatch } from './stream.js';
 import { makePalette } from './palette.js';
 import { shouldCheck, newerThan, dailyCheck, readNotify } from './notify.js';
 import { execFileSync } from 'node:child_process';
@@ -448,90 +447,6 @@ test('a piped `status` run emits zero escape bytes (the audit gap, closed for re
   assert.ok(out.includes('stratless status'), 'and the content itself still arrives');
 });
 
-// ── the streaming call harness (0.3.1): one harness, many verdicts — and never its own exhaust ──
-
-/** A fake `claude` that speaks the stream-json protocol — executable, shebang'd, argv-ignoring. */
-const mockBrain = (name: string, dieAfter = -1): string => {
-  const p = join(dir, name);
-  writeFileSync(
-    p,
-    `#!/usr/bin/env node
-let buf = ''; let turn = 0;
-process.stdin.on('data', (d) => {
-  buf += d.toString();
-  let i;
-  while ((i = buf.indexOf('\\n')) >= 0) {
-    const line = buf.slice(0, i); buf = buf.slice(i + 1);
-    if (!line.trim()) continue;
-    turn++;
-    if (${dieAfter} > 0 && turn > ${dieAfter}) process.exit(1);
-    const msg = JSON.parse(line);
-    if (!msg.message.content[0].text.startsWith('<stratless-')) process.exit(2); // sentinel enforced
-    process.stdout.write(JSON.stringify({
-      type: 'result', subtype: 'success',
-      result: JSON.stringify({ verdict: 'none', topic: 'topic' + turn, behavior: 'behavior' + turn }),
-      total_cost_usd: 0.001 * turn,
-      usage: { input_tokens: 10, output_tokens: 20, cache_creation_input_tokens: 5, cache_read_input_tokens: 100 },
-      modelUsage: { 'mock-model': { inputTokens: 10, outputTokens: 20, costUSD: 0.001 } },
-    }) + '\\n');
-  }
-});
-process.stdin.on('end', () => process.exit(0));
-`,
-  );
-  chmodSync(p, 0o755);
-  return p;
-};
-
-test('runStreamBatch: lockstep turns, per-session receipts, and rotation', async () => {
-  const usageFile = join(dir, 'stream-usage.json');
-  process.env.STRATLESS_USAGE = usageFile;
-  try {
-    const bin = mockBrain('mock-ok.js');
-    const items = Array.from({ length: 5 }, (_, k) => ({ id: `h${k}`, prompt: `PERSON ASKED: q${k}` }));
-    const out = await runStreamBatch(bin, {
-      systemPrompt: 'rules',
-      role: 'judge',
-      feature: 'judge',
-      items,
-      maxTurnsPerSession: 3,
-      turnTimeoutMs: 5000,
-    });
-    assert.equal(out.completed, 5, 'all turns complete across a rotation (3 + 2)');
-    assert.equal(out.remaining.length, 0, 'nothing left for the fallback');
-    assert.ok(out.results.get('h0')?.includes('topic1'), 'turn 1 answer routed to item 1');
-    assert.ok(out.results.get('h4')?.includes('topic2'), 'rotation resets the mock — session 2 turn 2 routed to item 5');
-    const u = readUsage(usageFile);
-    assert.equal(u.calls, 2, 'two sessions = two meter entries (a session is one borrowed process)');
-    assert.ok(u.cacheReadTokens > 0, 'stream receipts carry cache tokens');
-    assert.ok(u.byModel['mock-model'], 'per-model truth survives streaming');
-  } finally {
-    delete process.env.STRATLESS_USAGE;
-  }
-});
-
-test('runStreamBatch: a dying session hands the remainder to the fallback ladder', async () => {
-  const usageFile = join(dir, 'stream-usage-2.json');
-  process.env.STRATLESS_USAGE = usageFile;
-  try {
-    const bin = mockBrain('mock-die.js', 2);
-    const items = Array.from({ length: 5 }, (_, k) => ({ id: `h${k}`, prompt: `q${k}` }));
-    const out = await runStreamBatch(bin, {
-      systemPrompt: 'rules',
-      role: 'judge',
-      feature: 'judge',
-      items,
-      maxTurnsPerSession: 10,
-      turnTimeoutMs: 3000,
-    });
-    assert.equal(out.completed, 2, 'the two completed turns survive the crash');
-    assert.equal(out.remaining.length, 3, 'the remainder goes to the per-call fallback — never lost, never guessed');
-    assert.ok(out.streamed, 'partial success still counts as streamed');
-  } finally {
-    delete process.env.STRATLESS_USAGE;
-  }
-});
-
 // ── the miner's code half: THE MODEL NAMES, THE CODE COUNTS ───────────────────────────────────
 //
 // Everything numeric or temporal on a Pattern comes from aggregate() and only from there — the
@@ -544,7 +459,7 @@ test('HUMAN.md carries the person-layer schema marker (v3: the conductor brief +
   const humanMd = join(dir, 'HUMAN-schema.md');
   const claudeMd = join(dir, 'CLAUDE-schema.md');
   injectProfile('WHAT THEY KNOW\nbackend architecture', humanMd, claudeMd);
-  assert.ok(readFileSync(humanMd, 'utf8').includes('<!-- humanmd/v3 -->'), 'the protocol version is declared in the artifact');
+  assert.ok(readFileSync(humanMd, 'utf8').includes('<!-- format: humanmd/v3 -->'), 'the format version is declared in the artifact');
 });
 
 // ── the promise layer: a wrong frequency is a lie wearing precision ───────────────────────────
