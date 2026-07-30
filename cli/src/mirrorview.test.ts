@@ -37,6 +37,13 @@ function base(): Mirror {
         { name: 'Bash', calls: 100, share: 0.25 },
       ],
       toolCalls: 400,
+      agentRuns: 40,
+      agentMix: [
+        { name: 'Explore', runs: 24, share: 0.6 },
+        { name: 'general-purpose', runs: 12, share: 0.3 },
+      ],
+      skillUses: 10,
+      skillMix: [{ name: 'research', uses: 5, share: 0.5 }],
     },
     rhythm: { byHour: new Array(24).fill(1), hoursFor80: 8, hoursFor90: 12 },
     topics: ['stratless', 'discovery pipeline'],
@@ -61,10 +68,12 @@ test('busiest repo is by messages (basename), top tool is its share of all tool 
 test('rows with no data are skipped, not shown as zeros', () => {
   const m = base();
   m.context.repos = [];
-  m.work = { toolMix: [], toolCalls: 0 };
+  m.work = { toolMix: [], toolCalls: 0, agentRuns: 0, agentMix: [], skillUses: 0, skillMix: [] };
   const rows = renderMirror(m);
   assert.ok(!rows.some((r) => r.label === 'busiest repo'), 'no repo row without repos');
   assert.ok(!rows.some((r) => r.label === 'most-used tool'), 'no tool row without tools');
+  assert.ok(!rows.some((r) => r.label === 'work it handed off'), 'no delegation row for someone who never delegates');
+  assert.ok(!rows.some((r) => r.label === 'skills it loaded'), 'no skills row for someone whose assistant loaded none');
   assert.ok(rows.some((r) => r.label === 'course corrections'), 'but the friction read still stands');
 });
 
@@ -76,7 +85,7 @@ test('no history — no rows at all', () => {
 
 test('a non-empty toolMix with zero total calls skips the tool row (no divide-by-zero)', () => {
   const m = base();
-  m.work = { toolMix: [{ name: 'Edit', calls: 0, share: 0 }], toolCalls: 0 };
+  m.work = { toolMix: [{ name: 'Edit', calls: 0, share: 0 }], toolCalls: 0, agentRuns: 0, agentMix: [], skillUses: 0, skillMix: [] };
   const rows = renderMirror(m);
   assert.ok(!rows.some((r) => r.label === 'most-used tool'), 'guarded on toolCalls, not just toolMix length');
 });

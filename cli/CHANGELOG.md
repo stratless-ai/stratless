@@ -6,6 +6,18 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+### Added
+- **The free read now sees your fleet.** Two rows join `stratless mirror`, both computed on the same
+  local pass, both absent unless they apply to you: `work it handed off` counts the times your
+  assistant gave part of a job to another agent instead of doing it itself and names the kinds it
+  used most, and `skills it loaded` counts the packaged procedures it pulled in. Neither is inferred
+  — the agent type comes from the spawn's own record, the skill from the load's own — and a spawn or
+  load that named nothing is still counted rather than given a label we invented. Both stay in your
+  terminal and never reach the `--share` card, because an agent type or a skill name can be bespoke.
+  `skills it loaded` is deliberately phrased from the assistant's side: a skill enters the record the
+  same way whether you typed its name or your assistant chose it, so the row never claims the reach
+  was yours.
+
 ## [0.7.1] · 2026-07-30 · the file says who wrote it
 
 ### Changed

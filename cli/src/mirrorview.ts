@@ -143,6 +143,33 @@ export function renderMirror(m: Mirror, opts: { full?: boolean } = {}): MirrorRo
       .map((t) => `${t.name} ${Math.round(100 * t.share)}%`)
       .join(' · ');
     rows.push({ label: 'tools it ran for you', value: `${m.work.toolCalls.toLocaleString()} calls · ${mix}` });
+
+    // Work handed to other agents. Its own row rather than a line in the tool mix, because a
+    // delegation is a different KIND of event: the assistant stopped doing the work itself.
+    if (m.work.agentRuns) {
+      const kinds = m.work.agentMix
+        .slice(0, 2)
+        .map((a) => `${a.name} ${Math.round(100 * a.share)}%`)
+        .join(' · ');
+      rows.push({
+        label: 'work it handed off',
+        value: `${m.work.agentRuns.toLocaleString()} agent runs${kinds ? ` · ${kinds}` : ''}`,
+      });
+    }
+
+    // Skills: a packaged procedure loaded for the job. Named from the assistant's side on purpose
+    // — a skill enters the record identically whether the person typed `/name` or the assistant
+    // chose it, so the row must not claim it was the person's reach.
+    if (m.work.skillUses) {
+      const named = m.work.skillMix
+        .slice(0, 2)
+        .map((s) => `${s.name} ${Math.round(100 * s.share)}%`)
+        .join(' · ');
+      rows.push({
+        label: 'skills it loaded',
+        value: `${m.work.skillUses.toLocaleString()} time${m.work.skillUses === 1 ? '' : 's'}${named ? ` · ${named}` : ''}`,
+      });
+    }
   } else {
     const tool = topToolRow(m);
     if (tool) rows.push(tool);
@@ -155,10 +182,11 @@ export function renderMirror(m: Mirror, opts: { full?: boolean } = {}): MirrorRo
  * THE SHAREABLE CARD — the same free read, curated to the UNIVERSAL, name-safe surface so it is safe
  * to screenshot and forward (the viral unit the launch carries). The rule: the card draws ONLY from
  * aggregate number fields. It omits `busiest repo` (a repo basename can be a client or project name),
- * never touches `topics` (session titles), and never touches `writing.repeated` — the Mirror's one
- * text-carrying field, which exists for the person's own terminal alone. Any future field that
- * carries text is terminal-only by default; the card must opt nothing in without this comment
- * changing. Neutral labels only: the post brands the number ("AI Brain Fry" etc.), the tool never
+ * never touches `topics` (session titles), never touches `writing.repeated` — the Mirror's one
+ * text-carrying field, which exists for the person's own terminal alone — and never touches
+ * `work.agentMix` or `work.skillMix` (an agent type or skill name can be bespoke — a plugin, a
+ * company's own playbook, something written for one job). Any future field that carries text is
+ * terminal-only by default; the card must opt nothing in without this comment changing. Neutral labels only: the post brands the number ("AI Brain Fry" etc.), the tool never
  * marries a noun that might not stick.
  */
 export function renderCard(m: Mirror): MirrorRow[] {

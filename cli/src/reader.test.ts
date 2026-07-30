@@ -214,6 +214,54 @@ test('assistant tool use is captured; prose-only replies carry no tools', () => 
   rmSync(dir, { recursive: true });
 });
 
+test('a delegation is read from the spawn itself — never inferred, never labelled when unnamed', () => {
+  const dir = archiveOf({
+    'a.jsonl': [
+      rec({
+        type: 'assistant',
+        message: {
+          content: [
+            { type: 'tool_use', name: 'Task', input: { subagent_type: 'Explore', prompt: 'find it' } },
+            { type: 'tool_use', name: 'Agent', input: { subagent_type: 'Plan' } },
+            { type: 'tool_use', name: 'Task', input: { description: 'a one-off with no type' } },
+            { type: 'tool_use', name: 'Bash', input: { command: 'ls' } },
+          ],
+        },
+      }),
+      rec({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash' }] } }),
+    ],
+  });
+  const turns = [...readTurns([dir])];
+  assert.deepEqual(turns[0].delegations, ['Explore', 'Plan'], 'only the spawns that named their own type');
+  assert.equal(turns[0].tools?.filter((t) => t === 'Task' || t === 'Agent').length, 3, 'all three spawns stay countable');
+  assert.equal(turns[1].delegations, undefined, 'a turn that delegated nothing carries no field');
+  rmSync(dir, { recursive: true });
+});
+
+test('a skill load is read from its own argument, and an unnamed load is never labelled', () => {
+  const dir = archiveOf({
+    'a.jsonl': [
+      rec({
+        type: 'assistant',
+        message: {
+          content: [
+            { type: 'tool_use', name: 'Skill', input: { skill: 'deep-research', args: 'x' } },
+            { type: 'tool_use', name: 'Skill', input: { skill: 'plugin:push' } },
+            { type: 'tool_use', name: 'Skill', input: {} },
+            { type: 'tool_use', name: 'Read', input: { file_path: '/x' } },
+          ],
+        },
+      }),
+      rec({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Read' }] } }),
+    ],
+  });
+  const turns = [...readTurns([dir])];
+  assert.deepEqual(turns[0].skills, ['deep-research', 'plugin:push'], 'plugin-scoped names survive intact');
+  assert.equal(turns[0].tools?.filter((t) => t === 'Skill').length, 3, 'all three loads stay countable');
+  assert.equal(turns[1].skills, undefined, 'a turn that loaded none carries no field');
+  rmSync(dir, { recursive: true });
+});
+
 test('a missing or unreadable archive yields nothing rather than throwing', () => {
   assert.deepEqual([...readTurns(['/nope/not/here'])], []);
 });
