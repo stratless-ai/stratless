@@ -44,11 +44,11 @@ No server. No training. No inference bill. Five steps, all on your machine — f
 
 | Step | What happens |
 | :--- | :--- |
-| **1 · Read** | Every session is already on your disk in `~/.claude/projects`. stratless walks each one into moments: what you typed, and what the assistant was doing. |
-| **2 · Cluster** | A small open-weights model on your machine turns each moment into a fingerprint, and the recurring kinds of thing you do fall out as groups. Free, offline, a few minutes. Derived, not pre-matched: there is no category list to sort you into. One short call to your own assistant names what the maths found. |
-| **3 · Count** | Each moment is counted: how often, over what span, rising, fading, or met (you stopped asking because the assistant already does it). Every number is counted by code, never guessed. |
-| **4 · Tune** | Each refresh runs the loop that keeps the profile true: wherever the assistant measurably failed you, a patch enters the file — and deletes itself the moment the failure stops. The file gets shorter as you get better. |
-| **5 · Load** | It writes `~/.claude/HUMAN.md` and points your assistant's config at it, so your next session starts already knowing you. `stratless update` refreshes it; `stratless stop` unloads it. |
+| **1&nbsp;·&nbsp;Read** | Every session is already on your disk in `~/.claude/projects`. stratless walks each one into moments: what you typed, and what the assistant was doing. |
+| **2&nbsp;·&nbsp;Cluster** | A small open-weights model on your machine turns each moment into a fingerprint, and the recurring kinds of thing you do fall out as groups. Free, offline, a few minutes. Derived, not pre-matched: there is no category list to sort you into. One short call to your own assistant names what the maths found. |
+| **3&nbsp;·&nbsp;Count** | Each moment is counted: how often, over what span, rising, fading, or met (you stopped asking because the assistant already does it). Every number is counted by code, never guessed. |
+| **4&nbsp;·&nbsp;Tune** | Each refresh runs the loop that keeps the profile true: wherever the assistant measurably failed you, a patch enters the file — and deletes itself the moment the failure stops. The file gets shorter as you get better. |
+| **5&nbsp;·&nbsp;Load** | It writes `~/.claude/HUMAN.md` and points your assistant's config at it, so your next session starts already knowing you. `stratless update` refreshes it; `stratless stop` unloads it. |
 
 If the assistant can't answer honestly, it writes nothing: a confidently-wrong profile is the one failure that would end this, so silence always beats a guess.
 
