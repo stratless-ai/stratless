@@ -62,6 +62,28 @@ and each version matches its `cli-v*` git tag.
   argument leak), which no consumer noticed until the topic discriminator became the first code to
   depend on the fake geometry. Test-only; real fingerprints were never affected.
 
+## [0.6.3] · 2026-07-28 · the mirror reads you back
+
+The free read used to count you: messages, days, medians. Now it also quotes you.
+`what you keep typing` shows your most-repeated messages, exactly as you typed them,
+computed like everything else here: arithmetic on your own history, on your machine,
+nothing sent anywhere.
+
+### Added
+
+- New rows in the full `mirror` read (bare `npx stratless`), all computed locally:
+  `a median day`, `what you keep typing` (exact-text repeats, shown only in your
+  terminal), `screenshots sent`, `friction days`, `not counted against you` (the
+  permission stops and system blocks that are excluded from your friction rate,
+  shown instead of silently dropped), the repo and branch spread beside
+  `busiest repo`, and `tools it ran for you` (total tool calls plus the mix).
+
+### Unchanged on purpose
+
+- The `init` door's short teaser and the `--share` card are byte-identical to 0.6.2.
+  The card carries only universal numbers: no repo names, no session titles, and
+  never anything you typed.
+
 ## [0.6.2] · 2026-07-27 · many hands, same fingerprints
 
 A full build now takes ~2.7 minutes — and unlike every speedup before it, this one changes
