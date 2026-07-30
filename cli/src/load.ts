@@ -17,7 +17,8 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, sep } from 'node:path';
+import { dirname, join, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { atomicWriteFileSync } from './atomic.js';
 
 /** The global file Claude Code loads every session. Override with STRATLESS_CLAUDE_MD (tests). */
@@ -53,6 +54,17 @@ export interface Injected {
  * Write the profile to HUMAN.md and point CLAUDE.md at it. Returns both paths. Idempotent: re-running
  * rewrites HUMAN.md and replaces our CLAUDE.md block in place, never disturbing the rest.
  */
+/** The installed version, read from the package.json that ships next to dist/ — stamped into the
+ *  managed header so the file itself says which stratless wrote it. Never hand-typed. */
+export function installedVersion(): string {
+  try {
+    const pkg = join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json');
+    return (JSON.parse(readFileSync(pkg, 'utf8')).version as string) ?? 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
 export function injectProfile(
   text: string,
   humanTarget: string = humanMdPath(),
@@ -65,9 +77,9 @@ export function injectProfile(
   const stamp = `${builtAt.slice(0, 16).replace('T', ' ')} UTC`; // 2026-07-23T12:28:56.777Z -> "2026-07-23 12:28 UTC"
   const human = [
     '# Who you are working with',
-    '# (managed by stratless: do not edit by hand; refreshed by `stratless update`)',
+    `# (managed by stratless ${installedVersion()}: do not edit by hand; refreshed by \`stratless update\`)`,
     `# built ${stamp}`,
-    '<!-- humanmd/v3 -->', // the person-layer protocol's schema marker (v3: the conductor's brief + the LIFT rows — Frame/Judge/Move/Register)
+    '<!-- format: humanmd/v3 -->', // the person-layer format marker (v3: the conductor's brief + the LIFT rows)
     '',
     text.trim(),
     '',

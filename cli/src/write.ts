@@ -22,7 +22,7 @@
  * pipeline exists to avoid.
  *
  * The text produced here starts at the provenance line: `injectProfile` (load.ts) adds the
- * `# Who you are working with` header and the humanmd/v3 marker when it installs, so repeating the
+ * `# Who you are working with` header and the format marker when it installs, so repeating the
  * header here would double it.
  */
 import { findAssistant, runClaude } from './claude.js';

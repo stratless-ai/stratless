@@ -6,6 +6,22 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+## [0.7.1] · 2026-07-30 · the file says who wrote it
+
+### Changed
+- HUMAN.md's managed header now names the stratless version that wrote it — `# (managed by
+  stratless 0.7.1: …)` — read from the package at write time, never typed. When a profile ever
+  looks wrong, the file itself now answers the first question: which version made this?
+- The machine marker says what it is: `<!-- format: humanmd/v3 -->` (was the bare
+  `<!-- humanmd/v3 -->`). Same contract for adapters, now readable by the person whose file it is.
+
+### Removed
+- The dormant streaming batch harness (`stream.ts`, built 0.3.1). It kept one borrowed `claude`
+  session open to answer hundreds of one-liner judge questions without re-paying the ~30k-token
+  harness boot per call — an economics fix for an engine that no longer exists. v3's three model
+  calls are one-shot batches; nothing has called it since the judge retired. The measured lesson
+  lives in git.
+
 ## [0.7.0] · 2026-07-30 · the tune keeps itself true
 
 Your profile stops being a snapshot and becomes a tune. One loop now runs on every refresh:
