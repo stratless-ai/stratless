@@ -41,20 +41,21 @@ Who you are working with              (stratless · read from your own history)
 
 ## What to offer me before I ask
 
-- offer to enter an explicit plan mode with targets and
-  timeline before touching code — and when work is about to
-  proceed without a plan laid out, stop and plan it out with
-  me first. (234×, met · slip 25×)
+- offer a full plan mode with targets, scope, and timeline
+  before executing on anything ambitious — and when work is
+  about to proceed without a plan laid out, stop and plan it
+  out with me first. (238×, met · slip 25×)
 
 ## What to catch for me
 
-- catch unverified output and double check the work before
-  accepting it as done (99×)
+- catch unverified claims of completed work, they want a
+  double-check and full explanation before trusting it. (104×)
 
 ## How to talk to me
 
-- talk tersely and execute the brief low-context instruction
-  without asking for more detail (262×, rising)
+- talk in a loose, playful register when they riff on content
+  ideas, matching their energy rather than formalizing
+  prematurely. (99×, fading)
 ```
 
 Not a rules sheet you wrote. A brief on a person, derived from your real history and nothing you
