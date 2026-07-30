@@ -46,7 +46,7 @@ const storePath = (): string => process.env.STRATLESS_MOMENTS || join(homedir(),
  * shape could not re-derive. Independent of the assignment and discovery versions on purpose: a
  * change to what a moment IS should not throw away paid-for assignments, and vice versa.
  */
-export const MOMENTS_V = 1;
+export const MOMENTS_V = 3; // 3: `aiTerms` + `saidLen` added — the answer channel (asks/lift read them)
 
 /** The reply is stored capped — enough to read and to quote from, not the whole paste. The TRUE
  *  length rides alongside in `replyLen`, because size is itself a signal and the cap would hide it. */
@@ -78,10 +78,21 @@ export interface Moment {
   tools?: string[];
   /** total invocations, duplicates kept — HOW MUCH (twelve edits vs one). Absent on a pure-talk turn. */
   calls?: number;
+  /** distinct tool names the person REFUSED here — the other half of the supply question: an offer
+   *  kept being made vs an offer kept being taken. Absent when nothing was refused. */
+  denied?: string[];
   /** the OPENING of the assistant's turn — the trigger. Absent when it said nothing. */
   aiHead?: string;
   /** the ENDING of the assistant's turn — what the reply answered. Absent when it said nothing. */
   aiTail?: string;
+  /** salient candidate terms of the assistant's FULL answer — the answer channel. Extracted at
+   *  collect (exchange.ts holds the whole answer; the caps here keep 300+300), rarity and
+   *  salience judged downstream against the whole corpus (asks.ts). Absent when it said nothing. */
+  aiTerms?: string[];
+  /** the TRUE length of the assistant's turn, before any cap — the explanation-shape signal the
+   *  ask detector reads (mirrors replyLen: size is itself a signal and the caps would hide it).
+   *  Absent when it said nothing. */
+  saidLen?: number;
 }
 
 /** The recorded event decides the pile — never inference. A declined tool is the stronger, explicit
@@ -107,10 +118,14 @@ export function toMoment(ex: Exchange): Moment {
     m.tools = [...new Set(ex.tools)];
     m.calls = ex.tools.length;
   }
+  if (ex.denied?.length) m.denied = [...new Set(ex.denied)];
   // Head and tail travel together or not at all: both are absent exactly when the assistant said
   // nothing (an opener, a tool-only turn), which is honest — there was no opening move to record.
   if (ex.said) m.aiTail = ex.said.slice(-TAIL);
   if (ex.saidHead) m.aiHead = ex.saidHead.slice(0, HEAD);
+  // The answer channel rides the same gate: absent exactly when the assistant said nothing.
+  if (ex.aiTerms?.length) m.aiTerms = ex.aiTerms;
+  if (ex.said) m.saidLen = ex.shape?.said ?? ex.said.length;
   return m;
 }
 

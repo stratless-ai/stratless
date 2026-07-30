@@ -3,12 +3,12 @@
  * adds, revised re-words but KEEPS the birth date, retired drops, a torn line is skipped.
  */
 import { strict as assert } from 'node:assert';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, before, after } from 'node:test';
 
-import { loadCategories, appendCategories } from './categories.js';
+import { loadCategories, appendCategories, retireCategories } from './categories.js';
 
 let dir: string;
 before(() => {
@@ -59,4 +59,17 @@ test('a torn last line is skipped, not fatal', () => {
 
 test('missing store is no columns, never a throw', () => {
   assert.deepEqual(loadCategories(join(dir, 'nope.jsonl')), []);
+});
+
+test('a cold rebuild retires the outgoing generation — the live set never stacks', () => {
+  const file = join(dir, 'generations.jsonl');
+  appendCategories([{ name: 'gen1-a', description: 'a' }, { name: 'gen1-b', description: 'b' }], { file, at: '2026-07-01T00:00:00Z' });
+  // the rebuild: retire everything live, then the new generation is born
+  retireCategories(loadCategories(file).map((c) => c.name), { file, at: '2026-07-15T00:00:00Z' });
+  appendCategories([{ name: 'gen2-a', description: 'a2' }, { name: 'gen1-b', description: 'b2' }], { file, at: '2026-07-15T00:00:00Z' });
+  const live = loadCategories(file);
+  assert.equal(live.length, 2, 'only the current generation is live — no ghosts');
+  assert.ok(live.every((c) => c.bornAt === '2026-07-15T00:00:00Z'), 'a reborn name is a NEW column — its assignments were replaced wholesale');
+  const lines = readFileSync(file, 'utf8').trim().split('\n');
+  assert.equal(lines.length, 6, 'and the log keeps every tombstone — auditable, never rewritten');
 });

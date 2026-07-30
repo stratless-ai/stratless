@@ -6,6 +6,62 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+### Added
+- **A row can now deepen — and then thin itself.** When the engine measures a gap — a standard you
+  demonstrably hold (in your own calm words) that sometimes arrives only as a late correction —
+  the row holding that standard gains a when-clause: *"…offer to enter plan mode first — and when
+  work is starting and I haven't set a plan yet, stop and plan first."* Its receipt gains a second
+  count, `(234×, met · slip 25×)`: the slips are the times the standard arrived late. The decode
+  key gains the situation to catch unprompted — the state you never announce, which is exactly why
+  it is a gap. Nothing here is our opinion of who you should be: a gap can only exist where BOTH
+  sides are in your own history (the reaching and the late catch), arithmetic decides what exists,
+  and the model's one job is wording the clause — once, at birth; it never re-rolls. Every clause
+  carries its own retirement test: when the gap closes or the stumbles stop on their own, the
+  clause and its slip count disappear. **The file gets shorter as you get better** — an
+  accumulating memory cannot say that. Most profiles will carry zero or one of these; that is the
+  honest count, not a shortage.
+- The person-layer schema marker steps to `humanmd/v3` (the rider clause, the slip receipt, and the
+  situation triggers are a schema change).
+- **The tuning-service loop.** Your profile is the tune your AI reads; the engine now runs one
+  loop that keeps it true: wherever the AI measurably failed YOU — moving before your plan was
+  down, explaining denser than you could absorb — a patch enters the tune, worded once, tested
+  against its own birth baseline on every refresh, and **deleted the moment the failure stops.
+  The file gets shorter as the pairing gets better.** Two failure modes are live. *Wrong time*
+  prints as the when-clause riders and slip receipts above. *Wrong altitude* reads your own ask
+  rituals (mined from your history — no shipped phrasebook) and the explanations that came
+  straight back ("i don't understand"), and prints two lines in the decode key: your
+  comprehension signature with its honest counts (*my questions circle a mechanism → drop a
+  level… (563× across 88 conversations, 52 didn't land)*), and — where zones of chosen
+  outsourcing exist — *where I never ask questions, I don't want lessons*. No topic is ever
+  named, nothing about you is ever graded: **every patch records a failure of the AI, never a
+  state of you.** Everything that decides what exists is arithmetic against your own corpus; the
+  model's one job is wording each patch, once, at birth. (The moment record carries the answer
+  channel that makes this readable: every assistant answer's salient terms and true length.)
+
+### Changed
+- **A fading offer/catch row is now checked against what the assistant actually did before it
+  prints.** The moment record already knew every tool the assistant ran; it now also records which
+  tools you refused (`denied`, resolved from the denial record itself — nothing guessed). When your
+  asking for something fades, the engine reads the other side of the conversation: if the assistant
+  kept doing the thing and you kept accepting it, the row is stamped **`met`** instead of `fading` —
+  the asking faded because it stopped being needed. Offer and catch rows only carry a trend word the
+  engine confirmed from both sides; a bare count there means the trend is unproven, not absent.
+  "How to talk to me" rows keep their one-sided trend — they describe you rather than instruct.
+  Measured on the reference archive before the code was written: the plan-first row that shipped as
+  "fading" was in truth met — asks fell to 0.55× while plan-mode actions held at 1.20×, with zero
+  refusals of plan mode in 103 uses.
+- **Moment shape v3** (supersedes the v2 note below in the same unreleased cycle): the moment
+  record gains the answer channel — the assistant answer's salient terms and its true length.
+  Existing history re-derives itself from your transcripts on the next quiet refresh — free, no
+  model, nothing leaves the machine, and your paid assignments are untouched.
+- **Moment shape v2.** Existing history re-derives itself from your transcripts on the next quiet
+  refresh — free, no model, nothing leaves the machine, and your paid assignments are untouched.
+
+### Fixed
+- The offline test seam's stand-in fingerprints all carried different dimensionalities (a `map`
+  argument leak), which no consumer noticed until the topic discriminator became the first code to
+  depend on the fake geometry. Test-only; real fingerprints were never affected.
+
 ## [0.6.3] · 2026-07-28 · the mirror reads you back
 
 The free read used to count you: messages, days, medians. Now it also quotes you.

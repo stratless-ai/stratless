@@ -35,27 +35,37 @@ Who you are working with              (stratless · read from your own history)
 
 ## In the moment
 
-- "yes plan" · "lets plan" → wants a plan before building
-- "what was" · "what happened" → wants a quick plain answer
+- "yes plan" · "lets plan" → wants plan before commitment
+- work is about to proceed without a plan laid out
+  → stop and plan it out with me first
 
 ## What to offer me before I ask
 
-- offer a quick sketch of the idea before building it out,
-  then ask them to validate it. (218×)
+- offer to enter an explicit plan mode with targets and
+  timeline before touching code — and when work is about to
+  proceed without a plan laid out, stop and plan it out with
+  me first. (234×, met · slip 25×)
 
 ## What to catch for me
 
-- catch completed work presented as done and expect a
-  double-check pass before it's accepted. (101×)
+- catch unverified output and double check the work before
+  accepting it as done (99×)
 
 ## How to talk to me
 
-- talk in short go-ahead bursts, they approve with a brief
-  word and expect you to keep moving. (159×, rising)
+- talk tersely and execute the brief low-context instruction
+  without asking for more detail (262×, rising)
 ```
 
 Not a rules sheet you wrote. A brief on a person, derived from your real history and nothing you
 declared, and it sharpens as that history grows.
+
+It also thins. A when-clause and its slip count disappear once the gap they mark closes. And when
+your own questions keep circling one topic — asked across sessions, explanations coming straight
+back — the talk section can gain up to two temporary rows telling your assistant how to deliver
+explanations *in that topic's moments*, worded in your own delivery spec, each retiring itself
+when your questions fade while the topic stays in your work. A topic you never enter is read as
+delegated, not unknown: your assistant is told not to volunteer teaching there.
 
 ## The commands
 
@@ -95,8 +105,9 @@ No model of ours. No server. No training. No separate bill.
    because a list we wrote would be our model of a generic person, not a reading of you. Then your
    own assistant is borrowed for the only judgments left: naming what the maths found, and wording
    your profile — the two small calls that are all it ever spends.
-3. **Count.** Every count is plain arithmetic: how often, over what span, rising or fading. The model
-   names, the code counts, so no number in your profile is a guess.
+3. **Count.** Every count is plain arithmetic: how often, over what span, rising, fading, or `met`,
+   which means the asking faded because the assistant already does the thing, read from both sides
+   of the conversation. The model names, the code counts, so no number in your profile is a guess.
 4. **Load.** `stratless update` writes the profile to `~/.claude/HUMAN.md` and points your
    assistant's config at it, so your next session starts already knowing you. The after-session
    refresh keeps it current; `stratless stop` turns that off and unloads it.

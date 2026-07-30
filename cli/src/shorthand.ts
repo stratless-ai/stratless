@@ -41,8 +41,9 @@ export interface Signature {
   count: number;
 }
 
-/** Normalise a reply to comparable words: lowercase, punctuation to spaces, collapsed. */
-const norm = (s: string): string => s.toLowerCase().replace(/[^a-z0-9\s']/g, ' ').replace(/\s+/g, ' ').trim();
+/** Normalise a reply to comparable words: lowercase, punctuation to spaces, collapsed.
+ *  Exported for the knowledge leg's delivery-spec mining — one normaliser for every phrase. */
+export const norm = (s: string): string => s.toLowerCase().replace(/[^a-z0-9\s']/g, ' ').replace(/\s+/g, ' ').trim();
 
 /** Candidate phrases from one reply: the 2/3/4-word opening, the whole reply when short, and a
  *  structural marker when it opens with a numbered list. */
@@ -74,8 +75,9 @@ function lift(phrase: string, inCat: number, members: number, corpus: Map<string
   return corp ? inCat / members / (corp / N) : 999;
 }
 
-/** A phrase made entirely of stopwords carries no signal, however distinctive its count. */
-function allStop(phrase: string): boolean {
+/** A phrase made entirely of stopwords carries no signal, however distinctive its count.
+ *  Exported for the knowledge leg's delivery-spec mining. */
+export function allStop(phrase: string): boolean {
   return phrase !== NUMBERED && phrase.split(' ').every((w) => STOPWORDS.has(w));
 }
 

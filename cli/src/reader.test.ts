@@ -170,6 +170,29 @@ test('the system blocking a tool is not the person declining one', () => {
   rmSync(dir, { recursive: true });
 });
 
+test('a denial names WHICH tool was refused — the tool_use id resolved against the ledger', () => {
+  const dir = archiveOf({
+    'a.jsonl': [
+      rec({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tid1', name: 'ExitPlanMode' }, { type: 'tool_use', id: 'tid2', name: 'Bash' }] } }),
+      rec({
+        type: 'user',
+        toolDenialKind: 'user-rejected',
+        message: { content: [{ type: 'tool_result', tool_use_id: 'tid1', is_error: true, content: 'rejected' }] },
+      }),
+      // a denial whose id was never seen resolves to nothing rather than guessing
+      rec({
+        type: 'user',
+        toolDenialKind: 'user-rejected',
+        message: { content: [{ type: 'tool_result', tool_use_id: 'tid-unknown', is_error: true, content: 'rejected' }] },
+      }),
+    ],
+  });
+  const denials = [...readTurns([dir])].filter((t) => t.denial);
+  assert.deepEqual(denials[0].deniedTools, ['ExitPlanMode'], 'the id resolves to the refused tool, not its neighbour');
+  assert.equal(denials[1].deniedTools, undefined, 'an unresolvable id stays silent');
+  rmSync(dir, { recursive: true });
+});
+
 test('the working day boundary is 04:00, so past-midnight work belongs to the day it started', () => {
   const late = new Date('2026-07-01T22:30:00');
   const past = new Date('2026-07-02T01:30:00');

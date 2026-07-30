@@ -9,6 +9,10 @@ import { test } from 'node:test';
 
 import type { CategoryStat } from './count.js';
 import { assemble, looksLikeProfile, type Voiced, type Section } from './write.js';
+// Key lines are opaque strings to the assembler — liftPrint owns their gating and wording, so the
+// fixtures here use frozen literals rather than importing the templates.
+const META_LINE = "my questions circle a mechanism → drop a level: in layman, mechanism before number (48× across 12 conversations, 14 didn't land)";
+const DELEGATED_LINE = "where I never ask questions, I don't want lessons → just do the work, skip the teaching";
 
 const stat = (over: Pick<CategoryStat, 'name' | 'lift' | 'count'> & Partial<CategoryStat>): CategoryStat => ({
   description: `does ${over.name}`,
@@ -84,18 +88,68 @@ test('assemble: no blockquote appears anywhere — the quote is a gate, not disp
   assert.ok(!t.includes('> '), 'and nothing is printed as a blockquote');
 });
 
-test('assemble: rising/fading and bursts ride in the receipt', () => {
+test('assemble: which trend words ride in the receipt depends on the section', () => {
   const stats = [
+    // Frame/Judge rows are directives — a one-sided trend there is suppressed to the bare count.
     stat({ name: 'rise', lift: 1, count: 10, scope: 'person', direction: 'rising' }),
+    stat({ name: 'fade', lift: 5, count: 12, scope: 'person', direction: 'fading' }),
+    // ...unless count.ts confirmed it from both sides of the conversation.
+    stat({ name: 'met', lift: 1, count: 11, scope: 'person', direction: 'met', verified: true, action: 'EnterPlanMode' }),
+    stat({ name: 'truefade', lift: 1, count: 13, scope: 'person', direction: 'fading', verified: true }),
+    // Register rows describe the person — their one-sided trend stays.
+    stat({ name: 'regfade', lift: 1, count: 9, scope: 'person', direction: 'fading' }),
+    // Bursts are description, not direction — they ride everywhere.
     stat({ name: 'burst', lift: 1, count: 10, scope: 'person', burst: true }),
   ];
   const voiced = new Map<string, Voiced>([
     ['rise', v('frame', 'q1', 'offer rise')],
-    ['burst', v('frame', 'q2', 'offer burst')],
+    ['fade', v('judge', 'q2', 'catch fade')],
+    ['met', v('frame', 'q3', 'offer met')],
+    ['truefade', v('frame', 'q4', 'offer truefade')],
+    ['regfade', v('register', 'q5', 'talk fade')],
+    ['burst', v('frame', 'q6', 'offer burst')],
   ]);
   const built = assemble(stats, voiced, prov)!;
-  assert.ok(built.text.includes('- offer rise (10×, rising)'), 'rising rides in the receipt');
+  assert.ok(built.text.includes('- offer rise (10×)\n'), 'one-sided rising on a frame row is suppressed');
+  assert.ok(built.text.includes('- catch fade (12×)\n'), 'one-sided fading on a judge row is suppressed');
+  assert.ok(built.text.includes('- offer met (11×, met)'), 'met rides — it is two-sided by construction');
+  assert.ok(built.text.includes('- offer truefade (13×, fading)'), 'verified fading rides on a demand row');
+  assert.ok(built.text.includes('- talk fade (9×, fading)'), 'register keeps its one-sided trend');
   assert.ok(built.text.includes('- offer burst (10×, comes in bursts)'), 'burst rides in the receipt');
+});
+
+test('assemble: a when-clause deepens its host row — no section of its own, ever', () => {
+  const stats: CategoryStat[] = [
+    stat({ name: 'plan', lift: 1, count: 234, scope: 'person', direction: 'met', verified: true }),
+    stat({ name: 'verify', lift: 5, count: 99, scope: 'person' }),
+    stat({ name: 'terse', lift: 1, count: 100, scope: 'person' }),
+  ];
+  const voiced = new Map<string, Voiced>([
+    ['plan', v('frame', 'q', 'offer to enter plan mode first.')],
+    ['verify', v('judge', 'q2', 'catch unshown work')],
+    ['terse', v('register', 'sure', 'talk plainly')],
+  ]);
+  const clauses = new Map([
+    ['plan', { clause: "when work is starting and I haven't set a plan yet, stop and plan first.", slip: 25, trend: 'opening' as const }],
+    ['ghost', { clause: 'when something, do something', slip: 9 }], // no host row → invisible, key line and all
+  ]);
+  const built = assemble(stats, voiced, prov, undefined, { clauses, keyLines: [] })!;
+  const t = built.text;
+  assert.ok(
+    t.includes("- offer to enter plan mode first — and when work is starting and I haven't set a plan yet, stop and plan first. (234×, met · slip 25×, opening)\n"),
+    'the clause joins the host row; the receipt carries both sides and the gap trend',
+  );
+  assert.ok(!t.includes('How to move me forward'), 'LIFT never gets a heading');
+  assert.ok(t.includes("- work is starting and I haven't set a plan yet → stop and plan first\n"), 'the situation trigger lands in the decode key');
+  assert.ok(t.includes('and the situations to catch unprompted'), 'the key subtitle widens when a situation is present');
+  assert.ok(t.includes('A slip count marks the times a standard of mine arrived late'), 'the preamble explains the slip count');
+  assert.ok(!t.includes('do something'), 'a clause with no host row prints nothing at all');
+  assert.equal(built.meta.rules, 1, 'only attached clauses count');
+
+  const bare = assemble(stats, voiced, prov)!;
+  assert.ok(!bare.text.includes('slip'), 'no clauses → no slip ink anywhere');
+  assert.ok(!bare.text.includes('situations to catch'), 'and the plain subtitle stands');
+  assert.equal(bare.meta.rules, 0);
 });
 
 test('assemble: register fills only to the char budget', () => {
@@ -107,8 +161,12 @@ test('assemble: register fills only to the char budget', () => {
     // the LINE carries the bulk — quotes are no longer printed, so only the line can hit the budget
     voiced.set(name, v('register', 'q', `register trait number ${i} that is fairly wordy ${'x'.repeat(150)}`));
   }
-  const built = assemble(stats, voiced, prov)!;
+  // a clause rides the always-shipped judge row, so its ink is spent before register fills — the
+  // budget check on register absorbs it and the whole file still lands under the ceiling.
+  const clauses = new Map([['number', { clause: 'when a number arrives unsourced, show the breakdown first', slip: 25 }]]);
+  const built = assemble(stats, voiced, prov, undefined, { clauses, keyLines: [] })!;
   assert.equal(built.meta.judge, 1, 'the judge entry always ships');
+  assert.equal(built.meta.rules, 1, 'the clause ships with its host');
   assert.ok(built.meta.register > 0 && built.meta.register < 40, 'register truncated by the budget');
   assert.ok(built.text.length <= 5800, 'stays within the char budget');
 });
@@ -155,6 +213,27 @@ test("assemble: a behaviour routed to 'none' is left out, not jammed into a sect
   assert.ok(built.text.includes('offer a plan first'), 'the routed one ships');
   assert.ok(!built.text.includes('fits no section'), "'none' is left out despite the larger count");
   assert.equal(built.meta.frame, 1);
+});
+
+test('assemble: the loop\'s key lines print in the decode key — and no lift means no ink', () => {
+  const stats = [
+    stat({ name: 'plan', lift: 1, count: 300, scope: 'person' }),
+    stat({ name: 'terse', lift: 1, count: 100, scope: 'person' }),
+  ];
+  const voiced = new Map<string, Voiced>([
+    ['plan', v('frame', 'q', 'offer a plan first')],
+    ['terse', v('register', 'sure', 'talk plainly')],
+  ]);
+  const built = assemble(stats, voiced, prov, undefined, { clauses: new Map(), keyLines: [META_LINE, DELEGATED_LINE] })!;
+  const t = built.text;
+  assert.ok(t.includes(`- ${META_LINE}\n`), 'the signature line lands in the decode key');
+  assert.ok(t.includes(`- ${DELEGATED_LINE}`), 'and the delegated line beside it');
+  assert.ok(t.includes('and the situations to catch unprompted'), 'the key subtitle widens — a loop trigger IS a situation');
+  assert.ok(t.indexOf(`- ${META_LINE}`) < t.indexOf('## What to offer me'), 'key lines sit in the head, above the sections');
+  assert.ok(!t.includes('## How to grow') && !t.includes('## Knowledge'), 'LIFT never gets a heading');
+
+  const bare = assemble(stats, voiced, prov)!;
+  assert.ok(!bare.text.includes('my questions circle'), 'no lift → no ink anywhere');
 });
 
 test('looksLikeProfile: yes for a real profile, no for chatter', () => {

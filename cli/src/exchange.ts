@@ -16,6 +16,7 @@ import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { basename } from 'node:path';
 import { DEFAULT_ROOTS, PASTE_BOUND, dayKey, readSessions, turnsOfFile, type Turn } from './reader.js';
+import { termsOf } from './terms.js';
 
 /** One (AI turn → human reaction) pair. */
 export interface Exchange {
@@ -97,8 +98,24 @@ export interface Exchange {
    * after a paragraph. This is the largest fact the judge was never given.
    */
   tools?: string[];
+  /**
+   * WHICH TOOLS THE PERSON REFUSED in this exchange — the denial's tool_use id resolved to a name
+   * (reader.ts). `declined` says a refusal happened; this says what was refused, which is the
+   * difference between "he declined something" and "he declined the plan". Only `user-rejected`
+   * denials land here — a system block is not the person's act.
+   */
+  denied?: string[];
   /** last exchange of its session — "ended it here" is an act, and it was invisible */
   lastOfSession?: boolean;
+  /**
+   * THE ANSWER CHANNEL — salient candidate terms of the assistant's FULL answer, extracted here
+   * because this is the only place the whole answer exists as one string (the caps below keep a
+   * head and a tail; the card keeps less again). Candidates, not topics: which of these are rare
+   * for THIS person, and whether they thread across sessions, is downstream arithmetic (terms.ts
+   * has the doctrine — including why the v2 judge's `topic` tombstone above does not apply).
+   * Absent when the assistant said nothing, like `saidHead`.
+   */
+  aiTerms?: string[];
   /**
    * THE SHAPE OF THE MOMENT — true character counts, taken BEFORE the CAP truncation, so a genuine
    * wall of text reports its real size.
@@ -189,6 +206,7 @@ export function exchangesOfTurns(turns: Turn[], session: string): Exchange[] {
   let cwd: string | undefined;
   let branch: string | undefined;
   let tools: string[] = [];
+  let denied: string[] = [];
 
   for (const t of turns) {
     if (t.cwd) cwd = t.cwd;
@@ -204,7 +222,10 @@ export function exchangesOfTurns(turns: Turn[], session: string): Exchange[] {
       interrupted = t.interruptKind ?? 'plain';
       continue;
     }
-    if (t.denial === 'user-rejected') declined = true;
+    if (t.denial === 'user-rejected') {
+      declined = true;
+      if (t.deniedTools) denied.push(...t.deniedTools);
+    }
     if (!t.text) continue;
 
     // `said` keeps its TAIL: the reaction answers the end of the turn, not its preamble.
@@ -224,6 +245,8 @@ export function exchangesOfTurns(turns: Turn[], session: string): Exchange[] {
     if (t.text) {
       const p = prompt.slice(0, CAP);
       const r = t.text.slice(0, CAP);
+      // The answer channel reads the UNCAPPED answer — the one string the caps are about to shred.
+      const aiTerms = saidRaw ? termsOf(saidRaw) : [];
       out.push({
         prompt: p,
         said: saidText,
@@ -234,6 +257,7 @@ export function exchangesOfTurns(turns: Turn[], session: string): Exchange[] {
         // The head is a fact, outside the hash — the same slice discipline as `said`, from the other
         // end. Absent when the assistant said nothing at all.
         ...(saidRaw ? { saidHead: saidRaw.slice(0, SAID_HEAD) } : {}),
+        ...(aiTerms.length ? { aiTerms } : {}),
         ...(interrupted ? { interrupted } : {}),
         ...(declined ? { declined } : {}),
         // Facts — outside the hash by construction: hashOf() is called above with the three text
@@ -243,6 +267,7 @@ export function exchangesOfTurns(turns: Turn[], session: string): Exchange[] {
         ...(t.images ? { images: t.images } : {}),
         ...(p.length > PASTE_BOUND || r.length > PASTE_BOUND ? { pasted: true } : {}),
         ...(tools.length ? { tools: [...tools] } : {}),
+        ...(denied.length ? { denied: [...denied] } : {}),
         // Raw lengths, before CAP — the point of the field is to say how big the thing actually was.
         shape: { ask: prompt.length, said: saidRaw.length, reply: t.text.length },
       });
@@ -252,6 +277,7 @@ export function exchangesOfTurns(turns: Turn[], session: string): Exchange[] {
     interrupted = undefined;
     declined = false;
     tools = []; // reset with `said` — tools belong to the answering turn that just closed
+    denied = [];
   }
 
   // Position and rhythm — knowable only once the session is whole, which is why they are set here

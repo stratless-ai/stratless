@@ -106,6 +106,9 @@ export interface Turn {
   tools?: string[];
   /** 'user-rejected' (the person declined) or 'automode-blocked' (the SYSTEM blocked — not them) */
   denial?: string;
+  /** WHICH tools that denial refused — the record's tool_result ids resolved against the tool_use
+   *  blocks seen earlier in the file. Absent when no id resolves (older transcripts). */
+  deniedTools?: string[];
   /** images carried by this turn */
   images: number;
 }
@@ -192,12 +195,28 @@ function imagesOf(d: RawRecord): number {
   return Array.isArray(d.imagePasteIds) ? d.imagePasteIds.length : 0;
 }
 
+function toolUsesOf(content: unknown): { name: string; id?: string }[] {
+  if (!Array.isArray(content)) return [];
+  return content
+    .filter((b): b is { type: string; name?: string; id?: string } => typeof b === 'object' && b !== null)
+    .filter((b) => b.type === 'tool_use' && typeof b.name === 'string')
+    .map((b) => ({ name: b.name as string, ...(typeof b.id === 'string' ? { id: b.id } : {}) }));
+}
+
 function toolsOf(content: unknown): string[] | undefined {
+  const names = toolUsesOf(content).map((u) => u.name);
+  return names.length ? names : undefined;
+}
+
+/** Which tools a denial record refuses: its tool_result blocks name the declined call by
+ *  tool_use_id; the ledger turns the id back into the tool's name. */
+function deniedOf(content: unknown, ids: Map<string, string>): string[] | undefined {
   if (!Array.isArray(content)) return undefined;
   const names = content
-    .filter((b): b is { type: string; name?: string } => typeof b === 'object' && b !== null)
-    .filter((b) => b.type === 'tool_use' && typeof b.name === 'string')
-    .map((b) => b.name as string);
+    .filter((b): b is { type: string; tool_use_id?: string } => typeof b === 'object' && b !== null)
+    .filter((b) => b.type === 'tool_result' && typeof b.tool_use_id === 'string')
+    .map((b) => ids.get(b.tool_use_id as string))
+    .filter((n): n is string => typeof n === 'string');
   return names.length ? names : undefined;
 }
 
@@ -237,6 +256,9 @@ export function turnsOfFile(path: string, seen: Set<string> = new Set()): Turn[]
     // Parse the file's turns first: draft collapse needs to see a whole group before it can know
     // which member survived. Bounded by one file, so memory stays flat across the archive.
     const turns: Turn[] = [];
+    // The id→name ledger for denial attribution — one file is one session, and a denial always
+    // follows the tool_use it refuses within it.
+    const toolIds = new Map<string, string>();
     const drafts = new Map<string, number>(); // (session|parentUuid) -> index of the latest so far
 
     for (const line of lines) {
@@ -250,6 +272,9 @@ export function turnsOfFile(path: string, seen: Set<string> = new Set()): Turn[]
       if (d.type !== 'user' && d.type !== 'assistant') continue;
       if (d.isSidechain || d.isMeta || d.isCompactSummary) continue;
       if (d.entrypoint === 'sdk-cli') continue; // belt and braces: a mixed file cannot slip through
+      // Feed the ledger before dedup on purpose: a replayed assistant record still names the tool
+      // a later denial refers to.
+      if (d.type === 'assistant') for (const u of toolUsesOf(d.message?.content)) if (u.id) toolIds.set(u.id, u.name);
       // Dedup only when there IS a uuid. A record without one cannot be a known replay, and
       // dropping it would silently lose evidence — older transcripts do not always carry it.
       if (d.uuid) {
@@ -284,6 +309,7 @@ export function turnsOfFile(path: string, seen: Set<string> = new Set()): Turn[]
         gitBranch: d.gitBranch,
         tools,
         denial: d.toolDenialKind,
+        deniedTools: d.toolDenialKind ? deniedOf(d.message?.content, toolIds) : undefined,
         images: imagesOf(d),
       };
 
