@@ -6,6 +6,14 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+## [0.8.0] · 2026-07-31 · the profile leaves home
+
+Your profile stops living inside one assistant's directory, and starts being served to any
+assistant that asks. Two halves of the same claim: **the file is yours, not a tool's** — so it
+moves out of `~/.claude` into your own directory, and `stratless mcp` hands it to anything that
+speaks the Model Context Protocol, without stratless knowing the first thing about that tool's
+files. Reaching a new assistant used to mean writing an adapter for it. Now it's a config line.
+
 ### Changed
 - **Your profile moved to `~/.stratless/HUMAN.md`, and it moves itself.** It used to live at
   `~/.claude/HUMAN.md` — inside one assistant's directory, from the days when there was only one.
