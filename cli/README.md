@@ -110,7 +110,7 @@ No model of ours. No server. No training. No separate bill.
 3. **Count.** Every count is plain arithmetic: how often, over what span, rising, fading, or `met`,
    which means the asking faded because the assistant already does the thing, read from both sides
    of the conversation. The model names, the code counts, so no number in your profile is a guess.
-4. **Load.** `stratless update` writes the profile to `~/.claude/HUMAN.md` and points your
+4. **Load.** `stratless update` writes the profile to `~/.stratless/HUMAN.md` and points your
    assistant's config at it, so your next session starts already knowing you. The after-session
    refresh keeps it current; `stratless stop` turns that off and unloads it.
 

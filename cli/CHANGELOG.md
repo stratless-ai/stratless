@@ -6,6 +6,19 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+### Changed
+- **Your profile moved to `~/.stratless/HUMAN.md`, and it moves itself.** It used to live at
+  `~/.claude/HUMAN.md` — inside one assistant's directory, from the days when there was only one.
+  Two things were wrong with that. Uninstalling Claude Code took your profile with it, though the
+  profile is yours and describes you, not that tool. And plenty of people keep `~/.claude` in a
+  dotfiles repo to sync settings between machines, which put a behavioural read of how you work one
+  `git add -A` away from being published. It now sits with everything else stratless makes, in a
+  directory nobody syncs. You do nothing: the next stratless command moves the file and re-aims the
+  one-line import in your `CLAUDE.md` at its new home, once, silently. If you turned the profile off
+  with `stratless stop`, it stays off — the move never re-loads what you unloaded. A file we cannot
+  prove we wrote is never touched, and a profile you deliberately redirected with
+  `STRATLESS_HUMAN_MD` is left exactly where you pointed it.
+
 ### Added
 - **`stratless mcp` — your profile, in any assistant that speaks MCP.** Reaching a new tool used to
   mean teaching stratless where that tool keeps its context file and how it wants it written. This

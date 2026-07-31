@@ -183,7 +183,7 @@ useHead({
     <div v-if="briefOpen" class="brief-overlay" @click.self="briefOpen = false">
       <div class="brief-dialog" role="dialog" aria-modal="true" aria-label="the author's full HUMAN.md, a real example" @keydown.esc="briefOpen = false">
         <div class="filebar">
-          <span class="fname">~/.claude/HUMAN.md</span>
+          <span class="fname">~/.stratless/HUMAN.md</span>
           <button ref="briefClose" type="button" class="brief-x" aria-label="close" @click="briefOpen = false">×</button>
         </div>
         <div class="filebody"><div v-for="(l, i) in sampleLines" :key="i" class="fline" :class="{ 'md-h': l.startsWith('#') }"><template v-if="l.startsWith('- ')"><span class="md-li">-</span>{{ l.slice(1) }}</template><template v-else>{{ l }}</template></div></div>

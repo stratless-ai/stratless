@@ -18,7 +18,7 @@ import { init as doInit, ARCHIVE, PROJECTS, stopRefresh, refreshArmed, type Init
 import { runtimeDir, runtimeInstalled, ensureRuntime, runtimePresent, modelPresent, modelDir } from './embed.js';
 import { fetchLatest, newerThan } from './notify.js';
 import { loadRecentExchanges } from './exchange.js';
-import { removeProfile, humanMdPath, claudeMdPath, installedVersion } from './load.js';
+import { removeProfile, humanMdPath, claudeMdPath, installedVersion, migrateLegacyProfile } from './load.js';
 import { readRenders, requestColdBuild, coldBuildRequested, readState, setFlushCadence, type FlushCadence } from './state.js';
 import { readUsage } from './usage.js';
 import { readLock, lockIsStale, stopWorker, spawnDetached, resolveBinPath } from './worker.js';
@@ -456,7 +456,7 @@ async function stop(): Promise<void> {
   }
   if (hookRemoved) console.log(`  ${C.dim('· after-session refresh removed')}`);
   if (unloaded) console.log(`  ${C.dim('· profile unloaded from your CLAUDE.md')}`);
-  console.log(`  ${C.dim('Your ~/.claude/HUMAN.md is left as-is — delete it yourself if you want it gone.')}`);
+  console.log(`  ${C.dim(`Your ${humanMdPath()} is left as-is — delete it yourself if you want it gone.`)}`);
   if (existsSync(modelDir())) {
     console.log(`  ${C.dim(`The local model (~34MB) is still at ${modelDir()} — remove it if you want the disk back.`)}`);
   }
@@ -651,6 +651,12 @@ function argProblem(cmd: string, rest: string[]): string | undefined {
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const cmd = args[0];
+
+  // The profile moved out of Claude Code's directory into ours; carry an older install across before
+  // anything reads a path. Here rather than deeper because EVERY entry point reads it — the worker,
+  // `profile`, `status`, and the MCP server all resolve it through `humanMdPath()`. Costs one
+  // existsSync when there is nothing to do.
+  migrateLegacyProfile();
 
   if (cmd === '--version' || cmd === '-v' || cmd === 'version') {
     console.log(`stratless ${installedVersion()}`);

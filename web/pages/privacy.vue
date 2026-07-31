@@ -33,11 +33,13 @@ useSeo({
 
         <h2>What it writes, and where</h2>
         <p>
-          Everything stratless produces is a plain text file on your machine: the moments and
-          scores it derives, and your profile, under <code>~/.stratless</code>, the canonical
-          <code>HUMAN.md</code> at <code>~/.claude/HUMAN.md</code>, and a clearly marked block in
-          your <code>CLAUDE.md</code> that points at it. All of it is yours to read, edit, or
-          delete. <code>stratless stop</code> unloads the profile in one command.
+          Everything stratless produces is a plain text file on your machine, all of it under
+          <code>~/.stratless</code>: the moments and scores it derives, and your profile, the
+          canonical <code>HUMAN.md</code>. The only thing it writes anywhere else is a clearly
+          marked block in your <code>CLAUDE.md</code> that points at it. Your profile lives in
+          stratless's own directory, not inside any assistant's, so uninstalling a tool never takes
+          it with you. All of it is yours to read, edit, or delete. <code>stratless stop</code>
+          unloads the profile in one command.
         </p>
 
         <h2>Network calls, the tiered truth</h2>

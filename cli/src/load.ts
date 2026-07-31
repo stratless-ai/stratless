@@ -5,17 +5,27 @@
  * to know who it's talking to. Claude Code can't be pointed at an arbitrary filename, but it DOES
  * expand `@import` lines inside the CLAUDE.md it already auto-loads. So the load is two writes:
  *
- *   1. write the profile to ~/.claude/HUMAN.md         — the canonical artifact
- *   2. put a one-line `@~/.claude/HUMAN.md` redirect    — inside a managed block in CLAUDE.md
+ *   1. write the profile to ~/.stratless/HUMAN.md       — the canonical artifact
+ *   2. put a one-line `@~/.stratless/HUMAN.md` redirect  — inside a managed block in CLAUDE.md
  *
- * CLAUDE.md becomes a pointer, not a copy. Other tools (Gemini, Codex) point their own configurable
- * filename at the same HUMAN.md — one source, many entry points (build-pass §9, the adapter seam).
+ * CLAUDE.md becomes a pointer, not a copy — and every other route to the same file is a variation on
+ * that one theme: a tool that takes a path reads it directly (aider's `read:`), a tool with no import
+ * syntax gets the text copied into the block instead of a line pointing at it (codex's AGENTS.md),
+ * and `stratless mcp` serves it to anything that asks. One artifact, many entry points.
+ *
+ * WHY IT LIVES IN ~/.stratless AND NOT ~/.claude (moved 2026-07-31). The profile is the PERSON'S, not
+ * a tool's: keeping it inside Claude Code's directory meant uninstalling that tool took the profile
+ * with it, and an assistant we never read would be served its user's profile out of a competitor's
+ * folder. The sharper reason is privacy — people keep ~/.claude in dotfiles repos (atomic.ts follows
+ * symlinks precisely because one such link got severed), and a behavioural profile is the last file
+ * that should ride along in a `git add -A`. ~/.stratless is ours, holds every other output already,
+ * and nobody syncs it. `migrateLegacyProfile` moves an older install across, once.
  *
  * We only ever touch what's between our markers in CLAUDE.md; anything the person wrote themselves is
  * left exactly as it was. HUMAN.md is written FIRST, so the import never points at a missing file. The
  * privacy rule holds: these files are visible to your assistant, never networked, never committed by us.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,7 +38,12 @@ export function claudeMdPath(): string {
 
 /** The canonical profile artifact — the file every tool ultimately reads. Override with STRATLESS_HUMAN_MD. */
 export function humanMdPath(): string {
-  return process.env.STRATLESS_HUMAN_MD || join(homedir(), '.claude', 'HUMAN.md');
+  return process.env.STRATLESS_HUMAN_MD || join(homedir(), '.stratless', 'HUMAN.md');
+}
+
+/** Where the profile lived before it became one artifact many assistants point at. */
+function legacyHumanMdPath(): string {
+  return join(homedir(), '.claude', 'HUMAN.md');
 }
 
 const START = '<!-- stratless:start -->';
@@ -123,6 +138,48 @@ function upsertBlock(humanTarget: string, claudeTarget: string): void {
 export function ensureLoaded(humanTarget: string = humanMdPath(), claudeTarget: string = claudeMdPath()): boolean {
   if (!existsSync(humanTarget)) return false;
   upsertBlock(humanTarget, claudeTarget);
+  return true;
+}
+
+/**
+ * Move a pre-0.7.2 profile out of Claude Code's directory into stratless's own, ONCE, and re-point the
+ * import that was aimed at it. Silent and idempotent: every later run finds the new file already there
+ * and does nothing.
+ *
+ * Three refusals, each protecting something the person owns:
+ *  · a redirected profile (STRATLESS_HUMAN_MD) is a deliberate choice — a test's or a person's — and is
+ *    never migrated out from under them;
+ *  · a file whose first line is not the header WE stamp is not ours to move, however much it looks like
+ *    a profile. We only ever delete a file we can prove we wrote;
+ *  · the import block is rewritten only if one is ALREADY there. Adding it here would silently re-load
+ *    a profile the person turned off with `stratless stop`, which is the one thing that switch promises.
+ */
+export function migrateLegacyProfile(
+  target: string = humanMdPath(),
+  legacy: string = legacyHumanMdPath(),
+  claudeTarget: string = claudeMdPath(),
+): boolean {
+  // Guards the env var itself, not the argument: a test that redirects the profile into a temp dir
+  // must never reach past it and move the developer's REAL one.
+  if (process.env.STRATLESS_HUMAN_MD) return false;
+  if (existsSync(target) || !existsSync(legacy)) return false;
+
+  let body: string;
+  try {
+    body = readFileSync(legacy, 'utf8');
+  } catch {
+    return false; // unreadable is not ours to move
+  }
+  if (!body.startsWith('# Who you are working with')) return false;
+
+  atomicWriteFileSync(target, body);
+  try {
+    unlinkSync(legacy);
+  } catch {
+    /* the copy is what matters; a leftover costs nothing but tidiness */
+  }
+  // Re-aim an existing import at the file's new home — the old line now points at nothing.
+  if (existsSync(claudeTarget) && readFileSync(claudeTarget, 'utf8').includes(START)) upsertBlock(target, claudeTarget);
   return true;
 }
 
