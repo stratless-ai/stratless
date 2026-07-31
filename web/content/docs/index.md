@@ -48,5 +48,5 @@ Full reference on the [Commands](/docs/commands) page.
 ## Requirements
 
 - **Node 18+**
-- **Claude Code**, the only assistant supported today. Others roll out one batch at a time. See [Assistants](/docs/assistants).
+- **Claude Code**, the only assistant stratless reads today. Once your profile exists it can reach other assistants over MCP. More readers roll out one at a time. See [Assistants](/docs/assistants).
 - **No API key.** Reading and grouping your history run locally; stratless borrows the assistant you already have (`claude -p`) only to name what it found and write the profile, on your own subscription. Nothing new to install, and no separate bill.
