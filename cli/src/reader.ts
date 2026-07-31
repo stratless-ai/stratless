@@ -75,7 +75,14 @@ export function transcriptFiles(roots: string[]): string[] {
     }
   };
   for (const r of roots) walk(r);
-  return found.sort((a, b) => b.mtime - a.mtime).map((f) => f.path);
+  // A TOTAL ORDER, not just newest-first. Sorting on mtime alone leaves ties — and ties are common,
+  // since sessions written in the same millisecond share one stamp. A tied comparator falls back to
+  // whatever `readdirSync` happened to return, which differs by filesystem (APFS vs ext4). That
+  // silently reorders the moment list, and k-means++ picks its seeds BY INDEX, so the same archive
+  // clustered into 32/128 on one machine and 80/80 on another. Caught 2026-07-31 by the profile
+  // golden failing on CI while passing locally — exactly the reproducibility break it exists to
+  // find. The path tiebreak makes the read deterministic on any filesystem.
+  return found.sort((a, b) => b.mtime - a.mtime || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)).map((f) => f.path);
 }
 
 /** One turn, after every hygiene decision has already been made. */

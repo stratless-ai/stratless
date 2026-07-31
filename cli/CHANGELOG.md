@@ -14,6 +14,15 @@ moves out of `~/.claude` into your own directory, and `stratless mcp` hands it t
 speaks the Model Context Protocol, without stratless knowing the first thing about that tool's
 files. Reaching a new assistant used to mean writing an adapter for it. Now it's a config line.
 
+### Fixed
+- **Two machines reading the same history could build different profiles.** Transcripts were ordered
+  by modification time alone, which leaves sessions written in the same millisecond tied — and a tied
+  sort falls back to whatever order the filesystem happened to return. Since the clustering step picks
+  its starting points by position, that reordering could split the same history into different
+  patterns with different counts. Reading now has one total order on every filesystem. Nobody would
+  have noticed this as a bug; it would have shown up as a profile that quietly disagreed with itself
+  between machines.
+
 ### Changed
 - **Your profile moved to `~/.stratless/HUMAN.md`, and it moves itself.** It used to live at
   `~/.claude/HUMAN.md` — inside one assistant's directory, from the days when there was only one.

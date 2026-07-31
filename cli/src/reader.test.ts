@@ -10,7 +10,7 @@ import { test } from 'node:test';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readTurns, readSessions, isTypedMessage, stripWrappers, dayKey, PASTE_BOUND, driftCheck } from './reader.js';
+import { readTurns, readSessions, isTypedMessage, stripWrappers, dayKey, PASTE_BOUND, driftCheck, transcriptFiles } from './reader.js';
 
 let n = 0;
 const rec = (o: Record<string, unknown>) => ({
@@ -283,6 +283,26 @@ test('both roots are read as one union, deduped by uuid', () => {
   assert.ok(texts.includes('only in the live dir'));
   rmSync(a, { recursive: true });
   rmSync(b, { recursive: true });
+});
+
+test('SAME-MTIME FILES GET A TOTAL ORDER — the filesystem never decides the reading order', () => {
+  // Sessions written in the same millisecond share one mtime. Sorting on mtime alone leaves those
+  // tied, and a tied comparator falls back to readdir order, which differs by filesystem. That
+  // reorders the moment list, and k-means++ seeds BY INDEX — so the same archive clustered 32/128
+  // on macOS and 80/80 on CI until this was fixed (2026-07-31, caught by the profile golden).
+  const dir = archiveOf({
+    'ccc.jsonl': [user('three')],
+    'aaa.jsonl': [user('one')],
+    'bbb.jsonl': [user('two')],
+  });
+  const t = Date.now() / 1000;
+  for (const f of ['aaa.jsonl', 'bbb.jsonl', 'ccc.jsonl']) utimesSync(join(dir, f), t, t);
+
+  const order = transcriptFiles([dir]).map((p) => p.split('/').pop());
+  assert.deepEqual(order, ['aaa.jsonl', 'bbb.jsonl', 'ccc.jsonl'], 'ties break on path, identically everywhere');
+  // Stable across repeated reads on this machine too, not merely sorted once.
+  assert.deepEqual(transcriptFiles([dir]), transcriptFiles([dir]), 'the same archive reads the same way twice');
+  rmSync(dir, { recursive: true });
 });
 
 test('files arrive NEWEST-MODIFIED first, so a caller can stop early', () => {
