@@ -54,6 +54,18 @@ test('tools/list: exactly one tool, and it is read-only by construction', () => 
   assert.ok(tools[0].description.length < 1024, `description is ${tools[0].description.length} chars`);
 });
 
+test('THE DESCRIPTION IS FRONT-LOADED: the instruction survives an ~80-char clip', () => {
+  // Measured on Claude Desktop 2026-07-31: it shows a ~80-char preview from a deferred index and the
+  // model decides from THAT whether to load the tool. Anything past the clip may as well not exist.
+  const { description } = TOOL;
+  const preview = description.slice(0, 80);
+  assert.match(preview, /call this first/i, 'the reason to act must be inside the clip, not after it');
+  assert.match(preview, /before any substantive work/i, 'and so must the timing that makes it useful');
+  // Guards the reorder: a future edit that leads with contents again fails here rather than silently
+  // going unread on every deferred-index client.
+  assert.ok(!/^Read the profile/i.test(description), 'do not lead with what it contains');
+});
+
 test('tools/call: the profile is served verbatim, read at call time', () => {
   const f = join(dir, 'HUMAN.md');
   writeFileSync(f, '# Who you are working with\n\n- talk tersely (268×)\n');

@@ -57,10 +57,22 @@ export function hook(): string {
   return text.length <= HOOK_BUDGET ? text : `${text.slice(0, HOOK_BUDGET - 1)}…`;
 }
 
+/**
+ * FRONT-LOADED ON PURPOSE — the instruction first, the elaboration last (measured 2026-07-31).
+ *
+ * Claude Desktop does not put tool descriptions in the model's context. It keeps a DEFERRED INDEX:
+ * a ~80-character clipped preview, from which the model decides whether the tool is worth loading at
+ * all. The first draft of this string opened by describing the contents and closed with "Call this at
+ * the start of a conversation" — so on that client the only sentence that would make a model ACT was
+ * the sentence that got cut. It called the tool solely because the person asked it to.
+ *
+ * The rule, which is the 2048-character truncation lesson in a second place: EVERY channel truncates,
+ * and they all truncate the tail. Whatever must survive goes first.
+ */
 export const TOOL = {
   name: 'who_am_i',
   description:
-    'Read the profile of the person you are talking to: how they work, what to offer them before they ask, what to catch for them, and the register they use. Call this at the start of a conversation and before any substantive work, so your first answer already fits them.',
+    'Call this first, before any substantive work: it returns the profile of the person you are talking to, so your first answer already fits them rather than a later one. It covers how they work, what to offer them before they ask, what to catch for them, and the register they use.',
   inputSchema: { type: 'object' as const, properties: {}, additionalProperties: false },
 };
 
