@@ -1,0 +1,26 @@
+version: 2
+
+# GITHUB ACTIONS ONLY, on purpose.
+#
+# Actions are the one dependency in this repo that executes with repository credentials, so they are
+# the one worth a bot's attention. They are pinned to commit SHAs in .github/workflows/ (a tag like
+# @v6 is mutable — whoever controls the action can repoint it at new code without anyone opening a
+# PR), and a SHA pin only stays safe if something keeps proposing the next one. That is this file.
+#
+# The npm ecosystem is deliberately ABSENT. runtime/package.json pins @xenova/transformers and
+# esbuild to exact versions because this package's whole job is byte-reproducible output: bumping
+# either one changes every existing user's fingerprints, which is a versioned, announced rebuild in
+# the CLI — never a bot PR merged on a Tuesday. Dependabot *security* alerts still cover npm; a CVE
+# is a decision worth waking up for, a minor version bump is not.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ['*'] # one PR a month for all of them, not one per action
+    commit-message:
+      prefix: chore(ci)
+    labels: [dependencies]
+    open-pull-requests-limit: 3

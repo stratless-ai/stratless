@@ -1,4 +1,7 @@
-blank_issues_enabled: true
+# Blank issues are OFF on purpose. Every non-bug already has a better door below — questions and
+# ideas to Discussions, features to Discussions (CONTRIBUTING.md), vulnerabilities to the private
+# advisory form (SECURITY.md). A blank issue box on a public repo is mostly a spam surface.
+blank_issues_enabled: false
 contact_links:
   - name: Ask a question
     url: https://github.com/stratless-ai/stratless/discussions

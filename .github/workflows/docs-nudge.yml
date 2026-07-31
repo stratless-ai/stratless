@@ -6,8 +6,18 @@ name: docs nudge
 # docs nor the npm README gets ONE bot comment. It never blocks — refactors are real; a human
 # decides whether the docs needed to move.
 
+# WHY pull_request_target AND NOT pull_request. On a `pull_request` event raised from a FORK, GitHub
+# caps GITHUB_TOKEN at read-only no matter what the `permissions:` block below asks for — so
+# `gh pr comment` would 403 and this job would fail red on the first outside contribution this repo
+# ever receives. (Never seen: zero forks so far.) `pull_request_target` runs the workflow file from
+# the BASE branch with a real write token, which is why a fork cannot edit this file to steal it.
+#
+# That trade is only safe because of the rule below: THIS WORKFLOW NEVER CHECKS OUT, BUILDS, OR RUNS
+# PR CODE. There is no `actions/checkout` step on purpose — the changed-file list comes from the API
+# instead of a git diff, so no untrusted byte ever reaches the runner. If anyone ever adds a checkout
+# here, this must go back to `pull_request`.
 on:
-  pull_request:
+  pull_request_target:
     paths: ['cli/src/**']
 
 permissions:
@@ -17,23 +27,21 @@ jobs:
   nudge:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-        with: { fetch-depth: 0 }
       - name: comment when cli changed but the docs did not
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          # Compare against the base SHA from the event, never the base BRANCH NAME. A PR stacked on
-          # another branch keeps that branch as its base; once the lower PR merges, the branch is
-          # deleted and `git fetch origin <name>` exits 128, failing this job for a reason that has
-          # nothing to do with the diff. The SHA is immutable and stays fetchable. (PR #27, 2026-07-20.)
-          base="${{ github.event.pull_request.base.sha }}"
-          git fetch -q origin "$base" || true
-          changed="$(git diff --name-only "$base"...HEAD)"
+          # The API's file list, not a git diff. It is already the merge-base comparison GitHub shows
+          # in the Files tab, so it needs no clone, no fetch-depth, and no base SHA arithmetic — which
+          # also retires the stacked-branch failure this job hit in PR #27 (2026-07-20): a PR based on
+          # a branch that was later deleted made `git fetch origin <name>` exit 128 for a reason that
+          # had nothing to do with the diff.
+          changed="$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename')"
           echo "$changed"
-          if echo "$changed" | grep -qE '^(web/content/docs/|cli/README\.md)'; then
+          if grep -qE '^(web/content/docs/|cli/README\.md)' <<<"$changed"; then
             echo "docs moved too — nothing to say."
             exit 0
           fi
