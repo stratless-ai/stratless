@@ -6,6 +6,19 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+### Fixed
+- **Your profile depended on your files' timestamps, not just on your history.** 0.8.0 fixed half of
+  this: transcripts are now read in one total order on every filesystem. But the order they were read
+  in still decided the order of the pile, and the clustering step picks its starting points by
+  position — so anything that changed a file's modification date without changing a single byte
+  rebuilt you into different patterns with different counts. Restoring a backup did it. Copying
+  `~/.claude` to a new laptop did it. `rsync` without `-t` did it. Measured on identical transcripts:
+  the same eight conversations split 32/128 one way and 56/104 the other, with a whole section of the
+  profile present in one and absent in the other. The pile is now ordered by each moment's own
+  timestamp and content, so the same history produces the same profile on any machine, after any copy
+  or restore. Your next rebuild may shift some counts once as the true order takes effect; after that
+  it stops moving for reasons that are not you.
+
 ## [0.8.0] · 2026-07-31 · the profile leaves home
 
 Your profile stops living inside one assistant's directory, and starts being served to any

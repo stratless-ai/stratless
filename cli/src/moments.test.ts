@@ -238,3 +238,34 @@ test('a MOMENTS_V mismatch rebuilds the pile instead of appending onto a stale s
   assert.equal(r.added, stored, 'every moment was re-derived, not appended to the old ones');
   assert.ok(existsSync(`${file}.v`), 'and the sidecar is stamped current');
 });
+
+test('the pile reads in ONE order whatever the filesystem says — mtime cannot choose the piles', () => {
+  // THE PROFILE MUST NOT BE A FUNCTION OF FILE TIMESTAMPS. reader.ts hands transcripts over in mtime
+  // order, the store used to keep that order, and k-means++ seeds its centroids BY INDEX — so the
+  // same history clustered differently on a machine that had merely restored a backup or copied
+  // ~/.claude to a new laptop. Measured 2026-08-01 on byte-identical transcripts: 32/128 with
+  // ascending mtimes, 56/104 with tied ones, and the shorthand section present in one and gone from
+  // the other. Same three conversations here, same bytes, two archives whose mtimes run OPPOSITE ways.
+  const convo = (n: string, day: number) => [
+    u(`plan the ${n} rewrite before we touch code`, `2026-07-0${day}T10:00:00Z`),
+    a(`here is the ${n} plan, with the tradeoffs laid out`, `2026-07-0${day}T10:00:05Z`),
+    u(`show me the actual number for ${n}`, `2026-07-0${day}T10:01:00Z`),
+  ];
+  const read = (suffix: string, mtimes: number[]) => {
+    const rs = [1, 2, 3].map((i) => roots(`ord${i}${suffix}`, convo(`p${i}`, i + 1), mtimes[i - 1]));
+    const file = join(dir, `order-${suffix}.jsonl`);
+    buildMoments({ roots: rs, file });
+    return loadMoments(file);
+  };
+  const ascending = read('asc', [1_800_000_000, 1_800_000_010, 1_800_000_020]);
+  const descending = read('desc', [1_800_000_020, 1_800_000_010, 1_800_000_000]);
+
+  assert.ok(ascending.length >= 3, 'the fixture produced moments to order');
+  assert.deepEqual(
+    descending.map((m) => m.key),
+    ascending.map((m) => m.key),
+    'the same history reads in the same order on any filesystem, after any restore or copy',
+  );
+  const stamps = ascending.map((m) => m.ts);
+  assert.deepEqual(stamps, [...stamps].sort(), 'and that one order is chronological, oldest first');
+});
