@@ -25,6 +25,7 @@ import { readLock, lockIsStale, stopWorker, spawnDetached, resolveBinPath } from
 import { runWorker, JUDGE_WINDOW } from './loop.js';
 import { readProgress, type Progress } from './progress.js';
 import { makePalette } from './palette.js';
+import { serve } from './mcp.js';
 import { mirrorOfArchive, mirrorOfArchiveAsync } from './mirror.js';
 import { renderMirror, renderCard } from './mirrorview.js';
 import { estimateBuild, estimateFromMessages, estimateLine } from './estimate.js';
@@ -615,6 +616,7 @@ const COMMAND_ARGS: Record<string, { flags: string[]; positionals: number }> = {
   status: { flags: ['--check'], positionals: 0 },
   mirror: { flags: ['--share'], positionals: 0 },
   stop: { flags: [], positionals: 0 },
+  mcp: { flags: [], positionals: 0 },
   __worker: { flags: [], positionals: 0 },
 };
 
@@ -803,6 +805,7 @@ async function main(): Promise<void> {
     ${C.b('stratless update')}     ${C.dim('read what is new; rebuild + load the profile')}
     ${C.b('stratless stop')}       ${C.dim('turn it off — stop refreshing and unload the profile')}
     ${C.b('stratless status')}     ${C.dim("stratless's own state and what it has cost (--check: newer version?)")}
+    ${C.b('stratless mcp')}        ${C.dim('serve the profile to any MCP client — for their config, not for typing')}
 
   ${C.dim('Runs on your machine. Reads your own history. Nothing leaves.')}
   ${C.dim('docs: https://stratless.com/docs')}
@@ -819,6 +822,11 @@ async function main(): Promise<void> {
     process.exitCode = await runWorker();
     return;
   }
+  if (cmd === 'mcp') {
+    // stdio IS the protocol here: no banner, no spinner, nothing on stdout but JSON-RPC frames.
+    process.exitCode = await serve();
+    return;
+  }
   if (cmd === 'mirror') return await mirror(args.slice(1));
   if (cmd === 'status') return await status(args.slice(1));
   if (cmd === 'profile') return await profiler(args.slice(1));
@@ -827,7 +835,7 @@ async function main(): Promise<void> {
 
   // A mistyped COMMAND gets the same courtesy as a mistyped flag (0.3.5): name the nearest one,
   // never just reject. The user-facing verbs, in help order.
-  const KNOWN = ['init', 'mirror', 'profile', 'update', 'stop', 'status', 'help'];
+  const KNOWN = ['init', 'mirror', 'profile', 'update', 'stop', 'status', 'mcp', 'help'];
   const guess = cmd ? KNOWN.map((k) => [k, editDistance(cmd, k)] as const).filter(([, d]) => d <= 3).sort((a, b) => a[1] - b[1])[0]?.[0] : undefined;
   console.error(`\n  ${C.bad(`unknown command: ${cmd}`)}${guess ? C.dim(`  (did you mean ${guess}?)`) : ''}`);
   console.error(`  ${C.dim(`see \`${hint('stratless help')}\` for the full list`)}\n`);

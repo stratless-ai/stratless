@@ -40,6 +40,7 @@ stratless profile    see the model of you, free and instant
 stratless update     read what is new, rebuild and load it
 stratless stop       turn it off, and unload the profile
 stratless status     its own state, and what it has cost
+stratless mcp        serve the profile to any MCP client
 ```
 
 Full reference on the [Commands](/docs/commands) page.

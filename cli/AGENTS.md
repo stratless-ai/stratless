@@ -18,6 +18,15 @@ after joins new moments to those frozen centres, so piles keep their names. Supp
 zero-side-effect read), `worker.ts`/`loop.ts` (the after-session refresh), `init.ts` (protect history
 + install the Stop hook), `index.ts` (CLI entry).
 
+**The two ways the profile reaches an assistant.** `load.ts` writes it where a tool already looks
+(one file per tool — Claude Code today). `mcp.ts` serves it to any tool that speaks MCP, over stdio,
+so a new client costs a config line instead of an adapter — the Return leg of the seam, done once.
+Read-only, one tool, hand-rolled JSON-RPC (no SDK, the dep-free rule holds). Two rungs because
+clients differ, and the split is MEASURED: the connect-time `instructions` field is truncated at
+exactly 2048 chars (Claude Code, 2026-07-30), so it carries a short complete hook budgeted under
+1024, and the tool carries the profile. Reading a tool's transcripts is a separate, per-tool job
+(`reader.ts`) that MCP does not touch.
+
 ## Commands (from `cli/`)
 
 ```

@@ -7,6 +7,20 @@ and each version matches its `cli-v*` git tag.
 ## [Unreleased]
 
 ### Added
+- **`stratless mcp` — your profile, in any assistant that speaks MCP.** Reaching a new tool used to
+  mean teaching stratless where that tool keeps its context file and how it wants it written. This
+  goes around that entirely: one local server speaking the Model Context Protocol over stdio, and any
+  client that speaks it reads your profile with stratless knowing nothing about its files. Point a
+  client at `{"command": "stratless", "args": ["mcp"]}` once. It serves the profile two ways, because
+  clients differ: a short note at connect time asking the assistant to read your profile before doing
+  real work, and one read-only tool that returns the profile itself. The note stays short on purpose —
+  that channel is truncated (measured at exactly 2048 characters in one client), and half an
+  instruction is a wrong instruction, so the note says what to *call* and the tool carries what to
+  *know*. It reads `HUMAN.md` when asked, so a rebuild reaches every connected client at once. One
+  tool, read-only, no writes of any kind: your profile is derived by arithmetic from your own history,
+  so there is nothing for an assistant to edit. No profile yet means it says so and tells the
+  assistant to treat you as unknown rather than guess. Local, over a pipe, no network, and idle until
+  a client starts it.
 - **The free read now sees your fleet.** Two rows join `stratless mirror`, both computed on the same
   local pass, both absent unless they apply to you: `work it handed off` counts the times your
   assistant gave part of a job to another agent instead of doing it itself and names the kinds it
