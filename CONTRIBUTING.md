@@ -17,8 +17,19 @@ not as an issue.
 
 ## Features and pull requests
 
-Open an issue to discuss before writing code. Unsolicited feature PRs may be declined on
-direction alone, kindly: that is a statement about scope, never about your work.
+Open a [discussion](https://github.com/stratless-ai/stratless/discussions) before writing code.
+Unsolicited feature PRs may be declined on direction alone, kindly: that is a statement about
+scope, never about your work.
+
+Every PR to `main` goes through the same gates, mine included:
+
+- CI must be green — `typecheck · test` and `a stranger clones it and it runs` both have to pass
+  before the merge button unlocks. They run on every PR, not just ones that touch `cli/`.
+- PRs merge as a **squash**, so your branch lands as one commit with your authorship intact.
+- `main` takes no direct pushes, no force-pushes, and cannot be deleted.
+
+First PR from a new contributor waits on a maintainer to approve the CI run. That is GitHub's
+default for public repos, not a comment on you.
 
 ## Development
 
@@ -52,5 +63,10 @@ every contributor must know:
 2. **Docs move with code.** A PR that changes CLI behavior updates `cli/CHANGELOG.md`,
    `cli/README.md`, and `web/content/docs/` in the same PR. CI will nudge you if you forget.
 
-Releases are maintainer-only (a tag ritual with its own gates). Contributions are accepted under
-the MIT license (see [LICENSE](LICENSE)).
+Releases are maintainer-only (a tag ritual with its own gates: only an admin can create a `cli-v*`
+tag, and once created it can never be moved — the npm provenance signature binds a published
+tarball to one exact commit). Contributions are accepted under the MIT license (see
+[LICENSE](LICENSE)).
+
+Everyone here is covered by the [Code of Conduct](CODE_OF_CONDUCT.md); report anything that
+breaks it to sun@stratless.com.

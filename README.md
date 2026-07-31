@@ -81,6 +81,12 @@ pnpm dev:web     # stratless.com, locally
 
 The `cli/` is published standalone and carries **zero runtime dependencies** — the local embedding engine is not one: it arrives once at `init`, after your yes, pinned and checksummed (`runtime/` in this repo is that package). The bar for ever adding a real dependency is very high. Never auto-commit. The tree is left green and uncommitted for a human to review.
 
+## Contributing
+
+Bug reports are very welcome: [open one with the template](https://github.com/stratless-ai/stratless/issues/new/choose). Features and ideas start as a [discussion](https://github.com/stratless-ai/stratless/discussions), not a PR — the roadmap is deliberate and pre-1.0, so an unsolicited feature PR may be declined on direction alone. Found something that breaks the privacy promise? That goes **private**, via the Security tab, never a public issue.
+
+The full guide is **[CONTRIBUTING.md](CONTRIBUTING.md)** — [SECURITY.md](SECURITY.md) for vulnerabilities, [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for everyone.
+
 ---
 
 MIT. The profile is yours, it's a plain text file, and it's free forever.
