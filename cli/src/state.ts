@@ -42,12 +42,6 @@ export interface RunRecord {
 }
 
 export interface SynthState {
-  /** ISO timestamp of the last synthesis; absent if there has never been one */
-  lastSynthesisAt?: string;
-  /** how many judgments were cached at that moment */
-  judgmentsAtLastSynthesis?: number;
-  /** the judge's view sizes fitted to this user's window (0.3.0) — recorded for visibility */
-  aperture?: { prompt: number; said: number; reaction: number; computedAt: string };
   /** the stopwatch (C8): the last runs' measured walls — every ETA and quote derives from these */
   stopwatch?: RunRecord[];
   /** the last build's scoreboard rate — the WIDER distress read (~13/100). RECORDED, never shown: the
@@ -72,20 +66,6 @@ export function readState(file: string = statePath()): SynthState {
     if (!existsSync(file)) return {};
     const raw = JSON.parse(readFileSync(file, 'utf8')) as Partial<SynthState>;
     const out: SynthState = {};
-    if (typeof raw.lastSynthesisAt === 'string') out.lastSynthesisAt = raw.lastSynthesisAt;
-    const n = Number(raw.judgmentsAtLastSynthesis);
-    if (Number.isFinite(n) && n >= 0) out.judgmentsAtLastSynthesis = n;
-    const a = raw.aperture;
-    if (
-      a &&
-      typeof a === 'object' &&
-      Number.isFinite(Number(a.prompt)) &&
-      Number.isFinite(Number(a.said)) &&
-      Number.isFinite(Number(a.reaction)) &&
-      typeof a.computedAt === 'string'
-    ) {
-      out.aperture = { prompt: Number(a.prompt), said: Number(a.said), reaction: Number(a.reaction), computedAt: a.computedAt };
-    }
     const runs = validRuns(raw.stopwatch);
     if (runs.length) out.stopwatch = runs;
     const sb = raw.scoreboard;

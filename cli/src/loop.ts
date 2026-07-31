@@ -186,13 +186,10 @@ export async function runWorker(): Promise<number> {
           // The consent is now being taken up: consume the durable flag so it is honored exactly once.
           clearColdBuildRequest();
           const buildStart = Date.now();
-          const bin = findAssistant();
-          const dr = bin
-            ? await coldBuild(bin, {
-                onProgress: (l: string) => writeProgress({ phase: 'starting', startedAt, summary: [l] }),
-                shouldStop: () => stopRequested,
-              })
-            : { categories: 0, scored: 0, piles: 0 };
+          const dr = await coldBuild(bin, {
+            onProgress: (l: string) => writeProgress({ phase: 'starting', startedAt, summary: [l] }),
+            shouldStop: () => stopRequested,
+          });
           sw.stage('build', Date.now() - buildStart, dr.scored);
           cats = loadCategories();
           if (dr.categories) {
@@ -204,8 +201,6 @@ export async function runWorker(): Promise<number> {
             // A wrong reason is worse than none: without this the person is told there is not enough
             // behaviour to profile, when in fact the engine never arrived (or was deleted).
             summary.push('the local engine is not on this machine yet — run `stratless init` to fetch it, then `stratless update`');
-          } else if (!bin) {
-            summary.push('no assistant found to name the patterns — install Claude Code, then run `stratless update`');
           } else {
             summary.push('not enough recurring behaviour to build a profile yet — keep working, then run `stratless update`');
           }
@@ -287,7 +282,7 @@ export async function runWorker(): Promise<number> {
           sw.stage('write', Date.now() - writeStart, profile ? 1 : 0);
           if (profile && looksLikeProfile(profile.text)) {
             const builtAt = new Date().toISOString(); // one stamp for BOTH the HUMAN.md header and the sidecar — they must agree
-            injectProfile(profile.text, undefined, undefined, builtAt); // writes ~/.claude/HUMAN.md AND points CLAUDE.md at it — the load
+            injectProfile(profile.text, undefined, undefined, builtAt); // writes ~/.stratless/HUMAN.md AND points CLAUDE.md at it — the load
             writeRender('profile', { builtAt, sessions: profile.meta.sessions, exchanges: profile.meta.moments, categories: loadCategories().length });
             summary.push(
               `profile written and loaded · ${profile.meta.frame} to offer + ${profile.meta.judge} to catch + ${profile.meta.register} register${profile.meta.rules ? ` + ${profile.meta.rules} to move` : ''}${profile.meta.shorthand ? ` + ${profile.meta.shorthand} shorthand handles` : ''}`,

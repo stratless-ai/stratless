@@ -215,10 +215,10 @@ test('C8: the run record survives the state round-trip; malformed entries are dr
     totalMs: 5000,
     stages: [{ stage: 'judge', ms: 4000, units: 12, turns: { count: 12, meanMs: 333, p90Ms: 500 } }],
   };
-  writeState({ lastSynthesisAt: '2026-07-17T09:00:00Z', stopwatch: [good] }, f);
+  writeState({ lastFlushAt: '2026-07-17T09:00:00Z', stopwatch: [good] }, f);
   const back = readState(f);
   assert.deepEqual(back.stopwatch, [good], 'timing fields persist intact');
-  assert.equal(back.lastSynthesisAt, '2026-07-17T09:00:00Z', 'alongside the rest of the state');
+  assert.equal(back.lastFlushAt, '2026-07-17T09:00:00Z', 'alongside the rest of the state');
   writeFileSync(f, JSON.stringify({ stopwatch: [good, { at: 42, totalMs: 'x' }, { at: 'ok', totalMs: 1, stages: [{ stage: 7 }] }] }));
   const filtered = readState(f);
   assert.equal(filtered.stopwatch!.length, 2, 'malformed run dropped');
@@ -230,14 +230,14 @@ test('C8: startRun().record() merges into existing state — never clobbers, rin
   const f = join(dir, 'state-record.json');
   process.env.STRATLESS_STATE = f;
   try {
-    writeState({ lastSynthesisAt: '2026-07-16T00:00:00Z', judgmentsAtLastSynthesis: 42 });
+    writeState({ lastFlushAt: '2026-07-16T00:00:00Z', scoreboard: { rate: 12.5, at: '2026-07-16T00:00:00Z' } });
     const sw = startRun();
     sw.stage('judge', 1234, 5, [200, 300, 250, 180, 304]);
     sw.stage('synthesis', 900, 1);
     sw.record();
     const s = readState();
-    assert.equal(s.lastSynthesisAt, '2026-07-16T00:00:00Z', 'the rest of the state survives');
-    assert.equal(s.judgmentsAtLastSynthesis, 42);
+    assert.equal(s.lastFlushAt, '2026-07-16T00:00:00Z', 'the rest of the state survives');
+    assert.deepEqual(s.scoreboard, { rate: 12.5, at: '2026-07-16T00:00:00Z' });
     assert.equal(s.stopwatch!.length, 1);
     const run = s.stopwatch![0];
     assert.equal(run.stages.length, 2);
