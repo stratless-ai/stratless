@@ -145,8 +145,27 @@ function storedKeys(file: string): Set<string> {
   return keys;
 }
 
-/** Every stored moment, in file order (append order, so roughly oldest-batch first). Callers that
- *  need chronological order sort by `ts`; nothing relies on file order. */
+/**
+ * Every stored moment, CHRONOLOGICAL, in one total order derived from content alone.
+ *
+ * ⚠️ THE SORT IS LOAD-BEARING — do not drop it for being tidy. This function used to return file
+ * order, and the comment here promised "nothing relies on file order". Something did. Append order
+ * is the order `reader.ts` handed the transcripts over, and that is `mtime` order; k-means++ seeds
+ * its centroids BY INDEX, so the moment list's order chose the piles. The profile was therefore a
+ * function of FILE TIMESTAMPS rather than of the person.
+ *
+ * Measured 2026-08-01 — byte-identical transcripts, only the mtimes varied: the same eight sessions
+ * clustered 32/128 with ascending mtimes and 56/104 with tied ones, and the shorthand section
+ * appeared in one and vanished from the other. That is a different profile for the same history.
+ * Anything that rewrites mtimes without touching bytes reshuffled the person's file: restoring a
+ * backup, copying `~/.claude` to a new laptop, `rsync` without `-t`, a sync client.
+ *
+ * `ts` is the moment's own timestamp and `key` its content hash, so this order is reproducible on
+ * any machine, on any filesystem, after any copy or restore. Oldest-first because that is what the
+ * append-only store always meant to be, and no caller slices the head for recency (checked). The
+ * earlier half of this fix — `reader.ts`'s path tiebreak, 2026-07-31 — made the READ deterministic;
+ * this makes the ENGINE independent of it, which is the guarantee that actually holds.
+ */
 export function loadMoments(file: string = storePath()): Moment[] {
   if (!existsSync(file)) return [];
   const out: Moment[] = [];
@@ -158,7 +177,7 @@ export function loadMoments(file: string = storePath()): Moment[] {
       /* torn line — skip */
     }
   }
-  return out;
+  return out.sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
 }
 
 export interface BuildResult {
