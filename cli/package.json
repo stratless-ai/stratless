@@ -1,6 +1,6 @@
 {
   "name": "stratless",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "description": "Give your AI coding assistant a brief on who you are, read from your own history, so it stops making you feel stupid. Local, private, no account.",
   "type": "module",
   "bin": {

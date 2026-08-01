@@ -6,6 +6,7 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+## [0.9.0] · 2026-08-01 · reads Claude Code and Codex today
 
 ### Added
 - **stratless works with Codex.** If you run Codex, everything now works the way it does for Claude
