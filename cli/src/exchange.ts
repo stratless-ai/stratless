@@ -16,8 +16,24 @@
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { basename } from 'node:path';
-import { DEFAULT_ROOTS, PASTE_BOUND, dayKey, readSessions, turnsOfFile, type Turn } from './reader.js';
+import { PASTE_BOUND, dayKey, type Session, type Turn } from './seam.js';
+import { allSessions, recordFor } from './adapters.js';
 import { termsOf } from './terms.js';
+
+/**
+ * The sessions a walk reads: everything the registry finds, or — when a caller names roots
+ * explicitly — only those.
+ *
+ * Named roots are read by whichever Record claims them (`recordFor`), so this stays true when a
+ * second assistant registers: the archive walk, a fixture directory and a live log each get parsed
+ * by the reader that understands them, and the engine never learns which one that was.
+ */
+const sessionsIn = (roots?: string[]): Generator<Session> =>
+  roots ? sessionsOfRoots(roots) : allSessions();
+
+function* sessionsOfRoots(roots: string[]): Generator<Session> {
+  for (const root of roots) yield* recordFor(root).sessions([root]);
+}
 
 /** One (AI turn → human reaction) pair. */
 export interface Exchange {
@@ -316,7 +332,7 @@ export function markFirstOfDay(sorted: Exchange[]): Exchange[] {
 
 /** One transcript's exchanges. Kept as a named seam so a single file can be parsed directly. */
 export function parseExchanges(path: string): Exchange[] {
-  return exchangesOfTurns(turnsOfFile(path), basename(path, '.jsonl'));
+  return exchangesOfTurns(recordFor(path).turnsOf(path), basename(path, '.jsonl'));
 }
 
 /** A file's mtime only APPROXIMATES its newest exchange's ts, so once we have enough we read a few
@@ -329,7 +345,7 @@ const FILE_MARGIN = 4;
  */
 export function loadRecentExchanges(
   want: number,
-  roots: string[] = DEFAULT_ROOTS,
+  roots?: string[],
   opts: { fileMargin?: number } = {},
 ): Exchange[] {
   const fileMargin = opts.fileMargin ?? FILE_MARGIN;
@@ -337,7 +353,7 @@ export function loadRecentExchanges(
   const all: Exchange[] = [];
   let i = 0;
   let enoughAt = -1;
-  for (const session of readSessions(roots)) {
+  for (const session of sessionsIn(roots)) {
     for (const e of exchangesOfTurns(session.turns, basename(session.path, '.jsonl'))) {
       if (seen.has(e.hash)) continue;
       seen.add(e.hash);
@@ -360,9 +376,9 @@ export function loadRecentExchanges(
  * Every exchange, newest-first, one at a time — the flat-memory walk (C1) for a full-corpus read.
  * Nothing accumulates but the dedup set.
  */
-export function* iterateExchangesNewestFirst(roots: string[] = DEFAULT_ROOTS): Generator<Exchange> {
+export function* iterateExchangesNewestFirst(roots?: string[]): Generator<Exchange> {
   const seen = new Set<string>();
-  for (const session of readSessions(roots)) {
+  for (const session of sessionsIn(roots)) {
     const ex = exchangesOfTurns(session.turns, basename(session.path, '.jsonl'));
     for (let k = ex.length - 1; k >= 0; k--) {
       if (seen.has(ex[k].hash)) continue;
@@ -383,8 +399,8 @@ export function* iterateExchangesNewestFirst(roots: string[] = DEFAULT_ROOTS): G
  * Returns undefined when the transcript is gone — the reaper took it — which the caller reports
  * honestly rather than guessing at.
  */
-export function findExchange(session: string, hash: string, roots: string[] = DEFAULT_ROOTS): Exchange | undefined {
-  for (const s of readSessions(roots)) {
+export function findExchange(session: string, hash: string, roots?: string[]): Exchange | undefined {
+  for (const s of sessionsIn(roots)) {
     const name = basename(s.path, '.jsonl');
     // Tolerant of either naming: the file's name (what the cache stores) or the record's own
     // sessionId. A receipt written before or after this refactor dereferences the same way.

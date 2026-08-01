@@ -102,6 +102,16 @@ export interface BuildResult {
   /** the model was not available — offline, or the download never completed. Nothing was written and
    *  nothing was spent; the pile is intact and the next run resumes from it. */
   noModel?: boolean;
+  /**
+   * THE PILES WERE FOUND AND THE BORROWED MODEL DID NOT NAME THEM — refused, timed out, was
+   * unreachable, or answered something unusable.
+   *
+   * Its own flag because without one this outcome is indistinguishable from "you have no
+   * recurring behaviour yet": both reach the caller as zero categories, and the person is told
+   * something about THEMSELVES that is actually about their assistant. For a product whose whole
+   * claim is never being confidently wrong, that was the wrong silence.
+   */
+  unnamed?: boolean;
 }
 
 /**
@@ -110,7 +120,7 @@ export interface BuildResult {
  * Writes all three stores together at the end, so an abrupt death leaves nothing half-built: the next
  * run sees no engine state and starts cleanly rather than reading a partial model as if it were whole.
  */
-export async function coldBuild(bin: string, opts: {
+export async function coldBuild(opts: {
   onProgress?: (line: string) => void;
   shouldStop?: () => boolean;
 } = {}): Promise<BuildResult> {
@@ -142,8 +152,8 @@ export async function coldBuild(bin: string, opts: {
   if (opts.shouldStop?.()) return { categories: 0, scored: 0, piles: 0 };
 
   opts.onProgress?.(`naming ${piles.length} patterns`);
-  const named = namePiles(bin, piles, moments);
-  if (!named.length) return { categories: 0, scored: 0, piles: piles.length };
+  const named = namePiles(piles, moments);
+  if (!named.length) return { categories: 0, scored: 0, piles: piles.length, unnamed: true };
 
   return freeze(moments, piles, named, vocab);
 }

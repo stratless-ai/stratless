@@ -25,25 +25,15 @@
  * left exactly as it was. HUMAN.md is written FIRST, so the import never points at a missing file. The
  * privacy rule holds: these files are visible to your assistant, never networked, never committed by us.
  */
-import { existsSync, readFileSync, unlinkSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, sep } from 'node:path';
 import { atomicWriteFileSync } from './atomic.js';
+import { humanMdPath } from './profile.js';
 
 /** The global file Claude Code loads every session. Override with STRATLESS_CLAUDE_MD (tests). */
 export function claudeMdPath(): string {
   return process.env.STRATLESS_CLAUDE_MD || join(homedir(), '.claude', 'CLAUDE.md');
-}
-
-/** The canonical profile artifact — the file every tool ultimately reads. Override with STRATLESS_HUMAN_MD. */
-export function humanMdPath(): string {
-  return process.env.STRATLESS_HUMAN_MD || join(homedir(), '.stratless', 'HUMAN.md');
-}
-
-/** Where the profile lived before it became one artifact many assistants point at. */
-function legacyHumanMdPath(): string {
-  return join(homedir(), '.claude', 'HUMAN.md');
 }
 
 const START = '<!-- stratless:start -->';
@@ -66,44 +56,18 @@ export interface Injected {
 }
 
 /**
- * Write the profile to HUMAN.md and point CLAUDE.md at it. Returns both paths. Idempotent: re-running
- * rewrites HUMAN.md and replaces our CLAUDE.md block in place, never disturbing the rest.
+ * POINT CLAUDE CODE AT THE PROFILE.
+ *
+ * Claude Code cannot be told to load an arbitrary filename, but it DOES expand `@import` lines
+ * inside the `CLAUDE.md` it already reads every session. So the delivery is one line in a managed
+ * block: CLAUDE.md becomes a pointer, never a copy, and a rebuilt profile is picked up without
+ * touching this file again.
+ *
+ * Only ever touches what is between our markers; anything the person wrote themselves is left
+ * exactly as it was.
  */
-/** The installed version, read from the package.json that ships next to dist/ — stamped into the
- *  managed header so the file itself says which stratless wrote it. Never hand-typed. */
-export function installedVersion(): string {
-  try {
-    const pkg = join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json');
-    return (JSON.parse(readFileSync(pkg, 'utf8')).version as string) ?? 'unknown';
-  } catch {
-    return 'unknown';
-  }
-}
-
-export function injectProfile(
-  text: string,
-  humanTarget: string = humanMdPath(),
-  claudeTarget: string = claudeMdPath(),
-  builtAt: string = new Date().toISOString(),
-): Injected {
-  // 1. The canonical artifact — written FIRST, so the redirect never points at a missing file.
-  // The `# built` line is the version stamp: a person opening HUMAN.md can tell at a glance whether
-  // they are reading the latest rebuild. UTC (globalized, unambiguous anywhere), minute precision.
-  const stamp = `${builtAt.slice(0, 16).replace('T', ' ')} UTC`; // 2026-07-23T12:28:56.777Z -> "2026-07-23 12:28 UTC"
-  const human = [
-    '# Who you are working with',
-    `# (managed by stratless ${installedVersion()}: do not edit by hand; refreshed by \`stratless update\`)`,
-    `# built ${stamp}`,
-    '<!-- format: humanmd/v3 -->', // the person-layer format marker (v3: the conductor's brief + the LIFT rows)
-    '',
-    text.trim(),
-    '',
-  ].join('\n');
-  atomicWriteFileSync(humanTarget, human);
-
-  // 2. Point CLAUDE.md at it, inside our managed block — the person's own content is never touched.
+export function loadInto(humanTarget: string = humanMdPath(), claudeTarget: string = claudeMdPath()): Injected {
   upsertBlock(humanTarget, claudeTarget);
-
   return { humanMd: humanTarget, claudeMd: claudeTarget };
 }
 
@@ -142,44 +106,16 @@ export function ensureLoaded(humanTarget: string = humanMdPath(), claudeTarget: 
 }
 
 /**
- * Move a pre-0.7.2 profile out of Claude Code's directory into stratless's own, ONCE, and re-point the
- * import that was aimed at it. Silent and idempotent: every later run finds the new file already there
- * and does nothing.
+ * RE-AIM AN EXISTING POINTER, and only an existing one.
  *
- * Three refusals, each protecting something the person owns:
- *  · a redirected profile (STRATLESS_HUMAN_MD) is a deliberate choice — a test's or a person's — and is
- *    never migrated out from under them;
- *  · a file whose first line is not the header WE stamp is not ours to move, however much it looks like
- *    a profile. We only ever delete a file we can prove we wrote;
- *  · the import block is rewritten only if one is ALREADY there. Adding it here would silently re-load
- *    a profile the person turned off with `stratless stop`, which is the one thing that switch promises.
+ * For when the artifact moves under a person who already had it loaded. The distinction from
+ * `ensureLoaded` is the whole point: this NEVER adds a block that is not there, because someone who
+ * ran `stratless stop` turned the profile off deliberately, and a housekeeping move must not undo
+ * a decision they made.
  */
-export function migrateLegacyProfile(
-  target: string = humanMdPath(),
-  legacy: string = legacyHumanMdPath(),
-  claudeTarget: string = claudeMdPath(),
-): boolean {
-  // Guards the env var itself, not the argument: a test that redirects the profile into a temp dir
-  // must never reach past it and move the developer's REAL one.
-  if (process.env.STRATLESS_HUMAN_MD) return false;
-  if (existsSync(target) || !existsSync(legacy)) return false;
-
-  let body: string;
-  try {
-    body = readFileSync(legacy, 'utf8');
-  } catch {
-    return false; // unreadable is not ours to move
-  }
-  if (!body.startsWith('# Who you are working with')) return false;
-
-  atomicWriteFileSync(target, body);
-  try {
-    unlinkSync(legacy);
-  } catch {
-    /* the copy is what matters; a leftover costs nothing but tidiness */
-  }
-  // Re-aim an existing import at the file's new home — the old line now points at nothing.
-  if (existsSync(claudeTarget) && readFileSync(claudeTarget, 'utf8').includes(START)) upsertBlock(target, claudeTarget);
+export function reaimIfLoaded(humanTarget: string = humanMdPath(), claudeTarget: string = claudeMdPath()): boolean {
+  if (!existsSync(claudeTarget) || !readFileSync(claudeTarget, 'utf8').includes(START)) return false;
+  upsertBlock(humanTarget, claudeTarget);
   return true;
 }
 

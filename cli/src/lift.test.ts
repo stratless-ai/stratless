@@ -156,13 +156,13 @@ test('mode 2: a quiet window never heals; an abandoned zone lapses neutrally; pe
 
 test('the run is a no-op on nothing, and a dead home with no engine goes dormant', () => {
   const p1 = join(dir, 'noop.json');
-  const r = runLift(undefined, [], [], NOW, { file: p1, roots: [dir] });
+  const r = runLift([], [], NOW, { file: p1, roots: [dir] });
   assert.deepEqual(r, { minted: 0, retired: 0, open: 0, changed: false });
   assert.deepEqual(readLift(p1), { patches: [] }, 'the store was never created');
 
   const p2 = join(dir, 'dormant.json');
   writeLift({ patches: [patch({ pipeline: 'gone-runtime' })] }, p2);
-  const r2 = runLift(undefined, [], [], NOW, { file: p2, roots: [dir] });
+  const r2 = runLift([], [], NOW, { file: p2, roots: [dir] });
   assert.equal(readLift(p2).patches[0].state, 'dormant', 'no live home, no honest geometry → dormant, kept silent');
   assert.equal(r2.changed, true, 'what prints moved');
 });

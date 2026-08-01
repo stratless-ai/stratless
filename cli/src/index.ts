@@ -13,12 +13,16 @@
  */
 import { loadAssignments } from './assign.js';
 import { join as joinLabelled, misfitRate } from './count.js';
-import { findAssistant, onPath } from './claude.js';
-import { init as doInit, ARCHIVE, PROJECTS, stopRefresh, refreshArmed, type InitResult } from './init.js';
+import { onPath } from './brain-claude-code.js';
+import { brains, pickBrain } from './brains.js';
+import type { Adapter, ArmState, Brain, ProtectResult } from './seam.js';
+import { archiveDir, stopRefresh, refreshArmed } from './rhythm-claude-code.js';
 import { runtimeDir, runtimeInstalled, ensureRuntime, runtimePresent, modelPresent, modelDir } from './embed.js';
 import { fetchLatest, newerThan } from './notify.js';
 import { loadRecentExchanges } from './exchange.js';
-import { removeProfile, humanMdPath, claudeMdPath, installedVersion, migrateLegacyProfile } from './load.js';
+import { humanMdPath, installedVersion, migrateLegacyProfile } from './profile.js';
+import { reaimIfLoaded, claudeMdPath } from './load-claude-code.js';
+import { detect as detectAdapters, loadedInto, registry, unloadEverywhere } from './adapters.js';
 import { readRenders, requestColdBuild, coldBuildRequested, readState, setFlushCadence, type FlushCadence } from './state.js';
 import { readUsage } from './usage.js';
 import { readLock, lockIsStale, stopWorker, spawnDetached, resolveBinPath } from './worker.js';
@@ -26,7 +30,7 @@ import { runWorker, JUDGE_WINDOW } from './loop.js';
 import { readProgress, type Progress } from './progress.js';
 import { makePalette } from './palette.js';
 import { serve } from './mcp.js';
-import { mirrorOfArchive, mirrorOfArchiveAsync } from './mirror.js';
+import { mirrorOfArchive, mirrorOfArchiveAsync, mirrorOfEverything } from './mirror.js';
 import { renderMirror, renderCard } from './mirrorview.js';
 import { estimateBuild, estimateFromMessages, estimateLine } from './estimate.js';
 import { loadMoments } from './moments.js';
@@ -79,7 +83,7 @@ function startSpinner(label: string, stream: NodeJS.WriteStream = process.stderr
 
 /**
  * MIRROR — the zero-commitment free read. A stranger runs `stratless mirror` (or bare `stratless`) and
- * sees how they and their AI work, computed from their LIVE Claude Code logs at ~/.claude/projects —
+ * sees how they and their AI work, computed from the LIVE logs of every assistant on the machine —
  * with NO `init`, no archive, no settings touched, no spend. Pure arithmetic → stdout. This is the
  * run-it-now, change-nothing surface the launch forwards; `--share` renders the screenshot-safe card
  * (aggregate-only, no repo or session names). The mirror is the diagnosis; `init`/`update` is the cure,
@@ -91,19 +95,26 @@ function startSpinner(label: string, stream: NodeJS.WriteStream = process.stderr
  */
 async function mirror(args: string[]): Promise<void> {
   const share = args.includes('--share');
-  const empty = (): void =>
+  // Name the assistants this person actually has. Telling a Codex-only user to "talk to Claude Code
+  // a few times" both fails and advertises a product they may never have installed — and this is
+  // the headline surface, the one bare `stratless` runs.
+  const empty = (): void => {
+    const here = detectAdapters();
+    const who = here.length ? here.map((a) => a.displayName).join(' or ') : 'your AI coding assistant';
     console.log(
-      `\n  ${C.dim('No conversations to read yet. Talk to Claude Code a few times, then run')} ${C.b(hint('stratless mirror'))} ${C.dim('again.')}\n`,
+      `\n  ${C.dim(`No conversations to read yet. Talk to ${who} a few times, then run`)} ${C.b(hint('stratless mirror'))} ${C.dim('again.')}\n`,
     );
+  };
 
-  // The LIVE logs, not the archive — this must work with nothing archived and no init ever run.
-  if (!existsSync(PROJECTS)) return empty();
+  // The LIVE logs of EVERY assistant on this machine, not the archive — this must work with nothing
+  // archived and no init ever run.
+  if (!detectAdapters().length) return empty();
 
   // The nested-tree walk is the ~10s wait; the async twin lets the spinner rotate through it.
   const stopReading = startSpinner('reading your history…', process.stdout);
   let m: ReturnType<typeof mirrorOfArchive> | undefined;
   try {
-    m = await mirrorOfArchiveAsync(PROJECTS);
+    m = await mirrorOfEverything();
   } catch {
     m = undefined;
   } finally {
@@ -146,16 +157,16 @@ async function mirror(args: string[]): Promise<void> {
 }
 
 /**
- * Is the profile actually loaded? HUMAN.md exists AND CLAUDE.md carries our redirect block. The one
- * honest definition, shared by `status` and `profile`'s footer.
+ * Is the profile actually loaded? The artifact exists AND at least one assistant on this machine is
+ * carrying it. The one honest definition, shared by `status` and `profile`'s footer.
+ *
+ * ANY assistant, not Claude Code specifically: a person who reads their Codex history and has the
+ * profile in `~/.codex/AGENTS.md` is as loaded as anyone, and reporting them unloaded because a
+ * tool they do not use has no block would be a lie about their own machine.
  */
 function profileLoaded(): boolean {
   try {
-    return (
-      existsSync(humanMdPath()) &&
-      existsSync(claudeMdPath()) &&
-      readFileSync(claudeMdPath(), 'utf8').includes('<!-- stratless:start -->')
-    );
+    return existsSync(humanMdPath()) && loadedInto().length > 0;
   } catch {
     return false; // treat unreadable as not-loaded
   }
@@ -337,12 +348,36 @@ export function isYes(answer: string): boolean {
   return a === 'y' || a === 'yes';
 }
 
-/** Spawn the one detached worker. `flush` sets the consent signal for THIS worker's env (the fast
- *  path); durable consent lives in state (requestColdBuild) so a lock race can never drop it. */
-function spawnWorker(bin: string, flush: boolean): number | undefined {
-  const env: Record<string, string> = {};
-  const abs = resolveBinPath(bin) ?? (bin.includes('/') ? bin : undefined);
-  if (abs) env.STRATLESS_CLAUDE_BIN = abs; // C5: the claude path, captured while the PATH is real
+/**
+ * WHAT TO SAY ABOUT THE AFTER-SESSION REFRESH.
+ *
+ * Three outcomes, because "we wrote the hook" and "the hook will run" are different claims. Codex
+ * treats a newly written hook as untrusted and SILENTLY skips it until the person approves it in its
+ * own review screen — so printing `refresh on` there would be the one lie this product cannot
+ * afford: telling somebody their profile keeps itself current when nothing is going to run.
+ */
+function armedLine(adapter: Adapter, state: ArmState): string {
+  if (state === 'armed') return `${C.b('refresh on')}  ${C.dim(`· off any time: ${hint('stratless stop')}`)}`;
+  if (state === 'awaiting-approval') {
+    return `${C.warn('needs your approval')}  ${C.dim(`· ${adapter.displayName} will ask next time you open it`)}`;
+  }
+  return C.dim('not armed');
+}
+
+/**
+ * Spawn the one detached worker. `flush` sets the consent signal for THIS worker's env (the fast
+ * path); durable consent lives in state (requestColdBuild) so a lock race can never drop it.
+ *
+ * TWO THINGS ABOUT THE BRAIN CROSS THIS BOUNDARY, and one of them is newer than it looks. The path
+ * has always been pinned here because the worker inherits a hook's thin PATH and would otherwise
+ * fail to find a binary that is plainly installed. But a path cannot carry a PROTOCOL: with more
+ * than one brain compiled in, a worker handed one vendor's binary and driving it with another's
+ * flags gets silence rather than an error. So the CHOICE goes too.
+ */
+function spawnWorker(brain: Brain, flush: boolean): number | undefined {
+  const env: Record<string, string> = { STRATLESS_BRAIN: brain.id };
+  const abs = resolveBinPath(brain.id === 'claude' ? 'claude' : brain.id);
+  if (abs) env.STRATLESS_CLAUDE_BIN = abs; // C5: the path, captured while the PATH is real
   if (flush) env.STRATLESS_FLUSH = '1';
   return spawnDetached(process.execPath, [fileURLToPath(import.meta.url), '__worker'], env);
 }
@@ -371,16 +406,21 @@ async function update(_rest: string[], opts: { consented?: boolean } = {}): Prom
     console.log(`\n  ${C.dim(`auto-rebuild set to ${C.b(cadence)} — \`${hint('stratless update')}\` still rebuilds now, anytime`)}`);
   }
 
-  const bin = findAssistant();
-  if (!bin) {
-    console.error(`\n  ${C.bad('stratless needs your assistant to read your history.')}`);
-    console.error(`  ${C.dim('It borrows the `claude` you already have. Install Claude Code, then try again.')}\n`);
+  // Any brain will do, and the message must say so: naming only Claude Code told a Codex user to
+  // install a second assistant in order to be understood by the one they already run.
+  const brain = pickBrain();
+  if (!brain) {
+    const known = brains.map((b) => b.displayName).join(' or ');
+    console.error(`\n  ${C.bad('stratless needs an assistant of your own to put your history into words.')}`);
+    console.error(`  ${C.dim(`It borrows one you already have — install ${known}, then try again.`)}\n`);
     process.exit(1);
   }
 
   const window = loadRecentExchanges(JUDGE_WINDOW);
   if (!window.length) {
-    console.log(`\n  No conversations found yet.\n  ${C.dim(`Talk to Claude Code a few times, run \`${hint('stratless init')}\`, then try this.`)}\n`);
+    const here = detectAdapters();
+    const who = here.length ? here.map((a) => a.displayName).join(' or ') : 'your AI coding assistant';
+    console.log(`\n  No conversations found yet.\n  ${C.dim(`Talk to ${who} a few times, run \`${hint('stratless init')}\`, then try this.`)}\n`);
     return;
   }
 
@@ -410,7 +450,7 @@ async function update(_rest: string[], opts: { consented?: boolean } = {}): Prom
     console.log(`\n  ${C.dim(`a refresh is already running (pid ${holder!.pid})${watching}`)}`);
   } else {
     spawnedAtMs = Date.now();
-    if (!spawnWorker(bin, flushing)) {
+    if (!spawnWorker(brain, flushing)) {
       console.error(`\n  ${C.bad('could not start the background refresh.')}\n`);
       process.exit(1);
     }
@@ -428,7 +468,7 @@ async function update(_rest: string[], opts: { consented?: boolean } = {}): Prom
   if (!code && consentedColdBuild && coldBuildRequested() && !workerAlive()) {
     const at = Date.now();
     const stamp = readProgress()?.updatedAt ?? '';
-    if (spawnWorker(bin, true)) code = await tailWorker(at, stamp);
+    if (spawnWorker(brain, true)) code = await tailWorker(at, stamp);
   }
   if (code) process.exit(code);
 }
@@ -444,7 +484,8 @@ async function stop(): Promise<void> {
   // halts now, not after the current build finishes.
   const worker = await stopWorker();
   const hookRemoved = stopRefresh();
-  const unloaded = removeProfile();
+  const unloadedFrom = unloadEverywhere();
+  const unloaded = unloadedFrom.length > 0;
   if (!worker.killed && !hookRemoved && !unloaded) {
     console.log(`\n  ${C.dim('nothing to stop — no running refresh, no refresh hook, no loaded profile.')}\n`);
     return;
@@ -455,7 +496,7 @@ async function stop(): Promise<void> {
     console.log(`  ${C.dim('  everything already judged is banked — restarting re-reads at most one chunk')}`);
   }
   if (hookRemoved) console.log(`  ${C.dim('· after-session refresh removed')}`);
-  if (unloaded) console.log(`  ${C.dim('· profile unloaded from your CLAUDE.md')}`);
+  for (const a of unloadedFrom) console.log(`  ${C.dim(`· profile unloaded from ${a.displayName}`)}`);
   console.log(`  ${C.dim(`Your ${humanMdPath()} is left as-is — delete it yourself if you want it gone.`)}`);
   if (existsSync(modelDir())) {
     console.log(`  ${C.dim(`The local model (~34MB) is still at ${modelDir()} — remove it if you want the disk back.`)}`);
@@ -592,7 +633,7 @@ async function status(rest: string[] = []): Promise<void> {
   // recent run's receipt, and the meter's own blind spots (silent accounting would be the bug).
   const lastRunSpend = readProgress()?.spend;
   console.log(`\n    spend`);
-  console.log(`      total          ${C.b(`$${u.costUsd.toFixed(2)}`)}  ·  ${fmtTok(tokens)} tokens  ·  ${u.calls.toLocaleString()} calls  ${C.dim('on your own claude')}`);
+  console.log(`      total          ${C.b(`$${u.costUsd.toFixed(2)}`)}  ·  ${fmtTok(tokens)} tokens  ·  ${u.calls.toLocaleString()} calls  ${C.dim(`on your own ${pickBrain()?.displayName ?? 'assistant'}`)}`);
   if (stageParts.length) console.log(`      by stage       ${C.dim(stageParts.join(' · '))}`);
   if (retiredUsd > 0.005) console.log(`      retired        ${C.dim(`$${retiredUsd.toFixed(2)}  (earlier miner stages)`)}`);
   if (lastRunSpend) console.log(`      last run       ${C.dim(lastRunSpend.replace('this run: ', ''))}`);
@@ -656,7 +697,9 @@ async function main(): Promise<void> {
   // anything reads a path. Here rather than deeper because EVERY entry point reads it — the worker,
   // `profile`, `status`, and the MCP server all resolve it through `humanMdPath()`. Costs one
   // existsSync when there is nothing to do.
-  migrateLegacyProfile();
+  // Move the artifact, then re-aim whatever pointed at it: an import addressed to a file that
+  // no longer exists is a profile that silently stops loading.
+  if (migrateLegacyProfile()) reaimIfLoaded();
 
   if (cmd === '--version' || cmd === '-v' || cmd === 'version') {
     console.log(`stratless ${installedVersion()}`);
@@ -677,11 +720,24 @@ async function main(): Promise<void> {
     // THE DOOR — the product's only interactive moment. Keep the history, show a FREE read of the
     // person (no spend), quote the paid build honestly, then take ONE consent: build now (watched) or
     // later. The paid build never fires without an explicit yes on a real terminal.
-    let r: InitResult;
+    // ONE LOOP OVER THE ASSISTANTS ACTUALLY ON THIS MACHINE. Every one expires and notifies
+    // differently, so each keeps its own history and arms its own trigger — and one that is NOT here
+    // is never written to. Creating a config directory for an assistant somebody does not use is
+    // stratless leaving litter in a home folder to advertise itself.
+    const here = detectAdapters();
+    if (!here.length) {
+      console.log(`\n  ${C.warn('stratless found no assistant to read on this machine.')}`);
+      console.log(`  ${C.dim(`It reads ${registry.map((a) => a.displayName).join(' and ')} — nothing was created or changed.`)}\n`);
+      return;
+    }
+
+    const kept: { adapter: Adapter; protect?: ProtectResult; arm: ArmState }[] = [];
     try {
-      r = doInit();
+      // Keep the history FIRST, then arm: a trigger that fired before the rescue would rebuild from
+      // a vault that is not there yet.
+      for (const a of here) kept.push({ adapter: a, protect: a.rhythm.protect?.(), arm: a.rhythm.arm() });
     } catch (err) {
-      // Refuse, don't clobber — say what's wrong (a malformed settings.json) and stop cleanly.
+      // Refuse, don't clobber — say what's wrong (a malformed settings.json or hooks.json) and stop.
       console.error(`\n  ${C.bad('stratless could not update your settings.')}`);
       console.error(`  ${C.dim(String(err instanceof Error ? err.message : err).split('\n').join('\n  '))}\n`);
       process.exit(1);
@@ -689,12 +745,27 @@ async function main(): Promise<void> {
 
     // 1. what we kept. Install = alive: the after-session refresh is on now; `stop` is the one ceremony.
     console.log(`\n  ${C.ok('stratless is keeping your history.')}\n`);
-    console.log(`    reaper           ${C.dim(String(r.before))} → ${C.b(`${r.after} days`)}`);
-    console.log(`    archived         ${C.b(String(r.copied))} transcripts${r.skipped ? C.dim(` (${r.skipped} already current)`) : ''}`);
-    console.log(`    kept at          ${C.dim(ARCHIVE)}`);
-    console.log(`    after-session    ${C.b('refresh on')}  ${C.dim(`· off any time: ${hint('stratless stop')}`)}`);
-    console.log(`\n  ${C.dim('Claude Code deletes transcripts after 30 days — per file, even in a project you')}`);
-    console.log(`  ${C.dim('use daily. Anything already gone is gone. Everything from here is kept.')}\n`);
+    const solo = kept.length === 1;
+    for (const k of kept) {
+      // With ONE assistant the rows stay flat — the overwhelming case, and an upgrade must not
+      // reformat somebody's install on account of a tool they do not have. With two, group by name.
+      const pad = solo ? '    ' : '      ';
+      if (!solo) console.log(`    ${C.b(k.adapter.displayName)}`);
+      if (k.protect?.reaper) console.log(`${pad}reaper           ${C.dim(k.protect.reaper.before)} → ${C.b(k.protect.reaper.after)}`);
+      if (k.protect) {
+        console.log(`${pad}archived         ${C.b(String(k.protect.copied))} transcripts${k.protect.skipped ? C.dim(` (${k.protect.skipped} already current)`) : ''}`);
+      }
+      if (solo) console.log(`${pad}kept at          ${C.dim(archiveDir())}`);
+      console.log(`${pad}after-session    ${armedLine(k.adapter, k.arm)}`);
+    }
+    if (!solo) console.log(`    kept at          ${C.dim(archiveDir())}`);
+    // The reaper paragraph belongs to the tool that HAS one. Codex never deletes its rollouts, so
+    // printing this for it would invent a danger and then take credit for saving them from it.
+    for (const k of kept) {
+      if (!k.protect?.reaper) continue;
+      console.log(`\n  ${C.dim(`${k.adapter.displayName} deletes transcripts after 30 days — per file, even in a project you`)}`);
+      console.log(`  ${C.dim('use daily. Anything already gone is gone. Everything from here is kept.')}\n`);
+    }
 
     // The armed hook runs the bare `stratless`; from an npx-only install it would silently do nothing.
     if (!onPath('stratless')) {
@@ -707,7 +778,7 @@ async function main(): Promise<void> {
     const stopReading = startSpinner('reading your history…', process.stdout);
     let mirror: ReturnType<typeof mirrorOfArchive> | undefined;
     try {
-      mirror = await mirrorOfArchiveAsync(ARCHIVE);
+      mirror = await mirrorOfEverything();
     } catch {
       mirror = undefined;
     } finally {
@@ -715,7 +786,9 @@ async function main(): Promise<void> {
     }
     const rows = mirror ? renderMirror(mirror) : [];
     if (!rows.length) {
-      console.log(`  ${C.dim('No conversations to read yet — talk to Claude Code a few times, then run')} ${C.b(hint('stratless update'))}${C.dim('.')}\n`);
+      const here = detectAdapters();
+      const who = here.length ? here.map((a) => a.displayName).join(' or ') : 'your AI coding assistant';
+      console.log(`  ${C.dim(`No conversations to read yet — talk to ${who} a few times, then run`)} ${C.b(hint('stratless update'))}${C.dim('.')}\n`);
       return;
     }
     console.log(`  ${C.b('What I can already see')} ${C.dim('(free, from your own history):')}\n`);
@@ -732,7 +805,7 @@ async function main(): Promise<void> {
       /* fresh machine: no pile yet */
     }
     const est = pile > 0 ? estimateBuild(pile) : estimateFromMessages(mirror!.scale.messages);
-    console.log(`\n  ${C.dim('Full profile:')}    ${C.b(estimateLine(est))}   ${C.dim('built on your own claude, nothing leaves.')}`);
+    console.log(`\n  ${C.dim('Full profile:')}    ${C.b(estimateLine(est))}   ${C.dim(`built on your own ${pickBrain()?.displayName ?? 'assistant'}, nothing leaves.`)}`);
     // THE DOWNLOAD IS PART OF THE ASK. Most of the build now runs on a small local model, which is
     // why it costs cents instead of dollars — but the engine (~3MB runtime) and its weights (~34MB)
     // have to arrive once, and neither is in the npm package. Consenting to a build must mean
@@ -748,8 +821,8 @@ async function main(): Promise<void> {
 
     // 4. the one consent. Only a real terminal can say yes; a pipe or a missing assistant points to
     //    `update`, which is itself the consented build path.
-    const bin = findAssistant();
-    if (bin && process.stdin.isTTY && process.stdout.isTTY) {
+    const brain = pickBrain();
+    if (brain && process.stdin.isTTY && process.stdout.isTTY) {
       console.log('');
       let yes = false;
       try {

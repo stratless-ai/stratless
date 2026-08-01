@@ -33,7 +33,7 @@
  * --safe-mode rides on every borrowed call, so the person's own HUMAN.md is never in context while
  * their profile is being derived ([[borrowed-calls-load-human-md]]).
  */
-import { runClaude } from './claude.js';
+import { pickBrain } from './brains.js';
 import type { Moment } from './moments.js';
 import type { Pile } from './cluster.js';
 
@@ -53,11 +53,13 @@ export interface Named {
 
 const SCHEMA = JSON.stringify({
   type: 'object',
+  additionalProperties: false,
   properties: {
     groups: {
       type: 'array',
       items: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           name: { type: 'string' },
           description: { type: 'string' },
@@ -117,10 +119,13 @@ ${piles.map((p) => render(p, moments)).join('\n\n')}`;
  * Name every pile in one call. Returns [] when the assistant is unavailable or the reply is
  * unusable — refuse, don't lie: a build with no names writes no profile, which is the honest outcome.
  */
-export function namePiles(bin: string, piles: Pile[], moments: Moment[]): Named[] {
+export function namePiles(piles: Pile[], moments: Moment[]): Named[] {
   if (!piles.length) return [];
-  const raw = runClaude(bin, prompt(piles, moments), 'sonnet', 'name', TIMEOUT_MS, SCHEMA, 0);
-  if (!raw) return [];
+  const brain = pickBrain();
+  if (!brain) return [];
+  const answer = brain.ask(prompt(piles, moments), { role: 'main', feature: 'name', timeoutMs: TIMEOUT_MS, schema: SCHEMA });
+  if (!answer) return [];
+  const raw = answer.text;
   const m = raw.match(/\{[\s\S]*\}/);
   if (!m) return [];
   try {

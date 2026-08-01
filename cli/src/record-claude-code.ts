@@ -1,11 +1,17 @@
 /**
- * THE SHARED READER — the one place that decides what counts as the person talking.
+ * THE CLAUDE CODE RECORD — its transcripts, and the one place that decides what counts as the
+ * person talking in them.
+ *
+ * The first of stratless's Records (see `seam.ts` for the contract, `adapters.ts` for the registry
+ * that wraps these functions into it). Everything below is knowledge about how ONE tool writes its
+ * history down; nothing here may leak upward, and the engine never imports this file.
  *
  * Seven independent attempts to count one person's messages produced 4,437 / 4,773 / 5,502 /
  * 5,517 / 5,702 / 6,156 / 6,387 — same archive, same question, a 44% spread. Every one of them
  * drew the line somewhere different, and each was wrong in its own way. That is the whole reason
  * this module exists: the decisions below are made ONCE, and everything downstream reads what
- * comes out of here rather than re-deriving it.
+ * comes out of here rather than re-deriving it. A second Record inherits the LESSON, never the
+ * answers — each tool has its own ways of writing down things the person never typed.
  *
  * Five things are removed, and each one was found by getting it wrong first:
  *
@@ -29,22 +35,34 @@
  */
 import { readFileSync, readdirSync, statSync, type Dirent } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
-
-/** Longer than this and it is pasted, not typed: it still counts as a message, but it must never
- *  reach a length statistic. An uncapped p95 read 1,024 words; the capped one reads 78. */
-export const PASTE_BOUND = 2000;
-
-/** A working day runs 04:00 → 04:00 local. Splitting at midnight cuts a past-midnight session in
- *  half and reports someone who stops at 00:37 as stopping at 03:35. */
-export const DAY_START_HOUR = 4;
+import { join, sep } from 'node:path';
+import { PASTE_BOUND, isTypedMessage, type Turn, type DriftReport } from './seam.js';
 
 /** Per-file size ceiling — one pathological transcript cannot blow the heap. */
 const FILE_CAP_BYTES = 96 * 1024 * 1024;
 
-/** Both places a transcript lives: where Claude Code writes them, and our own copy that outlives the
- *  30-day reaper. Read as a union — a record present in both is deduped by uuid like any replay. */
-export const DEFAULT_ROOTS = [join(homedir(), '.claude', 'projects'), join(homedir(), '.stratless', 'archive')];
+/**
+ * Both places a Claude Code transcript lives: where the tool writes them, and our own copy that
+ * outlives its 30-day reaper. Read as a union — a record present in both is deduped by uuid like
+ * any replay.
+ *
+ * A FUNCTION, because the constant froze at import: a test wanting to read a fixture archive had to
+ * fork a subprocess to get a different HOME. The registry asks at call time. `DEFAULT_ROOTS` stays
+ * as the snapshot the existing default parameters use, derived from here so exactly one place knows
+ * where a transcript lives.
+ */
+export function roots(): string[] {
+  return [join(homedir(), '.claude', 'projects'), archiveRoot()];
+}
+
+/**
+ * OUR OWN VAULT, and this Record's slice of it is the ROOT of it — flat, by history: Claude Code was
+ * the only Record when the vault was made, and its copies are flattened filenames
+ * (`project__session.jsonl`), never nested. Which is exactly what makes the next line safe.
+ */
+export const archiveRoot = (): string => join(homedir(), '.stratless', 'archive');
+
+export const DEFAULT_ROOTS = roots();
 
 /**
  * Every transcript under these roots, NEWEST-MODIFIED FIRST.
@@ -54,7 +72,8 @@ export const DEFAULT_ROOTS = [join(homedir(), '.claude', 'projects'), join(homed
  * ordering that lets a caller wanting the recent window stop early instead of walking gigabytes.
  */
 export function transcriptFiles(roots: string[]): string[] {
-  const found: { path: string; mtime: number }[] = [];
+  const found: { path: string; mtime: number; root: string }[] = [];
+  let root = '';
   const walk = (dir: string): void => {
     let entries: Dirent[];
     try {
@@ -62,19 +81,29 @@ export function transcriptFiles(roots: string[]): string[] {
     } catch {
       return; // a root that does not exist is simply empty
     }
+    const vault = archiveRoot();
     for (const e of entries) {
       const p = join(dir, e.name);
-      if (e.isDirectory()) walk(p);
-      else if (e.name.endsWith('.jsonl')) {
+      if (e.isDirectory()) {
+        // A DIRECTORY DIRECTLY INSIDE THE VAULT IS ANOTHER RECORD'S SLICE, and parsing it here would
+        // read a different tool's transcripts as Claude Code JSONL. Ours are flat filenames at the
+        // vault root, so descending is never right — and this is the whole reason a second Record
+        // can archive anything at all without corrupting this one's read.
+        if (dir === vault) continue;
+        walk(p);
+      } else if (e.name.endsWith('.jsonl')) {
         try {
-          found.push({ path: p, mtime: statSync(p).mtimeMs });
+          found.push({ path: p, mtime: statSync(p).mtimeMs, root });
         } catch {
           /* vanished mid-walk */
         }
       }
     }
   };
-  for (const r of roots) walk(r);
+  for (const r of roots) {
+    root = r;
+    walk(r);
+  }
   // A TOTAL ORDER, not just newest-first. Sorting on mtime alone leaves ties — and ties are common,
   // since sessions written in the same millisecond share one stamp. A tied comparator falls back to
   // whatever `readdirSync` happened to return, which differs by filesystem (APFS vs ext4). That
@@ -82,50 +111,33 @@ export function transcriptFiles(roots: string[]): string[] {
   // clustered into 32/128 on one machine and 80/80 on another. Caught 2026-07-31 by the profile
   // golden failing on CI while passing locally — exactly the reproducibility break it exists to
   // find. The path tiebreak makes the read deterministic on any filesystem.
-  return found.sort((a, b) => b.mtime - a.mtime || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)).map((f) => f.path);
+  return dropArchivedTwins(found)
+    .sort((a, b) => b.mtime - a.mtime || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+    .map((f) => f.path);
 }
 
-/** One turn, after every hygiene decision has already been made. */
-export interface Turn {
-  uuid: string;
-  session: string;
-  /** ISO timestamp; '' when the record carried none (ai-title records never do) */
-  ts: string;
-  role: 'user' | 'assistant';
-  /** typed prose only — wrappers stripped. Empty on an interrupt-only record. */
-  text: string;
-  /** the person pressed escape. A control action, NOT a message: never counted as one. */
-  interrupted: boolean;
-  /**
-   * WHICH interrupt — measured, and they are not the same event:
-   *  · 'plain'    (119 on the reference archive) — Escape pressed mid-generation. 1% coincide with
-   *               a tool decline, so this is a spontaneous course correction.
-   *  · 'tool-use' (44) — the tail of the permission flow: generation stopped BECAUSE a tool was
-   *               declined. 39% coincide with an explicit `user-rejected` denial within 5s.
-   * Summing the two is exactly how the published 5.37/100 friction figure was manufactured.
-   */
-  interruptKind?: 'plain' | 'tool-use';
-  /** over PASTE_BOUND — counts as a message, excluded from length statistics */
-  pasted: boolean;
-  cwd?: string;
-  gitBranch?: string;
-  /** assistant turns only: tool names invoked here */
-  tools?: string[];
-  /** assistant turns only: the agent types this turn handed work to. One entry per NAMED spawn;
-   *  the run count comes from the `Task`/`Agent` tally in `tools`, so an unnamed spawn still
-   *  counts without us inventing a label for it. */
-  delegations?: string[];
-  /** assistant turns only: the skills loaded here, by name. A skill reaches the transcript the
-   *  same way whether the PERSON typed `/name` or the assistant chose it — the record cannot tell
-   *  them apart, so nothing downstream may claim this was the person's reach. */
-  skills?: string[];
-  /** 'user-rejected' (the person declined) or 'automode-blocked' (the SYSTEM blocked — not them) */
-  denial?: string;
-  /** WHICH tools that denial refused — the record's tool_result ids resolved against the tool_use
-   *  blocks seen earlier in the file. Absent when no id resolves (older transcripts). */
-  deniedTools?: string[];
-  /** images carried by this turn */
-  images: number;
+/**
+ * DROP THE VAULT COPY OF A FILE WE CAN STILL READ LIVE.
+ *
+ * `protect()` copies each live transcript into the vault under a FLATTENED name
+ * (`projects/a/b/s1.jsonl` → `a__b__s1.jsonl`), so once someone has run `init` the same conversation
+ * exists twice under two different roots. Records carrying a uuid are deduped downstream; older ones
+ * do not carry one, and those were counted TWICE — measured as 2 live records plus their 2 archived
+ * copies reading as 3 messages.
+ *
+ * It is fixed here rather than per record because the duplicate IS a whole file, and the per-record
+ * alternative needs a content key this data cannot supply. The live original wins; a vault copy is
+ * kept only when its original is gone, which is exactly the case the vault exists for — a transcript
+ * the tool's own reaper has already deleted.
+ */
+function dropArchivedTwins<T extends { path: string; root: string }>(files: T[]): T[] {
+  const vault = archiveRoot();
+  const liveFlat = new Set<string>();
+  for (const f of files) {
+    if (f.root === vault) continue;
+    liveFlat.add(f.path.slice(f.root.length + 1).split(sep).join('__'));
+  }
+  return files.filter((f) => !(f.root === vault && liveFlat.has(f.path.slice(vault.length + 1))));
 }
 
 /** Blocks that arrive inside a user record but were never typed by anyone. Each entry here was
@@ -155,14 +167,6 @@ function textOf(content: unknown): string {
 export function stripWrappers(raw: string): string {
   const out = raw.replace(WRAPPERS, ' ').replace(/<\/?[a-z-]+>/g, ' ').trim();
   return CONTINUATION.test(out) ? '' : out;
-}
-
-/** Which local day does this instant belong to, with the 04:00 boundary applied? YYYY-MM-DD. */
-export function dayKey(ts: string | Date): string {
-  const d = new Date(ts);
-  const shifted = new Date(d.getTime() - DAY_START_HOUR * 3600_000);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${shifted.getFullYear()}-${p(shifted.getMonth() + 1)}-${p(shifted.getDate())}`;
 }
 
 interface RawRecord {
@@ -226,6 +230,14 @@ function toolsOf(content: unknown): string[] | undefined {
 /** The tools that hand work to another agent. Both names ship in the harness; a transcript may
  *  carry either, so the reader knows both rather than guessing from one. */
 const AGENT_TOOLS = new Set(['Task', 'Agent']);
+
+/** The tool that loads a packaged procedure. */
+const SKILL_TOOLS = new Set(['Skill']);
+
+/** How many of a turn's calls were of a given kind. THIS FILE is the only place allowed to know
+ *  which of Claude Code's tool names mean what; the count travels upward, the names do not. */
+const countOf = (tools: string[] | undefined, kinds: Set<string>): number | undefined =>
+  tools ? tools.filter((t) => kinds.has(t)).length : undefined;
 
 /** Which agent types a turn handed work to — read from the spawn's own `subagent_type`, never
  *  inferred. An unnamed spawn contributes nothing here (it is still counted as a run via `tools`),
@@ -317,6 +329,9 @@ export function turnsOfFile(path: string, seen: Set<string> = new Set()): Turn[]
       if (d.type === 'assistant') for (const u of toolUsesOf(d.message?.content)) if (u.id) toolIds.set(u.id, u.name);
       // Dedup only when there IS a uuid. A record without one cannot be a known replay, and
       // dropping it would silently lose evidence — older transcripts do not always carry it.
+      // (The archived COPY of a live file is excluded a level up, in `transcriptFiles` — that
+      // duplicate is a whole file, and solving it per record needs a content key this data cannot
+      // supply: a fixture without timestamps makes two distinct messages look identical.)
       if (d.uuid) {
         if (seen.has(d.uuid)) continue; // a replay is not a second event
         seen.add(d.uuid);
@@ -350,6 +365,13 @@ export function turnsOfFile(path: string, seen: Set<string> = new Set()): Turn[]
         tools,
         delegations: d.type === 'assistant' ? delegationsOf(d.message?.content) : undefined,
         skills: d.type === 'assistant' ? skillsOf(d.message?.content) : undefined,
+        // THE COUNTS, which are not the same question as the names. Claude Code's handoff and
+        // skill tools are `Task`/`Agent` and `Skill`, and knowing that is THIS file's job — the
+        // engine used to look those names up itself, and threw away every load an assistant using
+        // other words had recorded. Counted from the tally so an unnamed spawn is still work
+        // handed off; absent on a turn that ran no tools at all, never a zero.
+        delegationCount: d.type === 'assistant' ? countOf(tools, AGENT_TOOLS) : undefined,
+        skillCount: d.type === 'assistant' ? countOf(tools, SKILL_TOOLS) : undefined,
         denial: d.toolDenialKind,
         deniedTools: d.toolDenialKind ? deniedOf(d.message?.content, toolIds) : undefined,
         images: imagesOf(d),
@@ -378,26 +400,9 @@ export function* readTurns(roots: string[] = DEFAULT_ROOTS): Generator<Turn> {
   for (const s of readSessions(roots)) for (const t of s.turns) yield t;
 }
 
-/** A message the person actually submitted: typed prose, not an interrupt, not machine traffic. */
-export function isTypedMessage(t: Turn): boolean {
-  return t.role === 'user' && !t.interrupted && t.text.length > 0;
-}
-
 /** Below this, the person's OWN transcripts are too slight to tell drift from a fresh start: a
  *  single real session clears it many times over, a new machine never does. */
 export const DRIFT_MIN_BYTES = 500_000;
-
-export interface DriftReport {
-  ok: boolean;
-  /** the person's own (non-machine) transcript files on disk */
-  files: number;
-  /** their total bytes */
-  bytes: number;
-  /** typed human turns the reader extracted (0, or 1 as soon as one is found) */
-  typed: number;
-  /** set only when ok === false: what to tell the person, and why stratless refuses */
-  reason?: string;
-}
 
 /**
  * THE CANARY (v3) — the alarm for the one failure that would end this product silently.

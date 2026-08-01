@@ -24,7 +24,8 @@ import { test } from 'node:test';
 import { mkdtempSync, writeFileSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readTurns, readSessions, readTitles, PASTE_BOUND, type Turn } from './reader.js';
+import { readTurns, readSessions, readTitles } from './record-claude-code.js';
+import { PASTE_BOUND, type Turn } from './seam.js';
 
 const CWD = '/w/proj';
 const BRANCH = 'main';
@@ -140,6 +141,10 @@ const EXPECTED = [
     tools: ['Bash', 'Task', 'Task', 'Skill', 'Skill'],
     delegations: ['Explore'],
     skills: ['push'],
+    // The counts are NOT the array lengths: two spawns and two loads happened, one of each
+    // unnamed. That gap is the whole reason the counts exist.
+    delegationCount: 2,
+    skillCount: 2,
   }),
   turn({ uuid: 'a3', ts: TS(2), denial: 'user-rejected', deniedTools: ['Bash'] }),
   turn({ uuid: 'a4', ts: TS(3), interrupted: true, interruptKind: 'tool-use' }),
@@ -168,6 +173,8 @@ const TURN_FIELDS = [
   'tools',
   'delegations',
   'skills',
+  'delegationCount',
+  'skillCount',
   'denial',
   'deniedTools',
   'images',

@@ -1,5 +1,10 @@
 /**
- * INIT — stop the reaper.
+ * THE CLAUDE CODE RHYTHM — stop the reaper, and keep the record coming.
+ *
+ * The RHYTHM leg is the one that runs on the tool's own clock rather than on ours: it arms the
+ * after-session trigger, and it protects the transcripts from the tool's own housekeeping. Every
+ * assistant needs its own, because every assistant expires and notifies differently — Codex's lives
+ * in `rhythm-codex.ts`. What follows is Claude Code's, and its first job is a deletion timer.
  *
  * Claude Code deletes transcripts after 30 days. Per FILE, not per project — so an archive
  * silently rots from the back even in a repo you use every day. On the machine this was built
@@ -19,15 +24,24 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { atomicWriteFileSync } from './atomic.js';
 
-const HOME = homedir();
-const SETTINGS = join(HOME, '.claude', 'settings.json');
-export const PROJECTS = join(HOME, '.claude', 'projects');
-export const ARCHIVE = join(HOME, '.stratless', 'archive');
+/**
+ * Resolved at CALL time, never frozen at import.
+ *
+ * These were module-level constants, which meant a test could only point them somewhere else by
+ * forking a subprocess — the same trap `roots()` was in. A function costs nothing and makes an
+ * in-process fixture HOME work.
+ */
+export const settingsPath = (): string => join(homedir(), '.claude', 'settings.json');
+export const projectsDir = (): string => join(homedir(), '.claude', 'projects');
+/** Our own vault, and Claude Code's slice of it: the ROOT, flat. A second Record's slice is a
+ *  subdirectory, which is why the reader refuses to descend one — see `record-claude-code.ts`. */
+export const archiveDir = (): string => join(homedir(), '.stratless', 'archive');
 
 const KEEP_DAYS = 3650; // ten years. long enough to mean "never".
 
 export interface InitResult {
-  before: number | 'default (30)';
+  /** the reaper setting as it was, rendered for display ('30', 'default (30)') */
+  before: string;
   after: number;
   copied: number;
   skipped: number;
@@ -66,7 +80,7 @@ export function readSettings(path: string): { ok: boolean; settings: any } {
 
 /** Is the after-session refresh armed? The installed hook IS the consent artifact — the daily
  *  version check (notify.ts) gates on this, and `status` reports it. */
-export function refreshArmed(path: string = SETTINGS): boolean {
+export function refreshArmed(path: string = settingsPath()): boolean {
   const read = readSettings(path);
   if (!read.ok || !read.settings) return false;
   return JSON.stringify(read.settings.hooks?.Stop ?? []).includes('stratless update');
@@ -78,8 +92,8 @@ export function refreshArmed(path: string = SETTINGS): boolean {
  * hook was actually there to remove.
  */
 export function stopRefresh(): boolean {
-  if (!existsSync(SETTINGS)) return false;
-  const read = readSettings(SETTINGS);
+  if (!existsSync(settingsPath())) return false;
+  const read = readSettings(settingsPath());
   if (!read.ok) return false; // an unreadable settings file has no hook we can remove
   const settings = read.settings;
   const stop: unknown = settings?.hooks?.Stop;
@@ -87,7 +101,7 @@ export function stopRefresh(): boolean {
   const kept = stop.filter((g) => !JSON.stringify(g).includes('stratless update'));
   if (kept.length === stop.length) return false;
   settings.hooks.Stop = kept;
-  atomicWriteFileSync(SETTINGS, `${JSON.stringify(settings, null, 2)}\n`);
+  atomicWriteFileSync(settingsPath(), `${JSON.stringify(settings, null, 2)}\n`);
   return true;
 }
 
@@ -102,9 +116,21 @@ function allTranscripts(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-export function init(): InitResult {
-  // 1. stop the reaper
-  const read = readSettings(SETTINGS);
+/**
+ * THE SETTINGS HALF — stop the reaper and arm the hook, in one write.
+ *
+ * Split out of `init` so the two adapter legs can each do their own job: `protect()` needs the
+ * reaper stopped, `arm()` needs the hook, and both used to mean running the whole ceremony
+ * including a full archive walk. Still ONE settings write, because they land in one file.
+ *
+ * INSTALL = ALIVE. Arming the after-session refresh IS the install — the door (index.ts) states the
+ * deal and takes one consent before this runs. A separate opt-in switch would guard nothing: the
+ * hook only ever does FREE work (collect + mirror + steady-state flush) and can NEVER trigger the
+ * paid build, which is TTY-gated in the worker (loop.ts). `stratless stop` is the single, total
+ * off-switch — that is the one ceremony.
+ */
+export function writeSettings(): { before: string; after: string; hookInstalled: boolean } {
+  const read = readSettings(settingsPath());
   if (!read.ok) {
     // Refuse, don't clobber: overwriting a file we couldn't read would destroy whatever the person
     // had in it. Say what's wrong and stop.
@@ -113,25 +139,25 @@ export function init(): InitResult {
     );
   }
   const settings = read.settings;
-  const before: number | 'default (30)' = settings.cleanupPeriodDays ?? 'default (30)';
+  const before = String(settings.cleanupPeriodDays ?? 'default (30)');
   settings.cleanupPeriodDays = KEEP_DAYS;
-  // INSTALL = ALIVE. Arming the after-session refresh IS the install — the door (index.ts) states the
-  // deal and takes one consent before this runs. A separate opt-in switch would guard nothing: the
-  // hook only ever does FREE work (collect + mirror + steady-state flush) and can NEVER trigger the
-  // paid build, which is TTY-gated in the worker (loop.ts). `stratless stop` is the single, total
-  // off-switch — that is the one ceremony.
   const hookInstalled = installStopHook(settings);
-  atomicWriteFileSync(SETTINGS, `${JSON.stringify(settings, null, 2)}\n`);
+  atomicWriteFileSync(settingsPath(), `${JSON.stringify(settings, null, 2)}\n`);
+  return { before, after: `${KEEP_DAYS} days`, hookInstalled };
+}
 
-  // 2. put a copy beyond its reach. flat, deduped by project + filename.
+/** THE COPY HALF — put every transcript beyond the reaper's reach. Flat, deduped by project +
+ *  filename, into this Record's own slice of the vault. */
+export function archiveTranscripts(): { copied: number; skipped: number; oldest?: string } {
   let copied = 0;
   let skipped = 0;
   let oldest: string | undefined;
 
-  for (const src of allTranscripts(PROJECTS)) {
-    const rel = src.slice(PROJECTS.length + 1).replace(/\//g, '__');
-    const dst = join(ARCHIVE, rel);
-    mkdirSync(ARCHIVE, { recursive: true });
+  const dest = archiveDir(); // Claude's slice IS the vault root — flat, for the reason record-claude-code.ts states
+  for (const src of allTranscripts(projectsDir())) {
+    const rel = src.slice(projectsDir().length + 1).replace(/\//g, '__');
+    const dst = join(dest, rel);
+    mkdirSync(dest, { recursive: true });
     // Only copy if new or grown — transcripts are append-only, so size is a sound check
     // and it makes `init` cheap to re-run on a cron or by hand.
     if (existsSync(dst) && statSync(dst).size >= statSync(src).size) {
@@ -143,6 +169,11 @@ export function init(): InitResult {
     const m = statSync(src).mtime.toISOString().slice(0, 10);
     if (!oldest || m < oldest) oldest = m;
   }
+  return { copied, skipped, oldest };
+}
 
+export function init(): InitResult {
+  const { before, hookInstalled } = writeSettings();
+  const { copied, skipped, oldest } = archiveTranscripts();
   return { before, after: KEEP_DAYS, copied, skipped, oldest, hookInstalled };
 }

@@ -17,7 +17,7 @@ import { test, before, after } from 'node:test';
 import { atomicWriteFileSync } from './atomic.js';
 import { acquireLock, releaseLock, readLock, lockIsStale, spawnDetached } from './worker.js';
 import { summarizeTurns, appendRun, stageRates, etaMs, startRun, STOPWATCH_KEEP } from './stopwatch.js';
-import { runClaude, parseJsonResult, CLEAN_ARGS, TOOLLESS_ARGS } from './claude.js';
+import { runClaude, parseJsonResult, CLEAN_ARGS, TOOLLESS_ARGS } from './brain-claude-code.js';
 import { readState, writeState, type RunRecord } from './state.js';
 import { readUsage, recordUsage } from './usage.js';
 

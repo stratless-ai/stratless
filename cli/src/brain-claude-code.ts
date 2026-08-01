@@ -1,14 +1,22 @@
 /**
- * THE BORROW — the one place the profiler shells out to the person's own `claude`.
+ * THE CLAUDE BRAIN — the one place the profiler shells out to the person's own `claude` to think.
  *
  * No API key, no server, no bill (handover §3). Most people run Claude Code on a subscription and
  * have no ANTHROPIC_API_KEY at all, so a BYO-key requirement would stop the majority at the door —
  * but `claude` is already installed and already authenticated. Every paid call — the naming, the
  * voicing, the patch wording — borrows it through here. Their model, their auth, their machine.
+ *
+ * WHY THE FILENAME SAYS CLAUDE CODE AND THE CONCEPT DOES NOT. A brain is PROVIDER-bound, never
+ * tool-bound (see `seam.ts`): this is one way to ask a question, and it can read ANY assistant's
+ * history. The most common machine there is reads Codex transcripts using this brain. So it is not
+ * Claude Code's brain, it is the brain that arrives with Claude Code — `brains.ts` chooses between
+ * it and `brain-codex.ts` by what is installed, and that choice belongs to the person, never to an
+ * adapter.
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { recordUsage, type CallCost } from './usage.js';
+import type { Brain } from './seam.js';
 
 /**
  * TOOL-LESS BY CONSTRUCTION (C9): every borrowed call carries `--tools ""` — the borrow asks a
@@ -243,3 +251,28 @@ export function parseJsonResult(raw: string): ParsedResult | undefined {
     return undefined;
   }
 }
+
+/**
+ * CLAUDE AS A BRAIN — the same borrow, behind the neutral contract.
+ *
+ * Nothing about the call changes: the two-rung ladder, the absolute model pin, the blank slate,
+ * the tool-less spawn, the argv order, the error-envelope refusal, the receipt parse. This only
+ * gives it a shape a second provider can also satisfy, so the engine asks for a ROLE and never
+ * for a product name.
+ */
+export const claudeBrain: Brain = {
+  id: 'claude',
+  displayName: 'Claude Code',
+  detect: () => findAssistant() !== undefined,
+  ask(input, opts) {
+    const bin = findAssistant();
+    if (!bin) return undefined;
+    // The role maps to the model this provider actually runs. `main` has always been sonnet here:
+    // measured as the one that could do the naming call well enough to trust.
+    const model = 'sonnet';
+    // Thinking off for every one of these: measured identical structural quality, 3.3x cheaper and
+    // 4.4x faster. Describing one pile at a time is recognition, not reasoning.
+    const text = runClaude(bin, input, model, opts.feature, opts.timeoutMs, opts.schema, 0);
+    return text === undefined ? undefined : { text };
+  },
+};

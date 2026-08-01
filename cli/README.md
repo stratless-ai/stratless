@@ -18,8 +18,10 @@ No account. No API key. No cloud. The reading and the pattern-finding happen on 
 only borrowed thing is your own `claude`, which names what the maths found. **Nothing leaves your
 machine.**
 
-You need three things, and you probably have all of them: **Claude Code** installed and signed in
-(the `claude` command), **Node 18+**, and a few sessions of history on this machine. That's it.
+You need three things, and you probably have all of them: **Claude Code or Codex** installed and
+signed in (the `claude` or `codex` command), **Node 18+**, and a few sessions of history on this
+machine. That's it. Use both and they read as one person: a single profile, built from everything
+you do, loaded back into each of them.
 
 ---
 
@@ -90,7 +92,8 @@ with no setup and no archive, so bare `npx stratless` (no verb) runs it too. `st
 
 `init` is the one thing you can't do later. Claude Code **deletes your transcripts after 30 days**,
 per file, so your history rots from the back even in a project you use every day. `init` stops that
-and copies everything somewhere safe. Everything else reads from there. Saying yes to the full build
+and copies everything somewhere safe. (Codex has no such timer; `init` still keeps its own copy, and
+it will ask Codex to approve the after-session refresh rather than turn it on behind your back.) Everything else reads from there. Saying yes to the full build
 also fetches the local pattern-finding machinery, once (~3MB runtime + ~34MB model, itemized before
 you answer); after that, every build runs offline. That is the **only** download door: the npm
 package itself has zero dependencies, and nothing heavier arrives until you say yes.
@@ -99,7 +102,8 @@ package itself has zero dependencies, and nothing heavier arrives until you say 
 
 No model of ours. No server. No training. No separate bill.
 
-1. **Read.** Every session Claude Code has is already on your disk, in `~/.claude/projects`.
+1. **Read.** Every session your assistant has is already on your disk, in `~/.claude/projects` or
+   `~/.codex/sessions`.
    stratless walks each one into moments: what you typed, and what the assistant was doing.
 2. **Cluster.** A small open-weights model on your machine turns each moment into a fingerprint, and
    the recurring kinds of thing you do fall out as groups — arithmetic, a few minutes, free, and it
