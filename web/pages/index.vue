@@ -57,7 +57,7 @@ useHead({
         applicationCategory: 'DeveloperApplication',
         operatingSystem: 'macOS, Linux, Windows',
         description:
-          'Reads your coding-assistant sessions and writes a HUMAN.md your AI loads every session, so it stops talking over your head. Runs locally, nothing leaves your machine.',
+          'Reads your own AI logs and writes a HUMAN.md your assistant loads every session, so it stops talking over your head or under it. Runs locally, nothing leaves your machine.',
         url: 'https://stratless.com',
         sameAs: [GITHUB],
         license: 'https://opensource.org/licenses/MIT',
@@ -83,12 +83,15 @@ useHead({
   <section class="section hero">
     <FogFlowField />
     <div class="container hero-inner">
-      <p class="eyebrow">Open source · runs on your machine</p>
-      <!-- The signature IS the hero headline; the lede below gives it its context. -->
-      <h1>Made for your AI.<br />Meant for you.</h1>
+      <p class="eyebrow">Nothing declared. Everything counted.</p>
+      <!-- Three slots, three jobs: the eyebrow is why believe it (the method, and the one line that
+           survives any future product), the h1 is what you get, the lede is how plus the pain it
+           kills. The eyebrow carries the proof so the lede never has to, which is what keeps it
+           short. The signature couplet moved to the closer, over the assistant marquee. -->
+      <h1>Get your AI to understand you.</h1>
       <p class="lede">
-        Stratless reads your chats and teaches your AI who you are, <br />so it stops talking over your
-        head or under it.
+        Stratless reads your own AI logs and writes down who you are, <br />so your assistant stops
+        talking over your head or under it.
       </p>
 
       <!-- Not role="img": that collapsed the whole real profile below to one aria-label sentence,
@@ -246,7 +249,7 @@ useHead({
   <section class="section roadmap">
     <div class="container narrow">
       <p class="eyebrow center">Built on Claude Code</p>
-      <h2 class="rm-h">One file for your AI coding assistants to get to know you.</h2>
+      <h2 class="rm-h">Made for your AI. Meant for you.</h2>
     </div>
     <div class="marquee" aria-hidden="true">
       <div class="marquee-track">
@@ -279,6 +282,20 @@ useHead({
   padding-top: calc(1rem + 58px);
   /* the fog-side half of the hero→install seam — pairs with the landing seam rule below */
   padding-bottom: 3.5rem;
+  /* Fill the first screen exactly. The -58px margin cancels the nav, so the band's top edge sits at
+     document y=0 and 100svh ends it precisely at the fold — no strip of the install section peeking
+     under the horizon. `svh`, deliberately, not the other two: `dvh` re-lays-out the whole hero when
+     a mobile URL bar hides, which is a layout shift check:fonts would fail; `vh` measures the tallest
+     viewport and overflows past that same bar on iOS. It is a MIN, so a short screen still grows the
+     band rather than clipping the terminal. */
+  min-height: 100svh;
+  /* the extra height goes above and below the content, not all at the bottom. Column keeps
+     .hero-inner full-width (align-items defaults to stretch) so .container's max-width still rules;
+     the asymmetric padding (74px top vs 56px bottom) lands the composition a touch above true
+     centre, which is where a hero wants to sit. */
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   /* The fog's stand-in, painted from static CSS the moment the HTML parses. The canvas needs
      hydration + two 512² noise tiles (~1s cold) and is transparent until then — without this,
      bare paper shows through the header strip and the fog visibly pops in. Same ramp as

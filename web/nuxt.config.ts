@@ -1,8 +1,11 @@
 import { readFileSync } from 'node:fs'
 
-const TITLE = 'stratless · Made for your AI. Meant for you.'
+const TITLE = 'stratless · Get your AI to understand you.'
+// Mechanism and pain both land inside the first ~155 chars, so a search snippet never truncates
+// mid-claim. Deliberately does NOT repeat the headline — the title already carries it, and a
+// duplicated line spends the snippet twice.
 const DESC =
-  'Made for your AI. Meant for you. stratless reads your coding-assistant sessions and writes a HUMAN.md your AI loads every session, so it stops talking over your head. Runs locally. Nothing leaves your machine.'
+  'Stratless reads your own AI logs and writes down who you are, so your assistant stops talking over your head or under it. Nothing declared, everything counted. Runs locally. Nothing leaves your machine.'
 const URL = 'https://stratless.com'
 
 // The version shown on the site is the CLI's real version, read from cli/package.json at BUILD so it
