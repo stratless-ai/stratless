@@ -1,6 +1,6 @@
 # stratless-web
 
-**Made for your AI. Meant for you.**
+**Get your AI to understand you.**
 
 **stratless.com** — the front door.
 
