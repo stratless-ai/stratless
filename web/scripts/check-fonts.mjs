@@ -80,9 +80,14 @@ async function staticChecks() {
   note(!/font-display:\s*optional/.test(html),
     'no @font-face uses `font-display: optional` (the 2026-07-16 regression)')
 
-  const inlinedCount = (html.match(/data:font\/woff2;base64/g) || []).length
-  note(inlinedCount === INLINED.length,
-    `${INLINED.length} faces inlined as data: URIs (found ${inlinedCount})`)
+  // PER FACE, not a count. This is the deterministic guard on the property the timing check can only
+  // approximate: a brand face served from a data: URI has no network race to lose. Asserted by name
+  // so a failure says WHICH face regressed, rather than "found 1 of 2" and leaving you to diff.
+  for (const [name] of INLINED) {
+    const face = html.match(new RegExp(`@font-face\\s*\\{[^}]*?['"]?${name}['"]?[^}]*?\\}`, 'is'))
+    note(!!face && /url\(\s*['"]?data:font\/woff2;base64/i.test(face[0]),
+      `"${name}" is inlined as a data: URI, not fetched`)
+  }
 
   // preloads ⇔ @font-face url() sources must be the same set
   const preloaded = [...html.matchAll(/<link[^>]+rel="preload"[^>]+href="([^"]+\.woff2)"/g)].map((m) => m[1])
@@ -127,8 +132,24 @@ async function browserCheck(routes) {
       await page.evaluateOnNewDocument((ALL) => {
         window.__ready = {}
         window.__cls = 0
+        // THE FIRST MOMENT WE CAN LOOK AT ALL. `document.fonts.check` is polled from animation
+        // frames, so every reading is quantised to the frame cadence: ~16.7ms when the machine is
+        // idle, and far coarser when it is not. Comparing that against a precise FCP timestamp is
+        // what made this gate flaky — a CI runner under load put the first frame 4ms AFTER paint and
+        // failed a page whose fonts were never fetched at all. Recording the first tick lets us ask
+        // the question the instrument can actually answer.
+        // THE INSTRUMENT'S OWN RESOLUTION, measured live. Every reading below is quantised to the
+        // frame cadence, so the widest gap between frames is the largest error a reading can carry.
+        // Using it as the tolerance is self-calibrating: ~16ms on an idle machine, wider exactly
+        // when the machine is loaded, which is when the old zero-tolerance check flaked.
+        window.__firstTick = undefined
+        window.__maxGap = 0
+        let last
         const tick = () => {
           const t = performance.now()
+          if (window.__firstTick === undefined) window.__firstTick = t
+          if (last !== undefined) window.__maxGap = Math.max(window.__maxGap, t - last)
+          last = t
           for (const [name, spec] of ALL) {
             if (window.__ready[name] === undefined) {
               try { if (document.fonts.check(spec)) window.__ready[name] = t } catch {}
@@ -154,20 +175,36 @@ async function browserCheck(routes) {
       })
       await page.goto(`http://localhost:${PORT}${route}`, { waitUntil: 'networkidle0', timeout: 60000 })
       await new Promise((r) => setTimeout(r, 1200))
-      const r = await page.evaluate(() => ({ ready: window.__ready, fcp: window.__fcp, cls: window.__cls }))
+      const r = await page.evaluate(() => ({ ready: window.__ready, fcp: window.__fcp, cls: window.__cls, firstTick: window.__firstTick, maxGap: window.__maxGap }))
 
       console.log(`\n  ${route}`)
       for (const [name] of ALL) {
         const t = r.ready[name]
         note(t !== undefined, `${route} — "${name}" loaded`)
       }
-      // The load-bearing assertion: inlined faces beat first paint.
+      // THE LOAD-BEARING ASSERTION: the inlined faces are usable before the page paints.
+      //
+      // Tolerated by ONE FRAME, and the reason is the instrument rather than the site. Readiness is
+      // polled from animation frames, so a reading can be a whole frame late purely because that is
+      // when we next got to look; FCP is a precise timestamp with no such error. Comparing the two
+      // at zero tolerance measured runner load as much as it measured the site, and failed a page
+      // by 4ms on 2026-08-01 whose fonts were never fetched at all. The tolerance is the widest
+      // frame gap actually observed on this run, so it widens exactly when the machine is loaded.
+      //
+      // Note an inlined face still needs a frame or two to DECODE — measured here at ~20ms after
+      // the first tick with no network involved — which is why "ready at the first frame" is the
+      // wrong bar and "before paint, within the measurement's error" is the right one.
       for (const [name] of INLINED) {
         const t = r.ready[name]
         if (t === undefined) continue
-        note(t <= r.fcp,
-          `${route} — "${name}" usable before first paint (${t.toFixed(0)}ms vs FCP ${r.fcp?.toFixed(0)}ms)`)
+        const slack = r.maxGap || 17
+        note(t <= r.fcp + slack,
+          `${route} — "${name}" usable before first paint ` +
+            `(${t.toFixed(0)}ms vs FCP ${r.fcp?.toFixed(0)}ms, ±${slack.toFixed(0)}ms frame)`)
       }
+      // (A request-URL check lived here briefly and was removed: it only caught a fetch whose URL
+      // happened to be NAMED after the face, so it reported a cheerful pass while Evogria was being
+      // served from another file. The per-face data: URI assertion above is the exact test.)
       note(r.cls < 0.02, `${route} — CLS ${r.cls.toFixed(5)} under 0.02`)
     } finally {
       await browser.close()
