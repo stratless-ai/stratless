@@ -140,10 +140,20 @@ jobs:
             echo "::error::cli/CHANGELOG.md has no section for $v — write the notes, then create the release by hand: gh release create $GITHUB_REF_NAME --notes-file <notes>"
             exit 1
           fi
+          # The title picks up the heading's optional tagline. SEPARATOR-AGNOSTIC, like the date gate
+          # above and for the same reason: the point is the tagline existing, not the punctuation
+          # around it. This used to split on " — " alone, and the changelog moved to "·" at 0.6.1 — so
+          # every release from 0.6.1 to 0.8.1 shipped as a bare "stratless x.y.z" with its tagline
+          # dropped. Nothing ever failed; the title was just quietly poorer, which is how it survived
+          # nine releases unnoticed. Strip the version, then the date, then whichever separator follows.
+          # What remains is the tagline — and nothing remaining is a real answer, not an error (0.1.0
+          # through 0.3.2 never had one).
           heading="$(grep -m1 -F "## [$v]" cli/CHANGELOG.md)"
-          rest="${heading#*] — }"        # "2026-01-01" or "2026-01-01 — the tagline"
+          rest="${heading#*]}"                                          # " · 2026-01-01 · the tagline"
+          rest="${rest#*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]}"    # " · the tagline"
+          rest="$(sed -E 's/^[[:space:]]*(—|·|-)[[:space:]]*//' <<<"$rest")"
           title="stratless $v"
-          case "$rest" in *" — "*) title="stratless $v — ${rest#* — }" ;; esac
+          [ -n "$rest" ] && title="stratless $v · $rest"
           notes="$notes
 
           ---
