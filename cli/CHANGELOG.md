@@ -6,6 +6,10 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+## [0.8.1] · 2026-08-01 · the same history, wherever it lives
+
+A profile should describe you, and nothing else. This one quietly described your filesystem too.
+
 ### Fixed
 - **Your profile depended on your files' timestamps, not just on your history.** 0.8.0 fixed half of
   this: transcripts are now read in one total order on every filesystem. But the order they were read
