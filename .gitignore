@@ -1,5 +1,12 @@
 node_modules/
 dist/
+# `dist/` above matches a DIRECTORY. `nuxi generate` leaves web/dist as a SYMLINK to .output/public,
+# and a symlink is a file to git — so the rule above misses it and it shows up as untracked after
+# every site build. That is how it got committed in the first place: the symlink rode into the repo
+# with the monorepo consolidation and pointed at an absolute path on one machine, which every
+# stranger who cloned then got as a dangling link (removed in #60). Without this line, one
+# `git add -A` after a build puts it straight back.
+/web/dist
 .nuxt/
 .output/
 .wrangler/
