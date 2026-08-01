@@ -5,7 +5,7 @@
  * A MOMENT is one thing the person typed paired with what the assistant was doing. It is derived
  * from an `Exchange` (exchange.ts does the pairing) and cached here so the stages above it —
  * assignment, counting, writing — never re-walk transcripts, and so a moment survives its source
- * being reaped (Claude Code deletes transcripts after 30 days; the value is longitudinal).
+ * being reaped (assistants expire their transcripts; the value of a moment is longitudinal).
  *
  * TWO PROPERTIES, both deliberate:
  *
@@ -33,7 +33,6 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { DEFAULT_ROOTS } from './reader.js';
 import { iterateExchangesNewestFirst, type Exchange } from './exchange.js';
 
 /** Where the pile lives. Override with STRATLESS_MOMENTS (tests). */
@@ -158,7 +157,7 @@ function storedKeys(file: string): Set<string> {
  * clustered 32/128 with ascending mtimes and 56/104 with tied ones, and the shorthand section
  * appeared in one and vanished from the other. That is a different profile for the same history.
  * Anything that rewrites mtimes without touching bytes reshuffled the person's file: restoring a
- * backup, copying `~/.claude` to a new laptop, `rsync` without `-t`, a sync client.
+ * backup, copying an assistant's history to a new laptop, `rsync` without `-t`, a sync client.
  *
  * `ts` is the moment's own timestamp and `key` its content hash, so this order is reproducible on
  * any machine, on any filesystem, after any copy or restore. Oldest-first because that is what the
@@ -202,7 +201,6 @@ export interface BuildResult {
  */
 export function buildMoments(opts: { roots?: string[]; file?: string } = {}): BuildResult {
   const file = opts.file ?? storePath();
-  const roots = opts.roots ?? DEFAULT_ROOTS;
 
   const stale = readMeta(file) !== MOMENTS_V;
   const seen = stale ? new Set<string>() : storedKeys(file);
@@ -212,7 +210,7 @@ export function buildMoments(opts: { roots?: string[]; file?: string } = {}): Bu
 
   // Walk the WHOLE archive, every run. The seen-set drops what is already stored; there is no early
   // stop, because no cheap ordering reliably says "everything past here is stored" (see the header).
-  for (const ex of iterateExchangesNewestFirst(roots)) {
+  for (const ex of iterateExchangesNewestFirst(opts.roots)) {
     scanned++;
     if (seen.has(ex.hash)) continue;
     seen.add(ex.hash);

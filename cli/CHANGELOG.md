@@ -6,6 +6,43 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+
+### Added
+- **stratless works with Codex.** If you run Codex, everything now works the way it does for Claude
+  Code: it reads your rollouts from `~/.codex/sessions`, builds the same profile from them, and
+  loads it back into Codex. Run both and they read as one person, since a single `HUMAN.md` is built
+  from everything you do and loaded into each of them. Three things differ, and stratless says so
+  rather than smoothing them over:
+  - **Your profile is copied into `~/.codex/AGENTS.md`, not linked.** Codex has no import syntax, so
+    the text itself goes in, between markers, and is rewritten on every build. If you keep an
+    `AGENTS.override.md`, it goes there instead, because Codex reads that file *instead of*
+    `AGENTS.md` rather than as well as it.
+  - **Codex asks you before the after-session refresh runs.** `init` writes a `SessionEnd` hook into
+    `~/.codex/hooks.json`, and Codex treats any new hook as untrusted until you approve it in its own
+    review screen. So `init` reports `needs your approval` instead of claiming the refresh is on, and
+    `status` keeps saying so until you have. That approval is yours to give inside Codex; stratless
+    will not write it for you.
+  - **No transcripts are rescued, because none are at risk.** Codex has no 30-day reaper, so nothing
+    is switched off and nothing claims to have been saved. stratless still keeps its own copy.
+- **The naming call can borrow `codex exec`.** Previously the one step that needs a model looked for
+  `claude` and stopped if it was missing, so a machine with only Codex could read its whole history
+  and never get a profile. It now uses whichever assistant you have, Claude Code first where both are
+  installed, so nobody's profile changes hands on upgrade. One honest difference: the Claude borrow
+  runs with no tools at all, while the Codex borrow runs read-only in an empty directory with a
+  scratch config, which the operating system enforces rather than a flag. Neither can write anything
+  and neither can see your profile.
+
+### Fixed
+- **`init` no longer sets up an assistant you do not have.** On a machine with only Codex it was
+  creating a `~/.claude/settings.json`, arming a hook nothing would ever fire, and explaining Claude
+  Code's 30-day reaper. Each assistant on your machine is now set up on its own terms, and one that
+  is not installed is left alone entirely.
+- **The free read counted archived conversations twice.** Once you had run `init`, your history
+  existed both live and in stratless's own copy of it, and older transcripts (which carry no record
+  id) were counted from both. Your message counts and rates were inflated as a result. The live
+  conversation now wins, and the copy is used only when the original is gone, which is the case it
+  exists for.
+
 ## [0.8.1] · 2026-08-01 · the same history, wherever it lives
 
 A profile should describe you, and nothing else. This one quietly described your filesystem too.

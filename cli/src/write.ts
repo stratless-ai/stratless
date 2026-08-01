@@ -25,7 +25,7 @@
  * `# Who you are working with` header and the format marker when it installs, so repeating the
  * header here would double it.
  */
-import { findAssistant, runClaude } from './claude.js';
+import { pickBrain } from './brains.js';
 import { loadCategories } from './categories.js';
 import { loadAssignments } from './assign.js';
 import { loadMoments, type Moment } from './moments.js';
@@ -83,11 +83,13 @@ function candidatesFor(name: string, labelled: Labelled[]): Moment[] {
 
 const VOICE_SCHEMA = JSON.stringify({
   type: 'object',
+  additionalProperties: false,
   properties: {
     picks: {
       type: 'array',
       items: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           name: { type: 'string' },
           section: { type: 'string' },
@@ -123,7 +125,6 @@ export interface Voiced {
  *  writes a short decode for the "In the moment" key. A category with no clear quote drops from the
  *  file rather than ship a line whose receipt fails. */
 export function pickAndVoice(
-  bin: string,
   work: { name: string; description: string; lift: number; cands: Moment[] }[],
 ): Map<string, Voiced> {
   const body = work
@@ -163,9 +164,12 @@ Reply with JSON only:
 {"picks":[{"name":"<exact name>","section":"frame|judge|register|none","line":"<instruction>","quote":<number or 0>,"signal":"<six words or fewer>"}]}
 
 ${body}`;
-  const raw = runClaude(bin, prompt, 'sonnet', 'write', QUOTE_TIMEOUT_MS, VOICE_SCHEMA, 0); // thinking capped
+  const brain = pickBrain();
+  if (!brain) return new Map<string, Voiced>();
+  const answer = brain.ask(prompt, { role: 'main', feature: 'write', timeoutMs: QUOTE_TIMEOUT_MS, schema: VOICE_SCHEMA });
   const out = new Map<string, Voiced>();
-  if (!raw) return out;
+  if (!answer) return out;
+  const raw = answer.text;
   const m = raw.match(/\{[\s\S]*\}/);
   if (!m) return out;
   try {
@@ -427,8 +431,7 @@ export function buildProfile(): { text: string; meta: ProfileMeta } | null {
     readVoiced(),
   );
   const missingWork = work.filter((w) => plan.missing.includes(w.name));
-  const bin = findAssistant();
-  const fresh = bin && missingWork.length ? pickAndVoice(bin, missingWork) : new Map<string, Voiced>();
+  const fresh = missingWork.length ? pickAndVoice(missingWork) : new Map<string, Voiced>();
   if (fresh.size) {
     const voicedAt = new Date().toISOString();
     rememberVoiced(

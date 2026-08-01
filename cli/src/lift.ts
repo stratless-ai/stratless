@@ -36,7 +36,7 @@ import { readFileSync } from 'node:fs';
 import { atomicWriteFileSync } from './atomic.js';
 import { dot } from './cluster.js';
 import { loadEngine } from './engine.js';
-import { runClaude } from './claude.js';
+import { pickBrain } from './brains.js';
 import type { Category } from './categories.js';
 import {
   gapCandidates,
@@ -322,11 +322,13 @@ export function nextPatchState(patch: Patch, nowMs: number): { state: PatchState
 
 const PATCH_SCHEMA = JSON.stringify({
   type: 'object',
+  additionalProperties: false,
   properties: {
     rules: {
       type: 'array',
       items: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           name: { type: 'string' },
           x: { type: 'string' },
@@ -384,7 +386,8 @@ export function patchVoiceJobs(labelled: Labelled[], candidates: GapCandidate[])
   }));
 }
 
-export function voicePatches(bin: string, jobs: PatchVoiceJob[]): Map<string, { x: string; doThis: string; y: string; clause: string }> {
+export function voicePatches(jobs: PatchVoiceJob[]): Map<string, { x: string; doThis: string; y: string; clause: string }> {
+  const brain = pickBrain();
   const body = jobs
     .map((j) => {
       const parts = [
@@ -424,8 +427,10 @@ export function voicePatches(bin: string, jobs: PatchVoiceJob[]): Map<string, { 
   ].join('\n');
 
   const out = new Map<string, { x: string; doThis: string; y: string; clause: string }>();
-  const reply = runClaude(bin, prompt, 'sonnet', 'lift', VOICE_TIMEOUT_MS, PATCH_SCHEMA, 0);
-  if (!reply) return out;
+  if (!brain) return out;
+  const answer = brain.ask(prompt, { role: 'main', feature: 'lift', timeoutMs: VOICE_TIMEOUT_MS, schema: PATCH_SCHEMA });
+  if (!answer) return out;
+  const reply = answer.text;
   try {
     const m = reply.match(/\{[\s\S]*\}/);
     if (!m) return out;
@@ -454,7 +459,6 @@ export interface LiftRunResult {
 }
 
 export function runLift(
-  bin: string | undefined,
   labelled: Labelled[],
   categories: Category[],
   nowMs: number,
@@ -550,9 +554,9 @@ export function runLift(
   const covered = new Set(store.patches.filter((p) => p.mode === 1).map((p) => p.home));
   const candidates = gapCandidates(labelled, categories).filter((c) => !covered.has(c.name));
   let minted = 0;
-  if (bin && candidates.length && engineView) {
+  if (candidates.length && engineView) {
     const jobs = patchVoiceJobs(labelled, candidates);
-    const voiced = voicePatches(bin, jobs);
+    const voiced = voicePatches(jobs);
     for (const j of jobs) {
       const v = voiced.get(j.candidate.name);
       if (!v) continue;

@@ -25,21 +25,36 @@ useSeo({
 
         <h2>What stratless reads</h2>
         <p>
-          Your coding assistant's own conversation history, which is already on your disk. Claude
-          Code keeps it in <code>~/.claude/projects</code>, and stratless keeps its own archive copy
-          in <code>~/.stratless/archive</code> so the assistant's 30-day cleanup cannot eat it. It
-          reads those transcripts locally. <strong>It does not send them anywhere.</strong>
+          Your coding assistants' own conversation history, which is already on your disk. Claude
+          Code keeps it in <code>~/.claude/projects</code> and Codex keeps it in
+          <code>~/.codex/sessions</code>; stratless reads whichever of those are actually present,
+          and keeps its own archive copy in <code>~/.stratless/archive</code>. That copy exists
+          because Claude Code deletes its transcripts after 30 days. Codex has no such timer, so
+          nothing there is being rescued from anything. It reads those transcripts locally.
+          <strong>It does not send them anywhere.</strong>
         </p>
 
         <h2>What it writes, and where</h2>
         <p>
           Everything stratless produces is a plain text file on your machine, all of it under
           <code>~/.stratless</code>: the moments and scores it derives, and your profile, the
-          canonical <code>HUMAN.md</code>. The only thing it writes anywhere else is a clearly
-          marked block in your <code>CLAUDE.md</code> that points at it. Your profile lives in
-          stratless's own directory, not inside any assistant's, so uninstalling a tool never takes
-          it with you. All of it is yours to read, edit, or delete. <code>stratless stop</code>
-          unloads the profile in one command.
+          canonical <code>HUMAN.md</code>. Your profile lives in stratless's own directory, not
+          inside any assistant's, so uninstalling a tool never takes it with you. All of it is
+          yours to read, edit, or delete. <code>stratless stop</code> unloads the profile in one
+          command.
+        </p>
+        <p>
+          Outside that directory it touches only what it must, and only for assistants you actually
+          have. In a clearly marked block it does not write over: a one-line pointer in your
+          <code>CLAUDE.md</code>, and, because Codex expands no import syntax, the profile text
+          itself in your <code>~/.codex/AGENTS.md</code> (or <code>AGENTS.override.md</code> when
+          you keep one, since Codex reads that instead). It also adds the after-session refresh:
+          a <code>Stop</code> hook in <code>~/.claude/settings.json</code>, a
+          <code>SessionEnd</code> hook in <code>~/.codex/hooks.json</code>, and on Claude Code only,
+          the <code>cleanupPeriodDays</code> setting that stops the 30-day deletion. Codex asks you
+          to approve its hook before it will run; that approval is yours to give inside Codex, and
+          stratless never writes it for you. An assistant you do not have is never written to at
+          all.
         </p>
 
         <h2>Network calls, the tiered truth</h2>
@@ -51,8 +66,21 @@ useSeo({
           all: reading your history, finding the patterns in it, and every count in your profile are
           plain arithmetic. One step needs judgment, so stratless borrows
           <strong>the coding assistant you already have installed</strong> and shells out to it
-          (<code>claude -p</code>), on your own subscription or key. That request goes to your
-          assistant's provider exactly as it does when you use it normally.
+          (<code>claude -p</code>, or <code>codex exec</code>), on your own subscription or key.
+          That request goes to your assistant's provider exactly as it does when you use it
+          normally.
+        </p>
+        <p>
+          A borrowed call is deliberately given nothing: no instruction files, no memory, no session
+          to resume, so it cannot read the profile it is helping to write. <strong>How that is
+          enforced differs by assistant, and the difference is worth stating rather than
+          averaging.</strong> The Claude Code borrow runs with no tools at all, so it has no way to
+          touch your disk. The Codex borrow has no equivalent switch; instead it runs in a read-only
+          sandbox, in an empty directory, with a scratch configuration, which your operating system
+          enforces rather than a flag we pass. That is stronger in one respect, since it does not
+          depend on a setting being honored, and weaker in another: it is containment rather than an
+          absence of hands, so a borrowed Codex call could in principle read a file where a borrowed
+          Claude call could not. Neither can write anything, and neither is given your profile.
         </p>
         <p>
           <strong>2. A one-time engine download, at <code>init</code>, with your consent.</strong>

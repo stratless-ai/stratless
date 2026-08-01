@@ -1,9 +1,10 @@
 # stratless — agent guide
 
 Monorepo for **stratless**: a local, private person-layer profiler. It reads your AI coding
-assistant's own transcripts, breaks each session into moments, discovers the recurring things you do
-from your own history, counts them, and writes a profile of the person (`HUMAN.md`) that loads into
-the assistant so it stops talking over your head or under it. No server, no API key, nothing leaves
+assistants' own transcripts (Claude Code and Codex today), breaks each session into moments,
+discovers the recurring things you do from your own history, counts them, and writes ONE profile of
+the person (`HUMAN.md`) that loads back into each of them so they stop talking over your head or
+under it. No server, no API key, nothing leaves
 the machine. (Pipeline: `moments → shape → embed → cluster → name → count → lift → write`.)
 
 This is the **project layer** (this codebase). Don't confuse it with `HUMAN.md`, which is the
@@ -11,7 +12,7 @@ product's *output*: a profile of a person.
 
 ## Layout
 
-- `cli/` — the tool. TypeScript, **zero** runtime deps (the embedding runtime arrives at `init`'s consent, never via npm — see `cli/AGENTS.md`), published standalone to npm.
+- `cli/` — the tool. TypeScript, **zero** runtime deps (the embedding runtime arrives at `init`'s consent, never via npm — see `cli/AGENTS.md`), published standalone to npm. Per-assistant code sits behind `cli/src/seam.ts`; adding one costs a file per leg and no engine edits.
 - `runtime/` — `@stratless/runtime`: the embedding runtime (transformers.js + ONNX WASM), pre-bundled by us, fetched once at consent. Zero deps of its own; changes here are versioned rebuild events (see `runtime/AGENTS.md`).
 - `web/` — stratless.com. Nuxt 3, no modules, prerendered to static HTML.
 

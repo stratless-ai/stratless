@@ -23,9 +23,9 @@
  * naming call is synchronous (the stop-latency caveat, flagged for the worker pass).
  */
 import { existsSync } from 'node:fs';
-import { findAssistant } from './claude.js';
+import { brains, pickBrain } from './brains.js';
 import { buildMoments, loadMoments } from './moments.js';
-import { driftCheck } from './reader.js';
+import { firstDrift } from './adapters.js';
 import { loadCategories } from './categories.js';
 import { loadAssignments, pendingMoments } from './assign.js';
 import { join as joinLabelled, scoreboard } from './count.js';
@@ -34,10 +34,11 @@ import { buildProfile, looksLikeProfile } from './write.js';
 import { coldBuild, engineReady, grow } from './engine.js';
 import { runtimePresent } from './embed.js';
 import { estimateBuild, estimateLine } from './estimate.js';
-import { injectProfile, humanMdPath, installedVersion } from './load.js';
+import { humanMdPath, installedVersion, writeProfile } from './profile.js';
+import { loadEverywhere } from './adapters.js';
 import { startRun } from './stopwatch.js';
 import { dailyCheck } from './notify.js';
-import { refreshArmed } from './init.js';
+import { refreshArmed } from './rhythm-claude-code.js';
 import { readState, writeState, writeRender, flushDue, flushCooldownMs, coldBuildRequested, clearColdBuildRequest } from './state.js';
 import { readUsage, diffUsage, fmtTokens } from './usage.js';
 import { acquireLock, releaseLock, lockFilePath } from './worker.js';
@@ -125,8 +126,15 @@ export async function runWorker(): Promise<number> {
 
   try {
     writeProgress({ phase: 'starting', startedAt });
-    const bin = findAssistant();
-    if (!bin) return fail(['stratless needs your assistant to read your history — is `claude` installed?']);
+    // WHICH MODEL WILL DO THE THINKING — not which assistant's history we read. Those are
+    // different questions with different answers, and the commonest machine answers them
+    // differently: one tool's transcripts, another tool's model.
+    const brain = pickBrain();
+    if (!brain) {
+      return fail([
+        `stratless borrows a model you already have to name what it found — install ${brains.map((b) => b.displayName).join(' or ')}, then run \`stratless update\``,
+      ]);
+    }
 
     const summary: string[] = [];
 
@@ -141,8 +149,8 @@ export async function runWorker(): Promise<number> {
       // Zero moments is usually a fresh start — but if the person's own transcripts are substantial
       // and the reader still got nothing, the log format moved under us. Refuse loudly rather than
       // quietly reporting "no conversations" over a profile we cannot honestly build. (v3 canary.)
-      const drift = driftCheck();
-      if (!drift.ok) return fail(drift.reason!.split('\n'));
+      const drift = firstDrift();
+      if (drift) return fail(drift.reason!.split('\n'));
       summary.push('no conversations found yet — talk to your assistant a few times, then run `stratless update`');
     } else {
       let cats = loadCategories();
@@ -186,7 +194,7 @@ export async function runWorker(): Promise<number> {
           // The consent is now being taken up: consume the durable flag so it is honored exactly once.
           clearColdBuildRequest();
           const buildStart = Date.now();
-          const dr = await coldBuild(bin, {
+          const dr = await coldBuild({
             onProgress: (l: string) => writeProgress({ phase: 'starting', startedAt, summary: [l] }),
             shouldStop: () => stopRequested,
           });
@@ -196,6 +204,12 @@ export async function runWorker(): Promise<number> {
             changed = true;
             summary.push(
               `found ${dr.categories} pattern${dr.categories === 1 ? '' : 's'} in ${dr.scored} moment${dr.scored === 1 ? '' : 's'} — fingerprinted on this machine, one call to name them`,
+            );
+          } else if (dr.unnamed) {
+            // Say what actually happened. The patterns are there and cached; only the naming call
+            // failed, so the next run picks up exactly where this one stopped.
+            summary.push(
+              `found ${dr.piles} pattern${dr.piles === 1 ? '' : 's'}, but ${brain.displayName} did not name them — nothing was lost, run \`stratless update\` to try again`,
             );
           } else if (dr.noModel) {
             // A wrong reason is worse than none: without this the person is told there is not enough
@@ -271,7 +285,7 @@ export async function runWorker(): Promise<number> {
         // decides what exists; the model only words each patch once. A moved patch set forces the
         // profile rebuild below.
         const liftStart = Date.now();
-        const lr = runLift(bin, labelledAll, cats, Date.now());
+        const lr = runLift(labelledAll, cats, Date.now());
         sw.stage('lift', Date.now() - liftStart, lr.minted + lr.retired);
         if (lr.minted) summary.push(`${lr.minted} patch${lr.minted === 1 ? '' : 'es'} minted — the counts decided; the model only worded it`);
         if (lr.retired) summary.push(`${lr.retired} patch${lr.retired === 1 ? '' : 'es'} retired — the tune thinned`);
@@ -282,7 +296,12 @@ export async function runWorker(): Promise<number> {
           sw.stage('write', Date.now() - writeStart, profile ? 1 : 0);
           if (profile && looksLikeProfile(profile.text)) {
             const builtAt = new Date().toISOString(); // one stamp for BOTH the HUMAN.md header and the sidecar — they must agree
-            injectProfile(profile.text, undefined, undefined, builtAt); // writes ~/.stratless/HUMAN.md AND points CLAUDE.md at it — the load
+            // Two steps, deliberately visible: write the one artifact, then get each assistant to
+            // read it. The second is per-tool and the first never is — and it runs on EVERY build
+            // rather than at install, because one of the two delivery shapes is a copy and a copy
+            // written once is a profile that quietly ages.
+            writeProfile(profile.text, undefined, builtAt);
+            loadEverywhere();
             writeRender('profile', { builtAt, sessions: profile.meta.sessions, exchanges: profile.meta.moments, categories: loadCategories().length });
             summary.push(
               `profile written and loaded · ${profile.meta.frame} to offer + ${profile.meta.judge} to catch + ${profile.meta.register} register${profile.meta.rules ? ` + ${profile.meta.rules} to move` : ''}${profile.meta.shorthand ? ` + ${profile.meta.shorthand} shorthand handles` : ''}`,

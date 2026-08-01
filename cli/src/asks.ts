@@ -34,7 +34,6 @@ import { adjacencyOf, RECENT_DAYS } from './count.js';
 import type { Moment } from './moments.js';
 import { termsOf } from './terms.js';
 import { phrasesOf, isMachineArtifact, norm, allStop } from './shorthand.js';
-import { DEFAULT_ROOTS } from './reader.js';
 import { iterateExchangesNewestFirst } from './exchange.js';
 
 /* ——— the ask-ritual floors (measured 2026-07-29) ——— */
@@ -108,7 +107,7 @@ export interface AnswerWalk {
   projects: Map<string, string>;
 }
 
-export function walkAnswers(roots: string[] = DEFAULT_ROOTS): AnswerWalk {
+export function walkAnswers(roots?: string[]): AnswerWalk {
   const df = new Map<string, number>();
   const heads = new Map<string, string>();
   const projects = new Map<string, string>();

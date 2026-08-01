@@ -10,7 +10,8 @@ import { test } from 'node:test';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readTurns, readSessions, isTypedMessage, stripWrappers, dayKey, PASTE_BOUND, driftCheck, transcriptFiles } from './reader.js';
+import { readTurns, readSessions, stripWrappers, driftCheck, transcriptFiles } from './record-claude-code.js';
+import { isTypedMessage, dayKey, PASTE_BOUND } from './seam.js';
 
 let n = 0;
 const rec = (o: Record<string, unknown>) => ({

@@ -34,7 +34,7 @@
  */
 import { createInterface } from 'node:readline';
 import { existsSync, readFileSync } from 'node:fs';
-import { humanMdPath } from './load.js';
+import { humanMdPath } from './profile.js';
 
 /** The protocol version we answer with when a client does not name one. */
 const FALLBACK_PROTOCOL = '2025-06-18';

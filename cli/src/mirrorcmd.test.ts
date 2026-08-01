@@ -77,10 +77,14 @@ test('mirror reads the live logs with no archive and no init', () => {
   assert.ok(!existsSync(join(home, '.stratless')), 'the read created nothing under ~/.stratless');
 });
 
-test('mirror with no history guides instead of crashing', () => {
-  const home = makeHome('empty'); // .claude exists, but no projects dir
+test('mirror with no history guides instead of crashing, naming a tool they actually have', () => {
+  // `.claude` exists but holds no projects dir, so no Record detects — and the guide must then name
+  // no product at all. Telling someone to "talk to Claude Code" is wrong twice over on a machine
+  // that runs something else: it fails AND it advertises software they may never have installed.
+  const home = makeHome('empty');
   const out = run(home, 'mirror'); // execFileSync throws on non-zero exit — reaching here proves exit 0
-  assert.match(out, /talk to Claude Code a few times/i, 'the friendly first-run guide, not a crash or a scary 0');
+  assert.match(out, /talk to your AI coding assistant a few times/i, 'the friendly first-run guide, not a crash or a scary 0');
+  assert.doesNotMatch(out, /Claude Code/, 'and it never names a tool this machine has no sign of');
 });
 
 test('mirror has zero side effects — settings.json untouched, ~/.stratless never created', () => {

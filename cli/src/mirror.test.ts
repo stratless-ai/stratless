@@ -11,7 +11,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mirrorOf, mirrorOfArchive, mirrorOfArchiveAsync, repoRoots, personTopics, type Mirror } from './mirror.js';
-import type { Turn } from './reader.js';
+import type { Turn } from './seam.js';
 
 let n = 0;
 const turn = (o: Partial<Turn>): Turn => ({
@@ -117,10 +117,12 @@ test('tool mix counts tool_use blocks, not assistant turns', () => {
 
 test('delegation: runs count every spawn, the mix names only what the spawn named', () => {
   const m = mirrorOf([
-    // three spawns in one turn: two named, one the transcript never labelled.
-    turn({ role: 'assistant', tools: ['Task', 'Task', 'Task', 'Bash'], delegations: ['Explore', 'Explore'] }),
-    turn({ role: 'assistant', tools: ['Agent'], delegations: ['Plan'] }),
-    turn({ role: 'assistant', tools: ['Bash'] }),
+    // three spawns in one turn: two named, one the transcript never labelled. The COUNT is what the
+    // Record reports (it is the only layer that knows which of its tools mean "handoff"); the names
+    // are what the spawns declared. The gap between them is the unnamed one.
+    turn({ role: 'assistant', tools: ['Task', 'Task', 'Task', 'Bash'], delegations: ['Explore', 'Explore'], delegationCount: 3 }),
+    turn({ role: 'assistant', tools: ['Agent'], delegations: ['Plan'], delegationCount: 1 }),
+    turn({ role: 'assistant', tools: ['Bash'], delegationCount: 0 }),
   ]);
   assert.equal(m.work.agentRuns, 4, 'four spawns — the unnamed one is still work handed off');
   assert.deepEqual(m.work.agentMix[0], { name: 'Explore', runs: 2, share: 0.5 });
@@ -136,9 +138,9 @@ test('delegation: a person who never delegates has no runs and no mix', () => {
 
 test('skills: loads count from the tally, the mix names only what named itself', () => {
   const m = mirrorOf([
-    turn({ role: 'assistant', tools: ['Skill', 'Skill', 'Skill'], skills: ['research', 'research'] }),
-    turn({ role: 'assistant', tools: ['Skill', 'Bash'], skills: ['push'] }),
-    turn({ role: 'assistant', tools: ['Bash'] }),
+    turn({ role: 'assistant', tools: ['Skill', 'Skill', 'Skill'], skills: ['research', 'research'], skillCount: 3 }),
+    turn({ role: 'assistant', tools: ['Skill', 'Bash'], skills: ['push'], skillCount: 1 }),
+    turn({ role: 'assistant', tools: ['Bash'], skillCount: 0 }),
   ]);
   assert.equal(m.work.skillUses, 4, 'four loads — the unnamed one still happened');
   assert.deepEqual(m.work.skillMix[0], { name: 'research', uses: 2, share: 0.5 });

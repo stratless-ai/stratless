@@ -32,8 +32,8 @@ useSeo({
 
         <h2>What it does, and what it does not promise</h2>
         <p>
-          stratless reads your coding assistant's own conversation history and writes a profile of
-          you (<code>HUMAN.md</code>) that your assistant loads at the start of each session. It is
+          stratless reads your coding assistants' own conversation history and writes a profile of
+          you (<code>HUMAN.md</code>) that your assistants load at the start of each session. It is
           built to <strong>refuse rather than guess</strong>: when it cannot read your history
           honestly, it says nothing. But it is software, and software is wrong sometimes.
         </p>

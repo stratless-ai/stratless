@@ -26,7 +26,7 @@ npx stratless init
 
 That does two things, and the first one is urgent:
 
-1. **Stops the reaper.** Claude Code deletes your transcripts after 30 days, per file, so your history rots from the back even in a project you open every day. `init` stops that and archives everything it can still reach. Whatever has already aged out is gone. This is the only part of stratless you cannot do later.
+1. **Stops the reaper.** Claude Code deletes your transcripts after 30 days, per file, so your history rots from the back even in a project you open every day. `init` stops that and archives everything it can still reach. Whatever has already aged out is gone. This is the only part of stratless you cannot do later. (Codex has no such timer; `init` still keeps its own copy of your rollouts.)
 2. **Turns it on.** From here, stratless keeps your history, and after each session it reads what is new in the background and keeps your profile current. `stop` turns that off whenever you want.
 
 Building the full profile is a separate yes: `init` shows you a free read and an honest quote first, and if you say yes it fetches the local engine once — a ~3MB runtime plus a ~34MB open-weights model, itemized before you answer — and the pattern-finding runs on your machine, offline, from then on. The npm package itself has zero dependencies; nothing heavier than the tool arrives until that yes.
@@ -48,5 +48,5 @@ Full reference on the [Commands](/docs/commands) page.
 ## Requirements
 
 - **Node 18+**
-- **Claude Code**, the only assistant stratless reads today. Once your profile exists it can reach other assistants over MCP. More readers roll out one at a time. See [Assistants](/docs/assistants).
-- **No API key.** Reading and grouping your history run locally; stratless borrows the assistant you already have (`claude -p`) only to name what it found and write the profile, on your own subscription. Nothing new to install, and no separate bill.
+- **Claude Code or Codex** — the two assistants stratless reads today, and either is enough. Use both and they read as one person. Once your profile exists it can reach further assistants over MCP. More readers roll out one at a time. See [Assistants](/docs/assistants).
+- **No API key.** Reading and grouping your history run locally; stratless borrows the assistant you already have (`claude -p`, or `codex exec`) only to name what it found and write the profile, on your own subscription. Nothing new to install, and no separate bill.

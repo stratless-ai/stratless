@@ -14,13 +14,16 @@
  *     manufactured a two-peak "deep work" finding that ranked #1 at a 30-minute gap threshold and
  *     #3/#6/#8 at 10/15/45. It measured the parameter, not the person.
  *
- * Everything reads from reader.ts, which already decided what counts as the person talking. Nothing
- * here re-derives that: seven passes that each decided for themselves produced seven different
- * message counts spanning 44%.
+ * Everything reads through the Records (adapters.ts), each of which already decided what counts as
+ * the person talking in its own tool's format. Nothing here re-derives that: seven passes that each
+ * decided for themselves produced seven different message counts spanning 44%. Nor does anything
+ * here know a tool's vocabulary — a metric that recognised one assistant's tool names would report
+ * a confident zero for every other one, which is the failure the rule at the top forbids.
  *
  * This module computes. It does not print — the display layer is a separate concern.
  */
-import { readTurns, readTitles, isTypedMessage, dayKey, type Turn } from './reader.js';
+import { isTypedMessage, dayKey, type Turn } from './seam.js';
+import { allTurns, recordFor, records } from './adapters.js';
 
 /** A friction event, kept whole so any count here can be dereferenced back to the moment. */
 export interface FrictionEvent {
@@ -89,15 +92,17 @@ export interface Mirror {
     branchNames: number;
   };
   work: {
-    /** one unit: one tool_use block in an assistant reply */
+    /** one unit: one tool call in an assistant reply, in whatever that assistant calls its tools */
     toolMix: { name: string; calls: number; share: number }[];
     toolCalls: number;
-    /** one unit: one spawn of another agent (a `Task`/`Agent` call), named or not */
+    /** one unit: one spawn of another agent, named or not — each Record counts its own, because what
+     *  a handoff is CALLED is the tool's vocabulary and never the engine's */
     agentRuns: number;
     /** the NAMED share of those runs, by agent type. Unnamed spawns count in `agentRuns` and
      *  appear nowhere here — the mix describes what it can name, never the remainder. */
     agentMix: { name: string; runs: number; share: number }[];
-    /** one unit: one skill load (a `Skill` call), whoever asked for it */
+    /** one unit: one packaged procedure loaded, whoever asked for it. Counted by the Record, which is
+     *  the only layer that knows how its tool records a load at all */
     skillUses: number;
     /** the NAMED share of those loads. Same rule as `agentMix`: what it can name, never more. */
     skillMix: { name: string; uses: number; share: number }[];
@@ -196,6 +201,11 @@ export function mirrorOf(turns: Iterable<Turn>, titles: { aiTitle: string; sessi
   const tools = new Map<string, number>();
   const agents = new Map<string, number>();
   const skills = new Map<string, number>();
+  // The COUNTS, summed from what each Record reported rather than from tool names the engine
+  // recognises. `undefined` while no Record has said anything either way — a tool that cannot
+  // record handoffs must leave the row silent, not report none.
+  let agentRuns: number | undefined;
+  let skillUses: number | undefined;
   const events: FrictionEvent[] = [];
   const sessions = new Set<string>();
 
@@ -218,6 +228,8 @@ export function mirrorOf(turns: Iterable<Turn>, titles: { aiTitle: string; sessi
       for (const name of t.tools ?? []) tools.set(name, (tools.get(name) ?? 0) + 1);
       for (const kind of t.delegations ?? []) agents.set(kind, (agents.get(kind) ?? 0) + 1);
       for (const name of t.skills ?? []) skills.set(name, (skills.get(name) ?? 0) + 1);
+      if (t.delegationCount !== undefined) agentRuns = (agentRuns ?? 0) + t.delegationCount;
+      if (t.skillCount !== undefined) skillUses = (skillUses ?? 0) + t.skillCount;
       continue;
     }
 
@@ -287,10 +299,13 @@ export function mirrorOf(turns: Iterable<Turn>, titles: { aiTitle: string; sessi
   for (const [dir, branch] of rawPairs) branchPairs.add((rootOf.get(dir) ?? dir) + ' ' + branch);
 
   const totalToolCalls = [...tools.values()].reduce((a, b) => a + b, 0);
-  // The run count comes from the SPAWNS, not the named types: a spawn whose type we cannot read
-  // is still work handed off, and dropping it would undercount the fleet.
-  const totalAgentRuns = (tools.get('Task') ?? 0) + (tools.get('Agent') ?? 0);
-  const totalSkillUses = tools.get('Skill') ?? 0;
+  // The run count comes from the SPAWNS, not the named types: a spawn whose type we cannot read is
+  // still work handed off, and dropping it would undercount the fleet. Each Record reports its own
+  // count (see `Turn.delegationCount`) — this used to look for tools literally named `Task`,
+  // `Agent` and `Skill`, which was one assistant's vocabulary sitting in the engine and silently
+  // discarded every load an assistant using other words had already recorded.
+  const totalAgentRuns = agentRuns ?? 0;
+  const totalSkillUses = skillUses ?? 0;
   const spanDays = first && last ? Math.round((Date.parse(last) - Date.parse(first)) / 86_400_000) + 1 : 0;
 
   return {
@@ -357,10 +372,45 @@ export function mirrorOf(turns: Iterable<Turn>, titles: { aiTitle: string; sessi
   };
 }
 
-/** Read an archive directory and compute its mirror. Titles are a second, lighter pass — they live
- *  in a record type readTurns drops, and can only be filtered by joining on the sessions it kept. */
+/** One directory's turns, read by the Record that understands the format they are written in.
+ *  Titles are a second, lighter pass — they live in a record type the turn walk drops, and can only
+ *  be filtered by joining on the sessions it kept. A Record that writes no titles simply has none,
+ *  and the topic row that reads them says less rather than guessing. */
+function* turnsIn(dir: string): Generator<Turn> {
+  for (const s of recordFor(dir).sessions([dir])) yield* s.turns;
+}
+const titlesIn = (dir: string): { aiTitle: string; sessionId: string }[] => recordFor(dir).titles?.(dir) ?? [];
+
+/** Read an archive directory and compute its mirror. */
 export function mirrorOfArchive(dir: string): Mirror {
-  return mirrorOf(readTurns([dir]), readTitles(dir));
+  return mirrorOf(turnsIn(dir), titlesIn(dir));
+}
+
+/**
+ * EVERY ASSISTANT ON THIS MACHINE, as one person.
+ *
+ * The free read's real shape: someone who works in two tools is still one person with one rhythm,
+ * one way of writing, one friction rate. Reading a single directory answers a narrower question
+ * ("what happened in THIS tool"), and the surfaces used to do exactly that — which meant a machine
+ * running an assistant we CAN read, but not the one whose directory was hardcoded, was told it had
+ * no conversations at all, while being advised to go talk to a product it had never installed.
+ * Measured on a real single-assistant machine, 2026-07-31: every row below was reachable and the
+ * headline surface printed none of them.
+ *
+ * Titles come from whichever Records write them, and a Record that writes none contributes
+ * nothing rather than a gap — the topic row simply says less. Every other row is a sum over
+ * everything, which is sound because each number here is the same unit whoever produced it: a
+ * message is a message, a day is a day, a stop is a stop.
+ */
+export async function mirrorOfEverything(): Promise<Mirror> {
+  const turns: Turn[] = [];
+  let i = 0;
+  for (const t of allTurns()) {
+    turns.push(t);
+    if ((++i & 63) === 0) await new Promise((r) => setImmediate(r)); // yield so a spinner can tick
+  }
+  const titles = records().flatMap((r) => (r.titles ? r.roots().flatMap((root) => r.titles!(root)) : []));
+  return mirrorOf(turns, titles);
 }
 
 /**
@@ -372,9 +422,9 @@ export function mirrorOfArchive(dir: string): Mirror {
 export async function mirrorOfArchiveAsync(dir: string): Promise<Mirror> {
   const turns: Turn[] = [];
   let i = 0;
-  for (const t of readTurns([dir])) {
+  for (const t of turnsIn(dir)) {
     turns.push(t);
     if ((++i & 63) === 0) await new Promise((r) => setImmediate(r)); // yield so the spinner can tick
   }
-  return mirrorOf(turns, readTitles(dir));
+  return mirrorOf(turns, titlesIn(dir));
 }
