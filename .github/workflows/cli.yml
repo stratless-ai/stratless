@@ -49,3 +49,93 @@ jobs:
           npx tsc
           node dist/index.js --help | grep -q "stratless profile"
           echo "✓ a clean clone builds and runs"
+
+  # THE RELEASE PATH, CHECKED ON A PULL REQUEST — where a red run is free.
+  #
+  # publish.yml runs ONLY on a tag push or a manual dispatch, so for its whole life nothing tested it
+  # until the one run that cannot be taken back. That is how the release-title parser stayed broken
+  # for nine releases (#61): it split the changelog heading on an em dash after the changelog had
+  # moved to "·", found nothing, and fell through to a bare "stratless x.y.z". A poorer title is not
+  # a failure, so no run ever went red and nobody looked.
+  #
+  # The publish STEP itself can never be tested here and this job does not try: a fork PR gets no
+  # id-token, and publishing is one-way by definition. That half is covered by publish.yml's own
+  # workflow_dispatch trust probe, run by hand. Everything AROUND it is a pure function of the repo,
+  # and that is exactly what runs below.
+  release-gates:
+    name: release gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with: { version: 9.15.0 }
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with: { node-version: 22, cache: pnpm }
+
+      # A workflow that does not parse does not run, and GitHub reports that as a silent non-event
+      # rather than a failure — the same shape of bug as the one above.
+      - name: every workflow parses
+        run: |
+          set -euo pipefail
+          for f in .github/workflows/*.yml; do
+            python3 -c 'import yaml,sys; yaml.safe_load(open(sys.argv[1]))' "$f" \
+              || { echo "::error file=$f::not valid YAML"; exit 1; }
+            echo "  ok  $f"
+          done
+
+      # publish.yml's own date gate, moved to where it is cheap. It fires there on the tag, when the
+      # only remedy is to delete the tag and start over; here it fires on the PR that bumped the
+      # version, which is the moment the date was actually forgotten. (0.3.1 and 0.3.2 both shipped
+      # with their date still reading "unreleased", both caught afterwards.)
+      - name: the changelog carries a dated section for this version
+        run: |
+          set -euo pipefail
+          v="$(node -p "require('./cli/package.json').version")"
+          echo "  cli/package.json is $v"
+          grep -qE "^## \[$v\][^0-9]*[0-9]{4}-[0-9]{2}-[0-9]{2}" cli/CHANGELOG.md \
+            || { echo "::error::CHANGELOG [$v] has no release date — a tag would be refused"; exit 1; }
+          echo "  ✓ dated section present"
+
+      # The exact script publish.yml calls, on the version this PR would ship.
+      - name: the release notes and title are what a tag would produce
+        run: |
+          set -euo pipefail
+          v="$(node -p "require('./cli/package.json').version")"
+          notes="$(.github/scripts/release-notes.sh --notes "$v")"
+          title="$(.github/scripts/release-notes.sh --title "$v")"
+          [ -n "${notes//[[:space:]]/}" ] || { echo "::error::release notes are empty"; exit 1; }
+          echo "  title would be: $title"
+          echo "  notes: $(wc -l <<<"$notes" | tr -d ' ') lines"
+          # THE ASSERTION THAT WOULD HAVE CAUGHT #61 — deliberately computed a different way from the
+          # script's, so this is a second opinion rather than the same code agreeing with itself. If
+          # the heading carries any words after the date, they have to reach the title.
+          tagline="$(python3 - "$v" <<'PY'
+          import re, sys
+          v = sys.argv[1]
+          head = next(l for l in open('cli/CHANGELOG.md') if l.startswith(f'## [{v}]'))
+          after = head.split('-', 2)[-1]                       # tail of the ISO date onwards
+          print(re.sub(r'^\d{2}\s*[^\w]*\s*', '', after).strip())
+          PY
+          )"
+          if [ -n "$tagline" ]; then
+            grep -qF -- "$tagline" <<<"$title" \
+              || { echo "::error::heading has a tagline ($tagline) but the title dropped it: $title"; exit 1; }
+            echo "  ✓ tagline survived into the title"
+          else
+            echo "  ✓ no tagline in the heading — a plain title is correct"
+          fi
+
+      # What npm would actually receive. `files` in package.json excludes the tests; nothing enforced
+      # that, and a stray test file in the tarball is a stranger downloading our fixtures.
+      - name: the tarball is what we mean to ship
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm --filter ./cli build
+          cd cli
+          files="$(npm pack --dry-run --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s)[0].files.map(f=>f.path).join("\n")))')"
+          echo "$files" | sed 's/^/    /'
+          grep -qE '\.test\.js$' <<<"$files" && { echo "::error::a test file is in the published tarball"; exit 1; }
+          grep -qx 'dist/index.js' <<<"$files" || { echo "::error::dist/index.js missing from the tarball"; exit 1; }
+          grep -qx 'CHANGELOG.md' <<<"$files" || { echo "::error::CHANGELOG.md missing from the tarball"; exit 1; }
+          echo "  ✓ $(wc -l <<<"$files" | tr -d ' ') files, no tests, entrypoint present"
