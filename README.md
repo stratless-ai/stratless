@@ -26,7 +26,7 @@ npx stratless
 
 That's the free read: what your AI already knows about you, computed on your machine, changing nothing. Like it? `npx stratless init` keeps it — it stops Claude Code's 30-day transcript reaper, archives your history, and builds the full profile after asking you once.
 
-No account. No API key. No cloud. The reading and the pattern-finding happen on your disk; the only borrowed thing is your own `claude`, which names what the maths found. **Nothing leaves your machine.** All you need: Claude Code installed and signed in, Node 18+, and a few sessions of history.
+No account. No API key. No cloud. The reading and the pattern-finding happen on your disk; the only borrowed thing is the assistant you already have, which names what the maths found. **Nothing leaves your machine.** All you need: Claude Code or Codex installed and signed in, Node 18+, and a few sessions of history. Use both and they read as one person.
 
 ## What it builds
 
@@ -44,7 +44,7 @@ No server. No training. No inference bill. Five steps, all on your machine — f
 
 | Step | What happens |
 | :--- | :--- |
-| **1&nbsp;·&nbsp;Read** | Every session is already on your disk in `~/.claude/projects`. stratless walks each one into moments: what you typed, and what the assistant was doing. |
+| **1&nbsp;·&nbsp;Read** | Every session is already on your disk, in `~/.claude/projects` or `~/.codex/sessions`. stratless walks each one into moments: what you typed, and what the assistant was doing. |
 | **2&nbsp;·&nbsp;Cluster** | A small open-weights model on your machine turns each moment into a fingerprint, and the recurring kinds of thing you do fall out as groups. Free, offline, a few minutes. Derived, not pre-matched: there is no category list to sort you into. One short call to your own assistant names what the maths found. |
 | **3&nbsp;·&nbsp;Count** | Each moment is counted: how often, over what span, rising, fading, or met (you stopped asking because the assistant already does it). Every number is counted by code, never guessed. |
 | **4&nbsp;·&nbsp;Tune** | Each refresh runs the loop that keeps the profile true: wherever the assistant measurably failed you, a patch enters the file — and deletes itself the moment the failure stops. The file gets shorter as you get better. |

@@ -28,17 +28,21 @@ watch(briefOpen, async (open) => {
   }
 })
 
-// Where HUMAN.md is headed. Claude Code is live; the rest are the roadmap. `logo` is a local monochrome
-// mark in /public/logos (from simple-icons, recolored via CSS mask); null = no clean official mark, so
-// it shows as a text wordmark (Codex — OpenAI has no distinct Codex mark; Aider — only a filtered wordmark).
+// Where HUMAN.md is headed. Claude Code and Codex are READ today; the rest either receive the profile
+// over MCP already or are readers still to come, and the note under the marquee says which is which.
+// `logo` is a local monochrome mark in /public/logos (from simple-icons, recolored via CSS mask);
+// null = no clean official mark, so it shows as a text wordmark (Aider — only a filtered wordmark).
+//
+// GEMINI CLI IS DELIBERATELY ABSENT. Google stopped serving it in June 2026 and replaced it with a
+// closed-source successor whose history cannot be read; the open codebase survives as Qwen Code.
+// Listing it promised support for a product that no longer exists. See /docs/assistants.
 const brands = [
   { name: 'Claude Code', logo: 'claudecode' },
-  { name: 'Gemini CLI', logo: 'googlegemini' },
-  { name: 'Codex CLI', logo: 'openai' },
+  { name: 'Codex', logo: 'openai' },
   { name: 'Cline', logo: 'cline' },
   { name: 'GitHub Copilot', logo: 'githubcopilot' },
-  { name: 'Aider', logo: null },
   { name: 'Cursor', logo: 'cursor' },
+  { name: 'Aider', logo: null },
   { name: 'Zed', logo: 'zedindustries' },
   { name: 'Windsurf', logo: 'windsurf' },
 ]
@@ -245,10 +249,10 @@ useHead({
     </div>
   </section>
 
-  <!-- THE ROADMAP — a monochrome marquee of where HUMAN.md is headed. Built on Claude Code. -->
+  <!-- THE ROADMAP — a monochrome marquee of where HUMAN.md is headed. Two read, many reached. -->
   <section class="section roadmap">
     <div class="container narrow">
-      <p class="eyebrow center">Built on Claude Code</p>
+      <p class="eyebrow center">Reads Claude Code and Codex</p>
       <h2 class="rm-h">Made for your AI. Meant for you.</h2>
     </div>
     <div class="marquee" aria-hidden="true">
@@ -260,7 +264,7 @@ useHead({
       </div>
     </div>
     <div class="container narrow">
-      <p class="quiet center rm-note">Live on Claude Code today. Aider, Gemini, Codex, Cline, Copilot and more, coming.</p>
+      <p class="quiet center rm-note">Claude Code and Codex today. Anything that speaks MCP can already receive your profile, and more readers arrive one tool at a time.</p>
     </div>
   </section>
 
