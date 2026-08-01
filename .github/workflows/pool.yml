@@ -1,0 +1,110 @@
+name: pool
+
+# THE POOL'S ONE GATE, MADE REAL IN CI.
+#
+# `pooled embedding is bit-identical to sequential` is the assertion that lets the 4-worker pool ship
+# with no stamp change and no rebuild: it may change the clock and nothing else. If it ever became
+# merely *similar*, every existing user's fingerprints would silently stop matching their frozen
+# centres, and the profile would drift for a reason that is not the person.
+#
+# It has never run here. The test is gated `{ skip: !runtimePresent() }` and the runtime only arrives
+# at `init`'s consent, so on every runner it has quietly skipped while passing on dev machines —
+# the one check that would catch worker-pool non-determinism, invisible in the only place that
+# checks strangers' code. Same shape as the mtime bug (#55): a gate that exists and never runs.
+#
+# NOT in cli.yml, on purpose. cli.yml deliberately has no paths filter on pull_request because its
+# two jobs are REQUIRED status checks, and a required check that never runs never passes. This one is
+# not required and should not be: it needs the network on a cache miss, and a required check with a
+# network dependency is a required check that fails on someone else's outage. So it lives here, with
+# a paths filter, and runs when something that could actually break it moves.
+on:
+  pull_request:
+    paths:
+      - 'cli/src/embed.ts'
+      - 'cli/src/embedworker.ts'
+      - 'cli/src/embedpool.test.ts'
+      - 'cli/src/fetch.ts'          # RUNTIME_VERSION and the weights hash live here
+      - '.github/workflows/pool.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'cli/src/embed.ts'
+      - 'cli/src/embedworker.ts'
+      - 'cli/src/embedpool.test.ts'
+      - 'cli/src/fetch.ts'
+      - '.github/workflows/pool.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  identity:
+    name: pooled embedding is bit-identical
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with: { version: 9.15.0 }
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with: { node-version: 22, cache: pnpm }
+
+      # The cache key IS the engine's identity — the same two constants that make up the `PIPELINE`
+      # stamp users see. A runtime bump or a weights change mints a new key and refetches, which is
+      # correct: those are exactly the changes that would make cached bits the wrong bits.
+      - name: the engine's identity, for the cache key
+        id: id
+        run: |
+          set -euo pipefail
+          rv="$(grep -oE "RUNTIME_VERSION = '[^']+'" cli/src/fetch.ts | grep -oE "[0-9.]+")"
+          wh="$(grep -oE "MODEL_WEIGHTS_SHA256 = '[a-f0-9]+'" cli/src/fetch.ts | grep -oE "[a-f0-9]{64}")"
+          [ -n "$rv" ] && [ -n "$wh" ] || { echo "::error::could not read the pinned runtime/weights identity"; exit 1; }
+          echo "runtime=$rv" >> "$GITHUB_OUTPUT"
+          echo "weights=${wh:0:12}" >> "$GITHUB_OUTPUT"
+          echo "  runtime $rv · weights ${wh:0:12}"
+
+      - name: restore the engine
+        id: cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.stratless-ci/runtime
+            ~/.stratless-ci/models
+          key: engine-${{ steps.id.outputs.runtime }}-${{ steps.id.outputs.weights }}
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter ./cli build
+
+      # On a hit this is a no-op and nothing touches the network. On a miss it fetches the same two
+      # things `init` fetches, from the same pinned URLs, verified against the same hashes — measured
+      # at ~5s and 44MB, which is why this job does not need to be clever about it.
+      - name: the engine is present
+        env:
+          STRATLESS_RUNTIME_DIR: ${{ github.workspace }}/../.stratless-ci/runtime
+          STRATLESS_MODELS: ${{ github.workspace }}/../.stratless-ci/models
+        run: |
+          set -euo pipefail
+          node -e "
+            import('./cli/dist/embed.js').then(async (m) => {
+              if (m.runtimePresent()) { console.log('  cache hit — nothing fetched'); return }
+              console.log('  cache miss — fetching the pinned runtime and weights')
+              await m.ensureRuntime()
+              if (!m.runtimePresent()) { console.error('::error::the engine is still not present after a fetch'); process.exit(1) }
+            }).catch((e) => { console.error('::error::' + e.message); process.exit(1) })
+          "
+
+      # THE POINT OF THE JOB. Without the guard below this would silently pass by skipping, which is
+      # the exact failure being fixed — so the run asserts the test actually RAN before believing it.
+      - name: pooled output is bit-identical to sequential
+        env:
+          STRATLESS_RUNTIME_DIR: ${{ github.workspace }}/../.stratless-ci/runtime
+          STRATLESS_MODELS: ${{ github.workspace }}/../.stratless-ci/models
+        run: |
+          set -euo pipefail
+          out="$(node --test cli/dist/embedpool.test.js 2>&1)" || { echo "$out"; exit 1; }
+          echo "$out"
+          grep -qE '^# skipped 0' <<<"$out" \
+            || { echo "::error::the byte-identity test SKIPPED — it is not actually running, which is the bug this job exists to fix"; exit 1; }
+          grep -qE '^# pass 1' <<<"$out" \
+            || { echo "::error::the byte-identity test did not run"; exit 1; }
+          echo "  ✓ the pool may change the clock and nothing else"
