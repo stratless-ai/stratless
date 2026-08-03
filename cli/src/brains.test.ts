@@ -9,7 +9,7 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { readStream } from './brain-codex.js';
-import { brains, detectBrains, pickBrain } from './brains.js';
+import { brainFor, brainForRecord, brains, detectBrains, pickBrain } from './brains.js';
 
 /** One frame of what `codex exec --json` really emits, shaped from a live run against 0.146.0. */
 const stream = (...lines: unknown[]): string => lines.map((l) => JSON.stringify(l)).join('\n') + '\n';
@@ -21,6 +21,17 @@ test('the registry is ordered, and the order IS the policy', () => {
     'Claude first, so nobody who has it today sees their profile written by a different model',
   );
   for (const b of brains) assert.ok(b.displayName, `${b.id} names itself — messages interpolate this, never a literal`);
+});
+
+test('a Record maps to a brain, and the two id spaces stay separate', () => {
+  // The rule: Codex history, Codex brain. Nothing calls it yet — its caller is the per-pair write
+  // stage — but the correspondence is worth pinning now, because `claude-code` is a place
+  // transcripts live and `claude` is a model you can ask. Fusing them would make the commonest
+  // machine — one tool's history, another tool's model — inexpressible.
+  assert.equal(brainForRecord('claude-code')?.id, 'claude');
+  assert.equal(brainForRecord('codex')?.id, 'codex');
+  assert.equal(brainForRecord('claude'), undefined, 'a brain id is not a Record id');
+  assert.equal(brainForRecord('some-future-tool'), undefined, 'a Record with no brain has no opinion, and that is not an error');
 });
 
 test('a pinned brain is honoured, and a pin for something absent picks nothing', () => {
@@ -92,4 +103,29 @@ test('what the borrow cannot report stays absent rather than zero', () => {
   assert.equal(read.cost.model, undefined, 'the model that ran is unknown here, and says so');
   assert.equal(read.cost.usedPercent, undefined);
   assert.equal(read.cost.costUsd, undefined, 'no dollars — nobody is billed for a subscription call');
+});
+
+test('brainFor: the rule, then its two escapes — pin above it, first-present beneath it', () => {
+  const saved = process.env.STRATLESS_BRAIN;
+  delete process.env.STRATLESS_BRAIN;
+  try {
+    const present = detectBrains().map((b) => b.id);
+    // THE RULE: a record whose own brain is installed gets it — Codex profile, Codex brain.
+    if (present.includes('claude')) assert.equal(brainFor('claude-code')?.id, 'claude');
+    if (present.includes('codex')) assert.equal(brainFor('codex')?.id, 'codex');
+    // Beneath the rule: a record with no brain of its own falls back to the first present —
+    // a profile in a borrowed voice beats a wall, and the stamp records which voice ran.
+    assert.equal(brainFor('some-future-tool')?.id, present[0]);
+    // Above the rule: an explicit pin outranks it everywhere; naming something absent resolves to
+    // nothing, never to a substitute.
+    if (present.length) {
+      process.env.STRATLESS_BRAIN = present[0];
+      assert.equal(brainFor('codex')?.id, present[0], 'the pin overrides the rule');
+    }
+    process.env.STRATLESS_BRAIN = 'nonexistent-brain';
+    assert.equal(brainFor('claude-code'), undefined);
+  } finally {
+    if (saved === undefined) delete process.env.STRATLESS_BRAIN;
+    else process.env.STRATLESS_BRAIN = saved;
+  }
 });

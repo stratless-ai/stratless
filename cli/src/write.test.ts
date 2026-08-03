@@ -8,7 +8,8 @@ import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 
 import type { CategoryStat } from './count.js';
-import { assemble, looksLikeProfile, type Voiced, type Section } from './write.js';
+import { assemble, evidenceWindow, looksLikeProfile, type Voiced, type Section } from './write.js';
+import type { Moment } from './moments.js';
 // Key lines are opaque strings to the assembler — liftPrint owns their gating and wording, so the
 // fixtures here use frozen literals rather than importing the templates.
 const META_LINE = "my questions circle a mechanism → drop a level: in layman, mechanism before number (48× across 12 conversations, 14 didn't land)";
@@ -109,13 +110,49 @@ test('assemble: which trend words ride in the receipt depends on the section', (
     ['regfade', v('register', 'q5', 'talk fade')],
     ['burst', v('frame', 'q6', 'offer burst')],
   ]);
-  const built = assemble(stats, voiced, prov)!;
-  assert.ok(built.text.includes('- offer rise (10×)\n'), 'one-sided rising on a frame row is suppressed');
-  assert.ok(built.text.includes('- catch fade (12×)\n'), 'one-sided fading on a judge row is suppressed');
-  assert.ok(built.text.includes('- offer met (11×, met)'), 'met rides — it is two-sided by construction');
-  assert.ok(built.text.includes('- offer truefade (13×, fading)'), 'verified fading rides on a demand row');
-  assert.ok(built.text.includes('- talk fade (9×, fading)'), 'register keeps its one-sided trend');
-  assert.ok(built.text.includes('- offer burst (10×, comes in bursts)'), 'burst rides in the receipt');
+  const built = assemble(stats, voiced, prov);
+  assert.ok(built!.text.includes('- offer rise (10×)\n'), 'one-sided rising on a frame row is suppressed');
+  assert.ok(built!.text.includes('- catch fade (12×)\n'), 'one-sided fading on a judge row is suppressed');
+  assert.ok(built!.text.includes('- offer met (11×, met)'), 'met rides bare — the pair file itself is the owner');
+  assert.ok(built!.text.includes('- offer truefade (13×, fading)'), 'verified fading rides on a demand row');
+  assert.ok(built!.text.includes('- talk fade (9×, fading)'), 'register keeps its one-sided trend');
+  assert.ok(built!.text.includes('- offer burst (10×, comes in bursts)'), 'burst rides in the receipt');
+});
+
+test('the provenance window is judged per assistant, then spanned', () => {
+  // THE BUG THIS PINS: one Codex rollout from December 2025 sat six months before the rest of a
+  // corpus and stretched the stated range to eight months over a pile that was ten weeks old. True,
+  // and misleading — the line exists to say where the evidence IS.
+  const m = (record: string, day: string, session: string): Moment => ({
+    key: `${record}-${day}-${session}`,
+    session,
+    record,
+    ts: `${day}T10:00:00.000Z`,
+    pile: 'ordinary',
+    reply: 'x',
+    replyLen: 1,
+  });
+
+  // A lone session six months adrift does not get to set the boundary.
+  const workingWeeks = ['2026-06-09', '2026-06-15', '2026-07-01', '2026-07-20', '2026-08-03'].map((d, i) =>
+    m('claude-code', d, `w${i}`),
+  );
+  const adrift = [m('codex', '2025-12-17', 'old'), ...workingWeeks];
+  assert.deepEqual(evidenceWindow(adrift), { from: '2026-06-09', to: '2026-08-03' });
+
+  // But a second assistant's OWN unbroken era is claimed, even where no single tool spans it: the
+  // person really did work across the whole span, just in different tools. Judged together these
+  // would collapse to the Claude-only window and the spring would vanish.
+  const twoEras = [m('codex', '2026-01-05', 'c1'), m('codex', '2026-01-20', 'c2'), m('codex', '2026-02-10', 'c3'), ...workingWeeks];
+  assert.deepEqual(evidenceWindow(twoEras), { from: '2026-01-05', to: '2026-08-03' }, 'the span may hold a gap — it is a window, not a promise of daily activity');
+
+  // A holiday inside one tool's history is not an era boundary.
+  const holiday = [m('claude-code', '2026-06-09', 'a'), m('claude-code', '2026-07-05', 'b'), m('claude-code', '2026-08-03', 'c')];
+  assert.deepEqual(evidenceWindow(holiday), { from: '2026-06-09', to: '2026-08-03' }, 'a 26-day break is time off, not a different era');
+
+  // A machine days old has no era to distinguish, so it claims what it has rather than nothing.
+  assert.deepEqual(evidenceWindow([m('claude-code', '2026-08-03', 'only')]), { from: '2026-08-03', to: '2026-08-03' });
+  assert.deepEqual(evidenceWindow([]), { from: '', to: '' }, 'nothing to claim, nothing claimed');
 });
 
 test('assemble: a when-clause deepens its host row — no section of its own, ever', () => {
@@ -136,8 +173,10 @@ test('assemble: a when-clause deepens its host row — no section of its own, ev
   const built = assemble(stats, voiced, prov, undefined, { clauses, keyLines: [] })!;
   const t = built.text;
   assert.ok(
-    t.includes("- offer to enter plan mode first — and when work is starting and I haven't set a plan yet, stop and plan first. (234×, met · slip 25×, opening)\n"),
-    'the clause joins the host row; the receipt carries both sides and the gap trend',
+    t.includes(
+      "- offer to enter plan mode first — and when work is starting and I haven't set a plan yet, stop and plan first. (234×, met · slip 25×, opening)\n",
+    ),
+    'the clause joins the host row; the receipt prints bare — the pair file itself is the owner',
   );
   assert.ok(!t.includes('How to move me forward'), 'LIFT never gets a heading');
   assert.ok(t.includes("- work is starting and I haven't set a plan yet → stop and plan first\n"), 'the situation trigger lands in the decode key');

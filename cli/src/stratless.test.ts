@@ -405,19 +405,19 @@ test('renders sidecar: round-trips build facts; missing/corrupt = build path, ne
   assert.deepEqual(readRenders(f), {}, 'missing = no cached renderings');
   writeFileSync(f, 'junk {');
   assert.deepEqual(readRenders(f), {}, 'corrupt = no cached renderings, never a throw');
-  writeRender('profile', { builtAt: '2026-07-17T10:00:00Z', sessions: 6, exchanges: 119 }, f);
-  writeRender('report', { builtAt: '2026-07-17T11:00:00Z', sessions: 6, exchanges: 120 }, f);
+  writeRender('claude-code', { builtAt: '2026-07-17T10:00:00Z', sessions: 6, exchanges: 119 }, f);
+  writeRender('codex', { builtAt: '2026-07-17T11:00:00Z', sessions: 6, exchanges: 120 }, f);
   const r = readRenders(f);
-  assert.equal(r.profile?.exchanges, 119, "the header's numbers come from the BUILD, stored not recomputed");
-  assert.equal(r.report?.builtAt, '2026-07-17T11:00:00Z', 'each rendering keeps its own build facts');
+  assert.equal(r.profiles?.['claude-code']?.exchanges, 119, "the header's numbers come from the BUILD, stored not recomputed");
+  assert.equal(r.profiles?.['codex']?.builtAt, '2026-07-17T11:00:00Z', 'each RECORD keeps its own build facts — pairs rebuild on their own clocks');
 });
 
 test('renders history: profile builds accumulate newest-first, dedupe by stamp, cap at 5; categories round-trip', () => {
   const f = join(dir, 'history-renders.json');
   for (let i = 1; i <= 6; i++)
-    writeRender('profile', { builtAt: `2026-07-2${i}T10:00:00Z`, sessions: 100 + i, exchanges: 5000 + i, categories: 20 + i }, f);
-  writeRender('profile', { builtAt: '2026-07-26T10:00:00Z', sessions: 200, exchanges: 9999, categories: 30 }, f); // same stamp as i=6 → replace, not stack
-  const h = readRenders(f).history ?? [];
+    writeRender('claude-code', { builtAt: `2026-07-2${i}T10:00:00Z`, sessions: 100 + i, exchanges: 5000 + i, categories: 20 + i }, f);
+  writeRender('claude-code', { builtAt: '2026-07-26T10:00:00Z', sessions: 200, exchanges: 9999, categories: 30 }, f); // same stamp as i=6 → replace, not stack
+  const h = readRenders(f).histories?.['claude-code'] ?? [];
   assert.equal(h.length, 5, 'capped at the five most recent builds');
   assert.equal(h[0].builtAt, '2026-07-26T10:00:00Z', 'newest first');
   assert.equal(h[0].exchanges, 9999, 'a same-stamp rebuild replaces the entry, never a duplicate');

@@ -20,10 +20,10 @@ import { archiveDir, stopRefresh, refreshArmed } from './rhythm-claude-code.js';
 import { runtimeDir, runtimeInstalled, ensureRuntime, runtimePresent, modelPresent, modelDir } from './embed.js';
 import { fetchLatest, newerThan } from './notify.js';
 import { loadRecentExchanges } from './exchange.js';
-import { humanMdPath, installedVersion, migrateLegacyProfile } from './profile.js';
+import { humanMdPath, installedVersion, migrateLegacyProfile, profilePath } from './profile.js';
 import { reaimIfLoaded, claudeMdPath } from './load-claude-code.js';
 import { detect as detectAdapters, loadedInto, registry, unloadEverywhere } from './adapters.js';
-import { readRenders, requestColdBuild, coldBuildRequested, readState, setFlushCadence, type FlushCadence } from './state.js';
+import { readRenders, latestRender, type RenderMeta, requestColdBuild, coldBuildRequested, readState, setFlushCadence, type FlushCadence } from './state.js';
 import { readUsage } from './usage.js';
 import { readLock, lockIsStale, stopWorker, spawnDetached, resolveBinPath } from './worker.js';
 import { runWorker, JUDGE_WINDOW } from './loop.js';
@@ -130,7 +130,12 @@ async function mirror(args: string[]): Promise<void> {
   let completeness: string | undefined;
   if (!share) {
     try {
-      const labelled = joinLabelled(loadMoments(), loadAssignments());
+      // Coverage is summed over each record's OWN join — every row is a within-pair match, so no
+      // moment is ever measured against another assistant's categories.
+      const moments = loadMoments();
+      const labelled = detectAdapters().flatMap((a) =>
+        joinLabelled(moments.filter((m) => m.record === a.record.id), loadAssignments(a.record.id)),
+      );
       if (labelled.length) completeness = `${Math.round(100 * (1 - misfitRate(labelled)))}% of your moments`;
     } catch {
       /* no build yet — no completeness line */
@@ -157,37 +162,58 @@ async function mirror(args: string[]): Promise<void> {
 }
 
 /**
- * Is the profile actually loaded? The artifact exists AND at least one assistant on this machine is
- * carrying it. The one honest definition, shared by `status` and `profile`'s footer.
+ * EACH DETECTED PAIR'S FILE, as every look-surface needs it: the assistant, its own profile path,
+ * whether that file exists yet, and whether the tool is actually carrying it. One profile per pair
+ * (the per-record doctrine) — there is no "the" artifact to ask about any more.
  *
- * ANY assistant, not Claude Code specifically: a person who reads their Codex history and has the
- * profile in `~/.codex/AGENTS.md` is as loaded as anyone, and reporting them unloaded because a
- * tool they do not use has no block would be a lie about their own machine.
+ * THE LEGACY FALLBACK: a machine upgraded but not yet rebuilt has no pair files and one merged
+ * `HUMAN.md` still serving. Surfaces show that file, honestly labelled by its own stamp, until the
+ * consented rebuild replaces it — an upgrade must never present as amnesia.
  */
+function pairFiles(): { a: Adapter; path: string; exists: boolean; loaded: boolean }[] {
+  return detectAdapters().map((a) => {
+    const path = profilePath(a.record.id);
+    let loaded = false;
+    try {
+      loaded = a.load.loaded();
+    } catch {
+      /* unreadable reads as not-loaded */
+    }
+    return { a, path, exists: existsSync(path), loaded };
+  });
+}
+
+/** Is anything loaded anywhere? The on-at-all question — per-pair detail is the surfaces' job. */
 function profileLoaded(): boolean {
   try {
-    return existsSync(humanMdPath()) && loadedInto().length > 0;
+    const pairs = pairFiles();
+    return (pairs.some((p) => p.exists) || existsSync(humanMdPath())) && loadedInto().length > 0;
   } catch {
     return false; // treat unreadable as not-loaded
   }
 }
 
-/** The `# built` stamp inside the LOADED HUMAN.md — WHICH build the assistant is actually reading,
+/** The `# built` stamp inside ONE loaded file — WHICH build that assistant is actually reading,
  *  not just whether one is. undefined when the file is absent or predates the stamp (pre-0.4.0). */
-function loadedBuiltStamp(): string | undefined {
+function loadedBuiltStamp(file: string): string | undefined {
   try {
-    return readFileSync(humanMdPath(), 'utf8').slice(0, 400).match(/^# built (.+)$/m)?.[1]?.trim();
+    return readFileSync(file, 'utf8').slice(0, 400).match(/^# built (.+)$/m)?.[1]?.trim();
   } catch {
     return undefined;
   }
 }
 
-/** The one honest footer a look shares. */
+/** The one honest footer a look shares — who is carrying their pair's file, who is still missing it. */
 function lookFooter(): void {
+  const pairs = pairFiles();
+  const carrying = pairs.filter((p) => p.loaded).map((p) => p.a.displayName);
+  const missing = pairs.filter((p) => p.exists && !p.loaded).map((p) => p.a.displayName);
   console.log(
-    profileLoaded()
-      ? `  ${C.dim(`loaded: ${humanMdPath()} · refresh it with \`${hint('stratless update')}\``)}`
-      : `  ${C.it('not loaded yet')} ${C.dim('· load it into your assistant:')} ${C.b(hint('stratless update'))}`,
+    !carrying.length
+      ? `  ${C.it('not loaded yet')} ${C.dim('· load it into your assistant:')} ${C.b(hint('stratless update'))}`
+      : missing.length
+        ? `  ${C.dim(`loaded into ${carrying.join(' and ')} · not in ${missing.join(' or ')} — load it: ${hint('stratless update')}`)}`
+        : `  ${C.dim(`loaded into ${carrying.join(' and ')} · refresh with \`${hint('stratless update')}\``)}`,
   );
   console.log('');
 }
@@ -209,29 +235,51 @@ function builtStamp(iso: string): string {
   return `${iso.slice(0, 16).replace('T', ' ')} UTC`;
 }
 
-async function profiler(_rest: string[] = []): Promise<void> {
-  // The profile BODY is HUMAN.md (the discovery pipeline's output) — NOT the old ~/.stratless/profile.txt,
-  // which nothing writes any more. Gate on the body existing; the render sidecar only carries the header
-  // facts, and a profile with no sidecar is still a profile worth showing.
-  const human = humanMdPath();
-  if (!existsSync(human)) {
-    console.log(`\n  ${C.it('Nothing built yet.')} ${C.dim('`profile` only ever looks — it never spends.')}`);
-    console.log(`  ${C.dim('Build and load it with:')} ${C.b(hint('stratless update'))}\n`);
+async function profiler(rest: string[] = []): Promise<void> {
+  // ONE PROFILE PER PAIR now, so `profile` prints each detected pair's file under a header naming
+  // the relationship it describes — or one, when the person names an assistant
+  // (`stratless profile codex`). The legacy merged file stands in for the interim between an
+  // upgrade and the first consented per-record rebuild.
+  const want = rest.find((r) => !r.startsWith('-'))?.toLowerCase();
+  const all = pairFiles();
+  const chosen = want
+    ? all.filter((p) => p.a.record.id === want || p.a.displayName.toLowerCase() === want)
+    : all;
+  if (want && !chosen.length) {
+    console.log(`\n  ${C.it(`no assistant called ${JSON.stringify(want)} here`)} ${C.dim(`· on this machine: ${all.map((p) => p.a.record.id).join(', ') || 'none detected'}`)}\n`);
     return;
   }
 
-  // Strip HUMAN.md's managed-by header (the `#` lines + the `<!-- format: … -->` marker) — plumbing a
-  // person reading their own profile does not need to see.
-  const raw = readFileSync(human, 'utf8').split('\n');
-  const start = raw.findIndex((l) => l.trim() !== '' && !/^\s*#/.test(l) && !/^\s*<!--/.test(l));
-  const body = raw.slice(start === -1 ? 0 : start).join('\n').trimEnd();
+  const renders = readRenders();
+  const printOne = (file: string, title: string, meta: { builtAt: string; sessions: number; exchanges: number } | undefined): void => {
+    const raw = readFileSync(file, 'utf8').split('\n');
+    const start = raw.findIndex((l) => l.trim() !== '' && !/^\s*#/.test(l) && !/^\s*<!--/.test(l));
+    const body = raw.slice(start === -1 ? 0 : start).join('\n').trimEnd();
+    const header = meta
+      ? `(stratless · built ${builtStamp(meta.builtAt)} · ${meta.sessions} sessions · ${meta.exchanges.toLocaleString()} moments)`
+      : '(stratless · your profile)';
+    console.log(`\n  ${C.b(title)}   ${C.dim(header)}\n`);
+    console.log(body.split('\n').map((l) => `  ${l}`).join('\n'));
+  };
 
-  const meta = readRenders().profile;
-  const header = meta
-    ? `(stratless · built ${builtStamp(meta.builtAt)} · ${meta.sessions} sessions · ${meta.exchanges.toLocaleString()} moments)`
-    : '(stratless · your profile)';
-  console.log(`\n  ${C.b("WHO YOU'RE WORKING WITH")}   ${C.dim(header)}\n`);
-  console.log(body.split('\n').map((l) => `  ${l}`).join('\n'));
+  const havePair = chosen.filter((p) => p.exists);
+  if (havePair.length) {
+    for (const p of havePair) {
+      printOne(p.path, chosen.length > 1 || all.length > 1 ? `WHO YOU'RE WORKING WITH · ${p.a.displayName}` : "WHO YOU'RE WORKING WITH", renders.profiles?.[p.a.record.id]);
+    }
+    const thin = chosen.filter((p) => !p.exists);
+    for (const p of thin) {
+      console.log(`\n  ${C.b(`WHO YOU'RE WORKING WITH · ${p.a.displayName}`)}   ${C.dim('not enough history yet — keep working in it')}`);
+    }
+  } else if (existsSync(humanMdPath())) {
+    // The interim: upgraded, not yet rebuilt per pair. Show the merged-era file as what it is.
+    printOne(humanMdPath(), "WHO YOU'RE WORKING WITH", readRenders().profile);
+    console.log(`\n  ${C.dim(`from the merged era — \`${hint('stratless update')}\` rebuilds one profile per assistant`)}`);
+  } else {
+    console.log(`\n  ${C.it('Nothing built yet.')} ${C.dim('\`profile\` only ever looks — it never spends.')}`);
+    console.log(`  ${C.dim('Build and load it with:')} ${C.b(hint('stratless update'))}\n`);
+    return;
+  }
   console.log(`\n  ${C.dim('free — this is the last build')}`);
   lookFooter();
 }
@@ -374,10 +422,17 @@ function armedLine(adapter: Adapter, state: ArmState): string {
  * than one brain compiled in, a worker handed one vendor's binary and driving it with another's
  * flags gets silence rather than an error. So the CHOICE goes too.
  */
-function spawnWorker(brain: Brain, flush: boolean): number | undefined {
-  const env: Record<string, string> = { STRATLESS_BRAIN: brain.id };
-  const abs = resolveBinPath(brain.id === 'claude' ? 'claude' : brain.id);
-  if (abs) env.STRATLESS_CLAUDE_BIN = abs; // C5: the path, captured while the PATH is real
+function spawnWorker(flush: boolean): number | undefined {
+  // PIN PATHS, NOT THE CHOICE. The worker picks a brain PER RECORD now (`brainFor` — Codex profile,
+  // Codex brain), so forcing one id here would override the rule for every pair in the run. What
+  // the worker genuinely cannot re-derive is WHERE the binaries are — its inherited PATH is the
+  // hook's thin one — so both are captured here, while the PATH is real. An explicit
+  // STRATLESS_BRAIN in the person's own shell still inherits through as the override it reads as.
+  const env: Record<string, string> = {};
+  const claudeBin = resolveBinPath('claude');
+  if (claudeBin) env.STRATLESS_CLAUDE_BIN = claudeBin;
+  const codexBin = resolveBinPath('codex');
+  if (codexBin) env.STRATLESS_CODEX_BIN = codexBin;
   if (flush) env.STRATLESS_FLUSH = '1';
   return spawnDetached(process.execPath, [fileURLToPath(import.meta.url), '__worker'], env);
 }
@@ -430,7 +485,9 @@ async function update(_rest: string[], opts: { consented?: boolean } = {}): Prom
   // Record a consented COLD-START build DURABLY, before any lock decision. Consent must survive a lock
   // race (a background hook worker holding the lock) or a killed process — it must never live only in
   // the spawned worker's env. A hook never sets this, so it can never manufacture consent.
-  const consentedColdBuild = flushing && loadCategories().length === 0;
+  // Consent is recorded when ANY detected assistant still awaits its first build — a machine that
+  // built for one tool and then gained a second is exactly the person this must not skip.
+  const consentedColdBuild = flushing && detectAdapters().some((a) => loadCategories(a.record.id).length === 0);
   if (consentedColdBuild) requestColdBuild();
 
   const holder = readLock();
@@ -450,7 +507,7 @@ async function update(_rest: string[], opts: { consented?: boolean } = {}): Prom
     console.log(`\n  ${C.dim(`a refresh is already running (pid ${holder!.pid})${watching}`)}`);
   } else {
     spawnedAtMs = Date.now();
-    if (!spawnWorker(brain, flushing)) {
+    if (!spawnWorker(flushing)) {
       console.error(`\n  ${C.bad('could not start the background refresh.')}\n`);
       process.exit(1);
     }
@@ -468,7 +525,7 @@ async function update(_rest: string[], opts: { consented?: boolean } = {}): Prom
   if (!code && consentedColdBuild && coldBuildRequested() && !workerAlive()) {
     const at = Date.now();
     const stamp = readProgress()?.updatedAt ?? '';
-    if (spawnWorker(brain, true)) code = await tailWorker(at, stamp);
+    if (spawnWorker(true)) code = await tailWorker(at, stamp);
   }
   if (code) process.exit(code);
 }
@@ -497,7 +554,12 @@ async function stop(): Promise<void> {
   }
   if (hookRemoved) console.log(`  ${C.dim('· after-session refresh removed')}`);
   for (const a of unloadedFrom) console.log(`  ${C.dim(`· profile unloaded from ${a.displayName}`)}`);
-  console.log(`  ${C.dim(`Your ${humanMdPath()} is left as-is — delete it yourself if you want it gone.`)}`);
+  {
+    // Name every file that stays — each pair's profile, and the merged-era one if it survives. All
+    // of them are the person's data; the off switch removes deliveries, never evidence.
+    const kept = [...pairFiles().filter((p) => p.exists).map((p) => p.path), ...(existsSync(humanMdPath()) ? [humanMdPath()] : [])];
+    if (kept.length) console.log(`  ${C.dim(`Your ${kept.join(' and ')} ${kept.length === 1 ? 'is' : 'are'} left as-is — delete ${kept.length === 1 ? 'it' : 'them'} yourself if you want ${kept.length === 1 ? 'it' : 'them'} gone.`)}`);
+  }
   if (existsSync(modelDir())) {
     console.log(`  ${C.dim(`The local model (~34MB) is still at ${modelDir()} — remove it if you want the disk back.`)}`);
   }
@@ -578,11 +640,12 @@ async function status(rest: string[] = []): Promise<void> {
   // The cold-start onramp: history collected but the paid build not yet run. Derived, never stored —
   // no categories on disk while the pile holds moments means "free read live, full build pending".
   try {
-    const cats = loadCategories();
     const pile = loadMoments();
-    if (!cats.length && pile.length) {
-      const est = estimateLine(estimateBuild(pile.length));
-      console.log(`    profile build           ${C.warn('not run yet')}  ${C.dim(`${est} — run ${hint('stratless update')}`)}`);
+    for (const a of detectAdapters()) {
+      const own = pile.filter((m) => m.record === a.record.id);
+      if (loadCategories(a.record.id).length || !own.length) continue;
+      const est = estimateLine(estimateBuild(own.length));
+      console.log(`    profile build           ${C.warn('not run yet')}  ${C.dim(`${a.displayName} · ${est} — run ${hint('stratless update')}`)}`);
     }
   } catch {
     /* stores absent on a brand-new machine — nothing to report */
@@ -602,38 +665,72 @@ async function status(rest: string[] = []): Promise<void> {
       }
     }
   }
-  // WHICH build is loaded, not just whether. The file's own `# built` stamp is compared to the
-  // latest build's — they diverge only when a rebuild never loaded, a `stop` unloaded, or the file
-  // was replaced by hand: exactly the states a bare "yes" would hide. Same stamp formula on both
-  // sides (load.ts writes it, builtStamp renders it), so agreement is exact, never fuzzy.
-  const loadedStamp = loaded ? loadedBuiltStamp() : undefined;
-  const latestStamp = builds.length ? builtStamp(builds[0].builtAt) : undefined;
-  if (loaded && loadedStamp && latestStamp && loadedStamp !== latestStamp) {
-    console.log(`    profile loaded          ${C.ok('yes')}  ${C.warn(`an OLDER build (${loadedStamp})`)} ${C.dim(`— latest is ${latestStamp} · load it: ${hint('stratless update')}`)}`);
-  } else if (loaded && loadedStamp) {
-    console.log(`    profile loaded          ${C.ok('yes')}  ${C.dim(`${latestStamp ? 'this build' : 'built'} (${loadedStamp}) · ${human}`)}`);
-  } else {
-    console.log(`    profile loaded          ${loaded ? C.ok('yes') : C.dim('no')}${humanExists ? `  ${C.dim(human)}` : ''}`);
+  // WHICH build each assistant is reading, not just whether one is. Every pair has ITS OWN file,
+  // its own `# built` stamp, and its own latest build in the sidecar — so each row compares its own
+  // pair, and a stale copy in one tool can never hide behind a fresh pointer in another. The legacy
+  // merged file (an upgrade not yet rebuilt) shows as itself, labelled by its own stamp.
+  {
+    const pairs = pairFiles();
+    const renders = readRenders();
+    if (!pairs.length) {
+      console.log(`    profile loaded          ${loaded ? C.ok('yes') : C.dim('no')}${humanExists ? `  ${C.dim(human)}` : ''}`);
+    } else {
+      const w = Math.max(...pairs.map((p) => p.a.displayName.length));
+      pairs.forEach((p, i) => {
+        const rowLabel = (i === 0 ? 'profile loaded' : '').padEnd(24);
+        // The interim: no pair file yet, but the merged-era artifact is still serving this leg.
+        const servingLegacy = !p.exists && p.loaded && humanExists;
+        const stamp = p.exists ? loadedBuiltStamp(p.path) : servingLegacy ? loadedBuiltStamp(human) : undefined;
+        const latest = latestRender(renders, p.a.record.id);
+        const latestStamp = latest ? builtStamp(latest.builtAt) : undefined;
+        const note = !p.loaded
+          ? C.dim(p.exists ? `— load it: ${hint('stratless update')}` : '— not enough history yet')
+          : stamp && latestStamp && stamp !== latestStamp && !servingLegacy
+            ? `${C.warn(`an OLDER build (${stamp})`)} ${C.dim(`— latest is ${latestStamp} · refresh: ${hint('stratless update')}`)}`
+            : stamp
+              ? C.dim(`${servingLegacy ? `the merged-era build (${stamp}) — rebuild per assistant: ${hint('stratless update')}` : `this build (${stamp}) · ${p.path}`}`)
+              : '';
+        console.log(`    ${rowLabel}${p.a.displayName.padEnd(w + 2)}${p.loaded ? C.ok('yes') : C.dim('no ')}  ${note}`);
+      });
+    }
   }
 
-  // RECENT BUILDS — when it last updated, and how the pile is growing. The trust surface: a person
-  // sees their profile is kept fresh, never silently frozen. Newest first, the latest one flagged.
-  if (builds.length) {
-    console.log(`\n    recent builds`);
-    for (const [i, b] of builds.slice(0, 5).entries()) {
-      const cats = b.categories != null ? ` · ${b.categories} categories` : '';
-      const tag = i === 0 ? `   ${C.dim('(latest)')}` : '';
-      console.log(`      ${builtStamp(b.builtAt)}   ${C.dim(`${b.sessions.toLocaleString()} conv · ${b.exchanges.toLocaleString()} moments${cats}`)}${tag}`);
+  // RECENT BUILDS — when each pair last updated, and how its pile is growing. Per record, because
+  // each pair rebuilds on its own clock; the legacy merged history stands in until the first
+  // per-record build exists, so an upgraded machine never presents as amnesia.
+  {
+    const renders = readRenders();
+    const here = detectAdapters();
+    let printed = false;
+    const show = (label: string | undefined, hist: RenderMeta[]): void => {
+      if (!printed) console.log(`\n    recent builds`);
+      printed = true;
+      if (label) console.log(`      ${C.dim(label)}`);
+      for (const [i, b] of hist.slice(0, 5).entries()) {
+        const cats = b.categories != null ? ` · ${b.categories} categories` : '';
+        const tag = i === 0 ? `   ${C.dim('(latest)')}` : '';
+        console.log(`      ${builtStamp(b.builtAt)}   ${C.dim(`${b.sessions.toLocaleString()} conv · ${b.exchanges.toLocaleString()} moments${cats}`)}${tag}`);
+      }
+    };
+    // Each record's OWN trajectory first. The merged-era history belongs to no single record —
+    // attributing it to each would print the same builds once per assistant, claiming twice —
+    // so it shows ONCE, labelled as the era it is, while it is still the only history there is.
+    for (const a of here) {
+      const own = renders.histories?.[a.record.id];
+      if (own?.length) show(here.length > 1 ? a.displayName : undefined, own);
     }
-  } else {
-    console.log(`    last built              ${C.dim(mtimeStamp || 'never')}`);
+    const legacy = renders.history ?? (renders.profile ? [renders.profile] : []);
+    if (legacy.length && here.some((a) => !renders.histories?.[a.record.id]?.length)) {
+      show('from the merged era', legacy);
+    }
+    if (!printed) console.log(`    last built              ${C.dim(mtimeStamp || 'never')}`);
   }
 
   // SPEND — lifetime total, the live stages, the retired miner era rolled into one line, the most
   // recent run's receipt, and the meter's own blind spots (silent accounting would be the bug).
   const lastRunSpend = readProgress()?.spend;
   console.log(`\n    spend`);
-  console.log(`      total          ${C.b(`$${u.costUsd.toFixed(2)}`)}  ·  ${fmtTok(tokens)} tokens  ·  ${u.calls.toLocaleString()} calls  ${C.dim(`on your own ${pickBrain()?.displayName ?? 'assistant'}`)}`);
+  console.log(`      total          ${C.b(`$${u.costUsd.toFixed(2)}`)}  ·  ${fmtTok(tokens)} tokens  ·  ${u.calls.toLocaleString()} calls  ${C.dim(`on your own ${brains.filter((b) => b.detect()).length > 1 ? 'assistants' : (pickBrain()?.displayName ?? 'assistant')}`)}`);
   if (stageParts.length) console.log(`      by stage       ${C.dim(stageParts.join(' · '))}`);
   if (retiredUsd > 0.005) console.log(`      retired        ${C.dim(`$${retiredUsd.toFixed(2)}  (earlier miner stages)`)}`);
   if (lastRunSpend) console.log(`      last run       ${C.dim(lastRunSpend.replace('this run: ', ''))}`);
@@ -805,7 +902,7 @@ async function main(): Promise<void> {
       /* fresh machine: no pile yet */
     }
     const est = pile > 0 ? estimateBuild(pile) : estimateFromMessages(mirror!.scale.messages);
-    console.log(`\n  ${C.dim('Full profile:')}    ${C.b(estimateLine(est))}   ${C.dim(`built on your own ${pickBrain()?.displayName ?? 'assistant'}, nothing leaves.`)}`);
+    console.log(`\n  ${C.dim('Full profile:')}    ${C.b(estimateLine(est))}   ${C.dim(`built on your own ${brains.filter((b) => b.detect()).length > 1 ? 'assistants' : (pickBrain()?.displayName ?? 'assistant')}, nothing leaves.`)}`);
     // THE DOWNLOAD IS PART OF THE ASK. Most of the build now runs on a small local model, which is
     // why it costs cents instead of dollars — but the engine (~3MB runtime) and its weights (~34MB)
     // have to arrive once, and neither is in the npm package. Consenting to a build must mean

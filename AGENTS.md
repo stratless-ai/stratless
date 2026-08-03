@@ -2,10 +2,12 @@
 
 Monorepo for **stratless**: a local, private person-layer profiler. It reads your AI coding
 assistants' own transcripts (Claude Code and Codex today), breaks each session into moments,
-discovers the recurring things you do from your own history, counts them, and writes ONE profile of
-the person (`HUMAN.md`) that loads back into each of them so they stop talking over your head or
-under it. No server, no API key, nothing leaves
-the machine. (Pipeline: `moments → shape → embed → cluster → name → count → lift → write`.)
+discovers the recurring things you do from your own history, counts them, and writes ONE PROFILE
+PER HUMAN+AI PAIR (`HUMAN.<assistant>.md`), each loaded back into the assistant whose own history
+earned it. Nothing is ever measured across assistants — what was observed working with one tool is
+never presented to another (the per-record doctrine, 2026-08-03). No server, no API key, nothing
+leaves the machine. (Pipeline, per record: `moments → shape → embed → cluster → name → count →
+lift → write`.)
 
 This is the **project layer** (this codebase). Don't confuse it with `HUMAN.md`, which is the
 product's *output*: a profile of a person.

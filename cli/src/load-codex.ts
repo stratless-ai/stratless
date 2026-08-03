@@ -26,8 +26,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { atomicWriteFileSync } from './atomic.js';
-import { readProfile } from './profile.js';
-import { codexHome } from './record-codex.js';
+import { profilePath, readProfile } from './profile.js';
+import { RECORD_ID, codexHome } from './record-codex.js';
 
 // `codexHome` comes from the Record so all three Codex legs resolve the tool's directory identically.
 
@@ -55,7 +55,10 @@ const END = '<!-- stratless:end -->';
  * the person's own file is not marked up with nothing.
  */
 export function loadInto(target: string = agentsMdPath()): string | undefined {
-  const profile = readProfile();
+  // ITS OWN PAIR'S FILE, never "the" profile: this copy lands inside Codex, so it may carry only
+  // what was measured working WITH Codex (the per-record doctrine). No file yet — a pair still
+  // below its evidence floor — means nothing is written, and the person's AGENTS.md stays theirs.
+  const profile = readProfile(profilePath(RECORD_ID));
   if (!profile) return undefined;
 
   // No header of our own: unlike Claude Code's block — which holds a bare import line and needs one —

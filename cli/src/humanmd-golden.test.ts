@@ -136,11 +136,11 @@ function fixture(name: string): Record<string, string> {
     STRATLESS_RENDERS: join(st, 'renders.json'),
     STRATLESS_BUILD: join(st, 'build.json'),
     STRATLESS_MOMENTS: join(st, 'moments.jsonl'),
-    STRATLESS_CATEGORIES: join(st, 'categories.jsonl'),
-    STRATLESS_ASSIGNMENTS: join(st, 'assignments.jsonl'),
-    STRATLESS_ENGINE: join(st, 'engine.json'),
-    STRATLESS_LIFT: join(st, 'lift.json'),
-    STRATLESS_VOICED: join(st, 'voiced.json'),
+    // Per-record stores land under the records dir; the fixture is single-record (claude-code),
+    // which is exactly the native-user case the golden pins: one Record must produce byte-identical
+    // output to the merged era.
+    STRATLESS_RECORDS_DIR: join(st, 'records'),
+    STRATLESS_PROFILE_DIR: st,
     STRATLESS_HUMAN_MD: join(home, '.claude', 'HUMAN.md'),
     STRATLESS_CLAUDE_MD: join(home, '.claude', 'CLAUDE.md'),
     STRATLESS_CLAUDE_BIN: fakeAssistant(name),
@@ -198,7 +198,7 @@ test('the profile golden: one cold build over a fixture archive writes exactly t
   const progress = readProgress(env.STRATLESS_PROGRESS);
   assert.equal(progress?.phase, 'done', `the worker finished the build (progress: ${JSON.stringify(progress)})`);
 
-  const written = readFileSync(env.STRATLESS_HUMAN_MD, 'utf8');
+  const written = readFileSync(join(env.STRATLESS_PROFILE_DIR, 'HUMAN.claude-code.md'), 'utf8');
   assert.equal(normalize(written), EXPECTED);
 });
 
@@ -210,5 +210,5 @@ test('the second build over the same corpus writes the same file — the wobble 
   }
   // The second run takes the STEADY path (categories and a frozen engine exist), so this also pins
   // that growing a pile re-stamps the same words rather than re-rolling them.
-  assert.equal(normalize(readFileSync(env.STRATLESS_HUMAN_MD, 'utf8')), EXPECTED);
+  assert.equal(normalize(readFileSync(join(env.STRATLESS_PROFILE_DIR, 'HUMAN.claude-code.md'), 'utf8')), EXPECTED);
 });

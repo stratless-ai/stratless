@@ -10,7 +10,7 @@ import type { Moment } from './moments.js';
 
 const moment = (reply: string, session = 's1'): Moment => ({
   key: `${session}:${reply.slice(0, 12)}`,
-  session,
+  session, record: 'claude-code',
   ts: '2026-07-01T00:00:00Z',
   pile: 'ordinary',
   reply,

@@ -64,17 +64,17 @@ const NOW = Date.parse('2026-07-28T00:00:00Z');
 test('a corrupt or missing store degrades to empty — never a throw (the renders.json discipline)', () => {
   const p = join(dir, 'corrupt.json');
   writeFileSync(p, '{"patches": [{"id": 42}, "junk", {"id": "a", "home": "h", "mode": 3, "wording": {"text": "t"}}, {"id": "b", "home": "h", "mode": 1, "wording": {"text": "keeps"}, "state": "sideways"}]}');
-  const store = readLift(p);
+  const store = readLift('claude-code', p);
   assert.equal(store.patches.length, 1, 'malformed records are dropped, valid ones survive');
   assert.equal(store.patches[0].state, 'open', 'an unknown state falls back to open, never crashes');
-  assert.deepEqual(readLift(join(dir, 'absent.json')), { patches: [] });
+  assert.deepEqual(readLift('claude-code', join(dir, 'absent.json')), { patches: [] });
 });
 
 test('the wording survives the store verbatim — voiced once, never re-worded', () => {
   const p = join(dir, 'verbatim.json');
   const text = "when I've started without one, stop and set the bound for me";
-  writeLift({ patches: [patch({ wording: { text } })] }, p);
-  const print = liftPrint(p);
+  writeLift({ patches: [patch({ wording: { text } })] }, 'claude-code', p);
+  const print = liftPrint('claude-code', p);
   assert.equal(print.clauses.get('plan')!.clause, text, 'the stored text is the printed text, byte for byte');
 });
 
@@ -156,14 +156,14 @@ test('mode 2: a quiet window never heals; an abandoned zone lapses neutrally; pe
 
 test('the run is a no-op on nothing, and a dead home with no engine goes dormant', () => {
   const p1 = join(dir, 'noop.json');
-  const r = runLift([], [], NOW, { file: p1, roots: [dir] });
+  const r = runLift([], [], NOW, { file: p1, roots: [dir], record: 'claude-code', isPrimary: true });
   assert.deepEqual(r, { minted: 0, retired: 0, open: 0, changed: false });
-  assert.deepEqual(readLift(p1), { patches: [] }, 'the store was never created');
+  assert.deepEqual(readLift('claude-code', p1), { patches: [] }, 'the store was never created');
 
   const p2 = join(dir, 'dormant.json');
-  writeLift({ patches: [patch({ pipeline: 'gone-runtime' })] }, p2);
-  const r2 = runLift([], [], NOW, { file: p2, roots: [dir] });
-  assert.equal(readLift(p2).patches[0].state, 'dormant', 'no live home, no honest geometry → dormant, kept silent');
+  writeLift({ patches: [patch({ pipeline: 'gone-runtime' })] }, 'claude-code', p2);
+  const r2 = runLift([], [], NOW, { file: p2, roots: [dir], record: 'claude-code', isPrimary: true });
+  assert.equal(readLift('claude-code', p2).patches[0].state, 'dormant', 'no live home, no honest geometry → dormant, kept silent');
   assert.equal(r2.changed, true, 'what prints moved');
 });
 
@@ -183,9 +183,10 @@ test('ACCEPTANCE: the print surface reproduces the pre-rebuild strings byte for 
       meta: { asks: 563, sessions: 88, bounces: 52, specPhrases: [] },
       delegatedZones: 383,
     },
+    'claude-code',
     p,
   );
-  const print = liftPrint(p);
+  const print = liftPrint('claude-code', p);
   assert.deepEqual(print.clauses.get('plan-mode-category'), {
     clause: 'when work is about to proceed without a plan laid out, stop and plan it out with me first',
     slip: 25,
@@ -209,9 +210,10 @@ test('clauses cap slip-heaviest; terminal and mode-2 patches never print as clau
         m2({ id: 'f' }),
       ],
     },
+    'claude-code',
     p,
   );
-  const print = liftPrint(p);
+  const print = liftPrint('claude-code', p);
   assert.equal(print.clauses.size, PRINT_CAP, 'capped');
   assert.deepEqual([...print.clauses.keys()], ['b', 'c', 'd'], 'slip-heaviest first; the healed patch is gone — the file thins');
   assert.ok(!print.clauses.has(ASK_ALTITUDE_HOME), 'mode 2 prints as key lines, never as a clause');

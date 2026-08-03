@@ -155,6 +155,16 @@ export interface Session {
   path: string;
   session: string;
   turns: Turn[];
+  /**
+   * WHICH RECORD PRODUCED THIS — stated by the reader that parsed it, never inferred downstream.
+   *
+   * The engine is tool-blind and stays that way; this is not for it. It is for the one question that
+   * IS per-assistant: LIFT grades an AI, so a verdict has to know whose turns it was earned on. The
+   * alternative was sniffing a path or a filename prefix, which is the fragile convention the seam
+   * exists to prevent — and it is genuinely wrong for archived files, where two Records' slices live
+   * under one root.
+   */
+  record: string;
 }
 
 /** The alarm for the one failure that would end this product silently: the tool changes its format,

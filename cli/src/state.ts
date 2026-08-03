@@ -47,7 +47,9 @@ export interface SynthState {
   /** the last build's scoreboard rate — the WIDER distress read (~13/100). RECORDED, never shown: the
    *  one user-facing friction number is the mirror's course-corrections rate (`mirror` + the door), so
    *  two near-identical "per 100" figures never collide on screen. Kept for the record / later use. */
-  scoreboard?: { rate: number; at: string };
+  /** the wider distress rate, PER RECORD — measured inside one pair, never summed across two.
+   *  Recorded for the record only; nothing prints it (the mirror's number is the user-facing one). */
+  scoreboards?: Record<string, { rate: number; at: string }>;
   /** when the worker last flushed (tagged + rebuilt) — the flush ceiling ([[flushDue]]) measures from here */
   lastFlushAt?: string;
   /** a CONSENTED cold-start build is pending. Set only by a consented interactive invocation (the
@@ -68,9 +70,15 @@ export function readState(file: string = statePath()): SynthState {
     const out: SynthState = {};
     const runs = validRuns(raw.stopwatch);
     if (runs.length) out.stopwatch = runs;
-    const sb = raw.scoreboard;
-    if (sb && typeof sb === 'object' && Number.isFinite(Number(sb.rate)) && typeof sb.at === 'string') {
-      out.scoreboard = { rate: Number(sb.rate), at: sb.at };
+    const sbs = raw.scoreboards;
+    if (sbs && typeof sbs === 'object') {
+      const clean: Record<string, { rate: number; at: string }> = {};
+      for (const [k, v] of Object.entries(sbs)) {
+        if (v && typeof v === 'object' && Number.isFinite(Number(v.rate)) && typeof v.at === 'string') {
+          clean[k] = { rate: Number(v.rate), at: v.at };
+        }
+      }
+      if (Object.keys(clean).length) out.scoreboards = clean;
     }
     if (typeof raw.lastFlushAt === 'string') out.lastFlushAt = raw.lastFlushAt;
     if (typeof raw.buildRequestedAt === 'string') out.buildRequestedAt = raw.buildRequestedAt;
@@ -144,14 +152,28 @@ export interface RenderMeta {
   exchanges: number;
   /** how many categories the build minted — the trajectory shows it growing (added 0.4.0). */
   categories?: number;
+  /**
+   * WHICH BRAIN WORDED THIS BUILD (added 0.9.x). Absent on every build before it, which is why it
+   * is optional and why nothing may infer a voice from silence.
+   *
+   * The profile is written in a borrowed model's voice, so a change of brain is a change of wording
+   * with no other visible cause — the same class of drift the voicer is already watched for. Naming
+   * it here makes "why does this read differently" answerable from the artifact instead of guessed.
+   */
+  brain?: string;
 }
 
 export interface Renders {
+  /** LEGACY, merged-era: the single profile slot and its history. Read for the interim between an
+   *  upgrade and the first per-record rebuild — status can still say what the old build was —
+   *  never written again. */
   profile?: RenderMeta;
   report?: RenderMeta;
-  /** The last few PROFILE builds, newest first — `status`'s "recent builds" trajectory, so a person
-   *  can see when it last updated and how it is growing. Capped; best-effort like the rest. */
   history?: RenderMeta[];
+  /** One build record per RECORD — each pair rebuilds on its own clock, so "latest" is only
+   *  meaningful within one record's history, never across the machine. */
+  profiles?: Record<string, RenderMeta>;
+  histories?: Record<string, RenderMeta[]>;
 }
 
 /** Where the sidecar lives. Override with STRATLESS_RENDERS (tests). */
@@ -167,6 +189,7 @@ function readOneRender(m: Partial<RenderMeta> | undefined): RenderMeta | undefin
     sessions: Number(m.sessions),
     exchanges: Number(m.exchanges),
     ...(Number.isFinite(Number(m.categories)) ? { categories: Number(m.categories) } : {}),
+    ...(typeof m.brain === 'string' && m.brain ? { brain: m.brain } : {}),
   };
 }
 
@@ -177,6 +200,8 @@ export function readRenders(file: string = rendersPath()): Renders {
       profile?: Partial<RenderMeta>;
       report?: Partial<RenderMeta>;
       history?: Partial<RenderMeta>[];
+      profiles?: Record<string, Partial<RenderMeta>>;
+      histories?: Record<string, Partial<RenderMeta>[]>;
     };
     const out: Renders = {};
     const p = readOneRender(raw.profile);
@@ -186,6 +211,23 @@ export function readRenders(file: string = rendersPath()): Renders {
     if (Array.isArray(raw.history)) {
       const h = raw.history.map(readOneRender).filter((m): m is RenderMeta => Boolean(m));
       if (h.length) out.history = h;
+    }
+    if (raw.profiles && typeof raw.profiles === 'object') {
+      const clean: Record<string, RenderMeta> = {};
+      for (const [k, v] of Object.entries(raw.profiles)) {
+        const m = readOneRender(v);
+        if (m) clean[k] = m;
+      }
+      if (Object.keys(clean).length) out.profiles = clean;
+    }
+    if (raw.histories && typeof raw.histories === 'object') {
+      const clean: Record<string, RenderMeta[]> = {};
+      for (const [k, v] of Object.entries(raw.histories)) {
+        if (!Array.isArray(v)) continue;
+        const h = v.map(readOneRender).filter((m): m is RenderMeta => Boolean(m));
+        if (h.length) clean[k] = h;
+      }
+      if (Object.keys(clean).length) out.histories = clean;
     }
     return out;
   } catch {
@@ -199,18 +241,23 @@ const HISTORY_CAP = 5;
 
 /** Record one rendering's build facts. Best-effort — a lost sidecar costs one rebuild, never a lie.
  *  A profile build also lands in `history` (newest first, deduped by stamp, capped) for the trajectory. */
-export function writeRender(kind: 'profile' | 'report', meta: RenderMeta, file: string = rendersPath()): void {
+export function writeRender(record: string, meta: RenderMeta, file: string = rendersPath()): void {
   try {
     const all = readRenders(file);
-    all[kind] = meta;
-    if (kind === 'profile') {
-      const prior = (all.history ?? []).filter((b) => b.builtAt !== meta.builtAt);
-      all.history = [meta, ...prior].slice(0, HISTORY_CAP);
-    }
+    all.profiles = { ...(all.profiles ?? {}), [record]: meta };
+    const prior = (all.histories?.[record] ?? []).filter((b) => b.builtAt !== meta.builtAt);
+    all.histories = { ...(all.histories ?? {}), [record]: [meta, ...prior].slice(0, HISTORY_CAP) };
+    // The merged-era `profile`/`history` slots are never written again — they age in place as the
+    // pre-upgrade record, which is exactly what status shows until the first per-record rebuild.
     atomicWriteFileSync(file, `${JSON.stringify(all)}\n`);
   } catch {
     /* best-effort by design */
   }
+}
+
+/** One record's latest build — legacy merged slot when the record has none yet. */
+export function latestRender(r: Renders, record: string): RenderMeta | undefined {
+  return r.profiles?.[record] ?? r.profile;
 }
 
 // ── the frozen corpus (report folded into `profile --read`, lazy) ───────────────────────────────

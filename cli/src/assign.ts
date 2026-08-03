@@ -20,12 +20,14 @@
  * NO MODEL CALLS. Everything here is disk. Cost is zero.
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { recordDir } from './stores.js';
 import { loadMoments, type Moment } from './moments.js';
 
-/** Where the checkmarks live. Override with STRATLESS_ASSIGNMENTS (tests). */
-const storePath = (): string => process.env.STRATLESS_ASSIGNMENTS || join(homedir(), '.stratless', 'assignments.jsonl');
+/** Where ONE RECORD's checkmarks live. An assignment pins a moment to a category, and both sides
+ *  of that pin belong to one pair — the moment carries its record, the category was minted from
+ *  that record's pile. Per-record files make cross-record placement unrepresentable. */
+export const assignmentsPath = (record: string): string => join(recordDir(record), 'assignments.jsonl');
 
 /** One frozen checkmark row. `at` is when it was assigned — with a category's birth date, the two
  *  timestamps are the entire frozen-once rule. */
@@ -36,7 +38,7 @@ export interface Assignment {
 }
 
 /** Every stored assignment, in file order. Torn lines (a crash mid-append) are skipped. */
-export function loadAssignments(file: string = storePath()): Assignment[] {
+export function loadAssignments(record: string, file: string = assignmentsPath(record)): Assignment[] {
   if (!existsSync(file)) return [];
   const out: Assignment[] = [];
   for (const line of readFileSync(file, 'utf8').split('\n')) {
@@ -51,15 +53,17 @@ export function loadAssignments(file: string = storePath()): Assignment[] {
 }
 
 /** The keys already assigned — the seen-set that stops a moment being shown (and billed) twice. */
-export function assignedKeys(file: string = storePath()): Set<string> {
-  return new Set(loadAssignments(file).map((a) => a.key));
+export function assignedKeys(record: string, file: string = assignmentsPath(record)): Set<string> {
+  return new Set(loadAssignments(record, file).map((a) => a.key));
 }
 
 /** The moments collected but not yet assigned — the "waiting" set the flush gate inspects, and
  *  exactly the work the engine places next run (engine.ts `grow`). */
-export function pendingMoments(file: string = storePath()): Moment[] {
-  const seen = assignedKeys(file);
-  return loadMoments().filter((m) => !seen.has(m.key));
+export function pendingMoments(record: string, file: string = assignmentsPath(record)): Moment[] {
+  // BOTH sides scoped to the record: its own store's seen-set, over its own slice of the pile. A
+  // filter on the seen-set alone would report every other assistant's moment as forever-pending here.
+  const seen = assignedKeys(record, file);
+  return loadMoments().filter((m) => m.record === record && !seen.has(m.key));
 }
 
 /**
@@ -74,7 +78,8 @@ export function pendingMoments(file: string = storePath()): Moment[] {
  */
 export function writeAssignments(
   records: Assignment[],
-  file: string = storePath(),
+  record: string,
+  file: string = assignmentsPath(record),
   mode: 'append' | 'replace' = 'append',
 ): void {
   if (!records.length && mode === 'append') return;

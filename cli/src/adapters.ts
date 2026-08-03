@@ -203,10 +203,20 @@ export function anyArmed(): boolean {
  * it here is better than the alternative of guessing a format from a file's contents.
  */
 export function recordFor(path: string): RecordAdapter {
+  // LONGEST MATCH WINS, and that is not a refinement — first-match is wrong here. Our vault nests:
+  // Claude Code's slice IS the vault root (flat, by history) and every later Record gets a
+  // subdirectory inside it. So an archived Codex rollout sits under BOTH `~/.stratless/archive` and
+  // `~/.stratless/archive/codex`, and asking the registry in order hands it to Claude Code — which
+  // then parses a rollout as Claude JSONL, silently, because a rollout is also valid JSONL. The more
+  // specific root is the one that actually owns the file.
+  let best: { record: RecordAdapter; len: number } | undefined;
   for (const a of registry) {
-    if (a.record.roots().some((r) => path === r || path.startsWith(r.endsWith(sep) ? r : r + sep))) return a.record;
+    for (const r of a.record.roots()) {
+      const under = path === r || path.startsWith(r.endsWith(sep) ? r : r + sep);
+      if (under && (!best || r.length > best.len)) best = { record: a.record, len: r.length };
+    }
   }
-  return registry[0].record;
+  return best?.record ?? registry[0].record;
 }
 
 /** Our managed block, present in a file we did not write. The marker is shared by every Return
@@ -244,6 +254,27 @@ export function unloadEverywhere(): Adapter[] {
 /** Which assistants are currently being handed this person's profile. */
 export function loadedInto(): Adapter[] {
   return registry.filter((a) => a.load.loaded());
+}
+
+/**
+ * DELIVER TO ANY ASSISTANT THAT DOES NOT HAVE THE PROFILE YET — arrival, as opposed to freshness.
+ *
+ * `loadEverywhere` runs after a build and keeps a COPY from ageing. That is a different failure from
+ * the one here: an assistant with no copy AT ALL cannot be reached by a rebuild it never triggers.
+ * A person who adds a second assistant to a working install is exactly there — the profile is
+ * current, so nothing rebuilds, so the new tool stays empty — and so is anyone returning from
+ * `stop`, which unloads every tool and then points at `update`.
+ *
+ * Returns the assistants that NEWLY received it, so a caller can name them. Empty when everyone
+ * already had it, which is the common case and costs one file read per detected tool.
+ */
+export function deliverMissing(): Adapter[] {
+  const missing = detect().filter((a) => !a.load.loaded());
+  if (!missing.length) return [];
+  loadEverywhere();
+  // Re-ask rather than assume: with no profile on disk a load leg writes nothing and reports
+  // nothing, and claiming a delivery that did not happen is the one thing this must not do.
+  return missing.filter((a) => a.load.loaded());
 }
 
 /** Does the vault ROOT hold a transcript of its own — as opposed to merely existing because some

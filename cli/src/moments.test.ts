@@ -125,7 +125,7 @@ test('a refused tool is NAMED on the moment — denied travels from the raw deni
 });
 
 test('the pile is the recorded event: decline beats interrupt, a bare tool-use interrupt is ordinary', () => {
-  const ex = (fields: Partial<Exchange>): Exchange => ({ reaction: 'r', hash: 'h', session: 's', ts: 't', prompt: 'p', said: '', ...fields });
+  const ex = (fields: Partial<Exchange>): Exchange => ({ reaction: 'r', hash: 'h', session: 's', record: 'claude-code', ts: 't', prompt: 'p', said: '', ...fields });
   assert.equal(pileOf(ex({ interrupted: 'plain' })), 'interrupt');
   assert.equal(pileOf(ex({ declined: true })), 'decline');
   assert.equal(pileOf(ex({ declined: true, interrupted: 'plain' })), 'decline', 'an explicit rejection is the stronger signal');

@@ -12,7 +12,7 @@ import { signatures, phrasesOf, isMachineArtifact, NUMBERED } from './shorthand.
 
 let seq = 0;
 const lab = (session: string, kinds: string[], reply: string): Labelled => ({
-  moment: { key: `k${seq++}`, session, ts: '2026-07-01T10:00:00Z', pile: 'ordinary', reply, replyLen: reply.length },
+  moment: { key: `k${seq++}`, session, record: 'claude-code', ts: '2026-07-01T10:00:00Z', pile: 'ordinary', reply, replyLen: reply.length },
   kinds,
 });
 const cat = (name: string, scope?: string): Category => ({ name, description: name, bornAt: '2026-06-01T00:00:00Z', ...(scope ? { scope } : {}) });

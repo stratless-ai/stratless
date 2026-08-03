@@ -23,7 +23,7 @@ const at = (axis: number, dims = 8, jitter = 0): Float32Array => {
 
 const moment = (session: string, pile: Moment['pile'] = 'ordinary'): Moment => ({
   key: `${session}:${Math.random()}`,
-  session,
+  session, record: 'claude-code',
   ts: '2026-07-01T00:00:00Z',
   pile,
   reply: 'x',

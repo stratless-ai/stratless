@@ -133,13 +133,26 @@ export function readStream(raw: string): StreamRead {
  *  answer — and an exceeded buffer throws, which the caller would swallow into silence. */
 const MAX_BUFFER = 32 * 1024 * 1024;
 
+/**
+ * Where the `codex` binary is. The pin (`STRATLESS_CODEX_BIN`) exists for the detached worker: a
+ * hook worker inherits a thin PATH where `which codex` fails, and without a captured absolute path
+ * the rule "Codex profile, Codex brain" would hold in a terminal and silently fall back to Claude
+ * on every background refresh. Mirrors `findAssistant()`/`STRATLESS_CLAUDE_BIN` exactly.
+ */
+function findCodex(): string | undefined {
+  const pinned = process.env.STRATLESS_CODEX_BIN;
+  if (pinned && existsSync(pinned)) return pinned;
+  return onPath('codex') ? 'codex' : undefined;
+}
+
 export const codexBrain: Brain = {
   id: 'codex',
   displayName: 'Codex',
-  detect: () => onPath('codex'),
+  detect: () => findCodex() !== undefined,
 
   ask(input, opts): BrainAnswer | undefined {
-    if (!onPath('codex')) return undefined;
+    const bin = findCodex();
+    if (!bin) return undefined;
 
     const root = mkdtempSync(join(tmpdir(), 'stratless-borrow-'));
     const home = join(root, 'home');
@@ -172,7 +185,7 @@ export const codexBrain: Brain = {
       const childEnv: Record<string, string | undefined> = { ...process.env, CODEX_HOME: home };
       delete childEnv.STRATLESS_FLUSH; // our consent signal must never ride into a borrowed session
 
-      const raw = execFileSync('codex', args, {
+      const raw = execFileSync(bin, args, {
         encoding: 'utf8',
         env: childEnv,
         timeout: opts.timeoutMs,
