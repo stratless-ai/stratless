@@ -34,7 +34,8 @@
  */
 import { createInterface } from 'node:readline';
 import { existsSync, readFileSync } from 'node:fs';
-import { humanMdPath } from './profile.js';
+import { humanMdPath, profilePath } from './profile.js';
+import { registry } from './adapters.js';
 
 /** The protocol version we answer with when a client does not name one. */
 const FALLBACK_PROTOCOL = '2025-06-18';
@@ -77,23 +78,59 @@ export const TOOL = {
 };
 
 /**
- * The profile as it stands right now, read at call time so a rebuild is live everywhere with nothing
- * to re-inject. Refuses honestly when there is nothing built: silence beats inventing a person.
+ * The profiles as they stand right now, read at call time so a rebuild is live everywhere with
+ * nothing to re-inject. Refuses honestly when there is nothing built: silence beats inventing a
+ * person.
+ *
+ * EVERY PAIR'S PROFILE, EACH LABELLED WITH THE RELATIONSHIP IT WAS MEASURED IN. An MCP client is a
+ * tool stratless loads into but has never read — a pair with no history — so it gets no unlabelled
+ * profile at all: handing Cursor a file measured in Claude Code as if it were about Cursor is the
+ * exact cross-pair claim the per-record split removed. Labelled, the consumer knows precisely what
+ * it is holding: how this person works with each assistant stratless CAN read, and that none of it
+ * was measured here. The merged-era file serves the interim between an upgrade and the rebuild.
  */
-export function profileText(file: string = humanMdPath()): { text: string; isError: boolean } {
-  if (!existsSync(file)) {
-    return {
-      text: 'No profile has been built yet on this machine. Ask the person to run `stratless update`, and treat them as unknown until then rather than guessing.',
-      isError: true,
-    };
-  }
-  try {
-    const raw = readFileSync(file, 'utf8').trim();
+export function profileText(file?: string): { text: string; isError: boolean } {
+  const readOne = (path: string): string | undefined => {
+    try {
+      const raw = readFileSync(path, 'utf8').trim();
+      return raw || undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  // An explicit file (tests, and the legacy serve path) keeps the single-file behaviour.
+  if (file) {
+    if (!existsSync(file)) {
+      return {
+        text: 'No profile has been built yet on this machine. Ask the person to run `stratless update`, and treat them as unknown until then rather than guessing.',
+        isError: true,
+      };
+    }
+    const raw = readOne(file);
     if (!raw) return { text: 'The profile file exists but is empty. Treat the person as unknown.', isError: true };
     return { text: raw, isError: false };
-  } catch {
-    return { text: 'The profile could not be read on this machine. Treat the person as unknown.', isError: true };
   }
+
+  const parts: string[] = [];
+  for (const a of registry) {
+    const path = profilePath(a.record.id);
+    if (!existsSync(path)) continue;
+    const raw = readOne(path);
+    if (raw) parts.push(`# As observed working with ${a.displayName}\n\n${raw}`);
+  }
+  if (parts.length) {
+    return {
+      text: `${parts.join('\n\n---\n\n')}\n\n---\nEach section above was measured inside ONE assistant's own history. None of it was measured with you — read it as how this person works with those tools, not as a claim about this conversation.`,
+      isError: false,
+    };
+  }
+  const legacy = existsSync(humanMdPath()) ? readOne(humanMdPath()) : undefined;
+  if (legacy) return { text: legacy, isError: false };
+  return {
+    text: 'No profile has been built yet on this machine. Ask the person to run `stratless update`, and treat them as unknown until then rather than guessing.',
+    isError: true,
+  };
 }
 
 type Req = { jsonrpc?: string; id?: string | number | null; method?: string; params?: Record<string, unknown> };

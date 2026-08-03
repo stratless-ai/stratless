@@ -14,30 +14,31 @@ import { join } from 'node:path';
 import { agentsMdPath, loadInto, loaded, unload } from './load-codex.js';
 import { writeProfile } from './profile.js';
 
-/** A machine with a Codex home and a profile already built. */
+/** A machine with a Codex home and the CODEX PAIR's profile already built — the copy's source is
+ *  `HUMAN.codex.md`, never a merged artifact (the per-record doctrine). */
 function machine(fn: (home: string, profile: string) => void): void {
   const root = mkdtempSync(join(tmpdir(), 'load-codex-'));
   const home = join(root, '.codex');
-  const profile = join(root, 'HUMAN.md');
+  const profile = join(root, 'HUMAN.codex.md');
   mkdirSync(home, { recursive: true });
   const savedHome = process.env.CODEX_HOME;
-  const savedProfile = process.env.STRATLESS_HUMAN_MD;
+  const savedProfile = process.env.STRATLESS_PROFILE_DIR;
   process.env.CODEX_HOME = home;
-  process.env.STRATLESS_HUMAN_MD = profile;
+  process.env.STRATLESS_PROFILE_DIR = root;
   try {
     fn(home, profile);
   } finally {
     if (savedHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = savedHome;
-    if (savedProfile === undefined) delete process.env.STRATLESS_HUMAN_MD;
-    else process.env.STRATLESS_HUMAN_MD = savedProfile;
+    if (savedProfile === undefined) delete process.env.STRATLESS_PROFILE_DIR;
+    else process.env.STRATLESS_PROFILE_DIR = savedProfile;
     rmSync(root, { recursive: true, force: true });
   }
 }
 
 test('the profile is COPIED in, because Codex has no import to follow', () => {
-  machine((home) => {
-    writeProfile('offer them a plan before building');
+  machine((home, profile) => {
+    writeProfile('offer them a plan before building', profile);
     const written = loadInto();
     assert.equal(written, join(home, 'AGENTS.md'));
     const body = readFileSync(written!, 'utf8');
@@ -49,9 +50,9 @@ test('the profile is COPIED in, because Codex has no import to follow', () => {
 test('an override file SHADOWS AGENTS.md, so that is where the profile goes', () => {
   // The silent failure this prevents: Codex reads AGENTS.override.md INSTEAD of AGENTS.md when one
   // exists. A perfect block in the wrong file is a profile nobody ever loads, with no error.
-  machine((home) => {
+  machine((home, profile) => {
     writeFileSync(join(home, 'AGENTS.override.md'), '# my own instructions\n');
-    writeProfile('the profile');
+    writeProfile('the profile', profile);
     assert.equal(agentsMdPath(), join(home, 'AGENTS.override.md'), 'the live file is the one Codex would actually read');
     const written = loadInto();
     assert.equal(written, join(home, 'AGENTS.override.md'));
@@ -60,17 +61,17 @@ test('an override file SHADOWS AGENTS.md, so that is where the profile goes', ()
 });
 
 test("the person's own instructions are never touched", () => {
-  machine((home) => {
+  machine((home, profile) => {
     const agents = join(home, 'AGENTS.md');
     writeFileSync(agents, '# always use tabs\n# never force push\n');
-    writeProfile('first profile');
+    writeProfile('first profile', profile);
     loadInto();
     let body = readFileSync(agents, 'utf8');
     assert.ok(body.includes('# always use tabs') && body.includes('# never force push'));
 
     // A rebuild replaces only what is between the markers — the copy has to refresh, since nothing
     // about it updates itself.
-    writeProfile('second profile');
+    writeProfile('second profile', profile);
     loadInto();
     body = readFileSync(agents, 'utf8');
     assert.ok(body.includes('second profile'), 'the fresh profile is in');
@@ -81,7 +82,7 @@ test("the person's own instructions are never touched", () => {
 });
 
 test('no profile yet means no block — not an empty one', () => {
-  machine((home) => {
+  machine((home, profile) => {
     assert.equal(loadInto(), undefined, 'nothing to deliver, so nothing is written');
     assert.equal(loaded(), false);
     assert.equal(existsSync(join(home, 'AGENTS.md')), false, "and no file is created just to hold an empty block");
@@ -89,10 +90,10 @@ test('no profile yet means no block — not an empty one', () => {
 });
 
 test('unloading closes the gap and leaves everything else alone', () => {
-  machine((home) => {
+  machine((home, profile) => {
     const agents = join(home, 'AGENTS.md');
     writeFileSync(agents, '# mine above\n');
-    writeProfile('a profile');
+    writeProfile('a profile', profile);
     loadInto();
     writeFileSync(agents, readFileSync(agents, 'utf8') + '\n# mine below\n');
 

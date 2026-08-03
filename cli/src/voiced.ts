@@ -31,13 +31,16 @@
  *
  * NO MODEL CALLS HERE. This store only remembers what one was paid for.
  */
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { recordDir } from './stores.js';
 import { readFileSync } from 'node:fs';
 
 import { atomicWriteFileSync } from './atomic.js';
 
-const voicedPath = (): string => process.env.STRATLESS_VOICED || join(homedir(), '.stratless', 'voiced.json');
+/** Per record: a voice is the wording of ONE pair's category, so the cache lives on that pair's
+ *  shelf. This also ends two hazards the shared file had — two records minting the same kebab name
+ *  colliding on one row, and one record's prune deleting the other's paid-for voices. */
+export const voicedPath = (record: string): string => join(recordDir(record), 'voiced.json');
 
 /** Kept as a local union (write.ts imports this module, so importing its Section back would
  *  close a cycle). 'none' is the router's real answer: this behaviour fits no section. */
@@ -63,7 +66,7 @@ interface VoicedStore {
 
 /** Defensive read — corrupt input degrades to empty, never throws (the renders.json discipline).
  *  A lost cache costs one re-voicing, never a lie. */
-export function readVoiced(file: string = voicedPath()): VoicedStore {
+export function readVoiced(record: string, file: string = voicedPath(record)): VoicedStore {
   try {
     const raw = JSON.parse(readFileSync(file, 'utf8')) as { rows?: unknown };
     if (!Array.isArray(raw.rows)) return { rows: [] };
@@ -90,7 +93,7 @@ export function readVoiced(file: string = voicedPath()): VoicedStore {
   }
 }
 
-export function writeVoiced(store: VoicedStore, file: string = voicedPath()): void {
+export function writeVoiced(store: VoicedStore, record: string, file: string = voicedPath(record)): void {
   atomicWriteFileSync(file, JSON.stringify(store, null, 1));
 }
 
@@ -141,13 +144,14 @@ export function voicingPlan(work: VoiceWork[], store: VoicedStore): VoicingPlan 
 export function rememberVoiced(
   newRows: VoicedRow[],
   liveKeys: { name: string; bornAt: string }[],
-  file: string = voicedPath(),
+  record: string,
+  file: string = voicedPath(record),
 ): void {
-  const store = readVoiced(file);
+  const store = readVoiced(record, file);
   const live = new Set(liveKeys.map((k) => keyOf(k.name, k.bornAt)));
   const kept = store.rows.filter((r) => live.has(keyOf(r.name, r.bornAt)));
   const have = new Set(kept.map((r) => keyOf(r.name, r.bornAt)));
   const added = newRows.filter((r) => live.has(keyOf(r.name, r.bornAt)) && !have.has(keyOf(r.name, r.bornAt)));
   if (!added.length && kept.length === store.rows.length) return; // nothing moved
-  writeVoiced({ rows: [...kept, ...added] }, file);
+  writeVoiced({ rows: [...kept, ...added] }, record, file);
 }

@@ -23,10 +23,12 @@
  * naming call is synchronous (the stop-latency caveat, flagged for the worker pass).
  */
 import { existsSync } from 'node:fs';
-import { brains, pickBrain } from './brains.js';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { brainFor, brains, pickBrain } from './brains.js';
 import { buildMoments, loadMoments } from './moments.js';
-import { firstDrift } from './adapters.js';
-import { loadCategories } from './categories.js';
+import { detect, firstDrift, registry } from './adapters.js';
+import { loadCategories, type Category } from './categories.js';
 import { loadAssignments, pendingMoments } from './assign.js';
 import { join as joinLabelled, scoreboard } from './count.js';
 import { runLift } from './lift.js';
@@ -34,12 +36,12 @@ import { buildProfile, looksLikeProfile } from './write.js';
 import { coldBuild, engineReady, grow } from './engine.js';
 import { runtimePresent } from './embed.js';
 import { estimateBuild, estimateLine } from './estimate.js';
-import { humanMdPath, installedVersion, writeProfile } from './profile.js';
-import { loadEverywhere } from './adapters.js';
+import { humanMdPath, installedVersion, profilePath, writeProfile } from './profile.js';
+import { deliverMissing, loadEverywhere } from './adapters.js';
 import { startRun } from './stopwatch.js';
 import { dailyCheck } from './notify.js';
 import { refreshArmed } from './rhythm-claude-code.js';
-import { readState, writeState, writeRender, flushDue, flushCooldownMs, coldBuildRequested, clearColdBuildRequest } from './state.js';
+import { readState, writeState, writeRender, readRenders, latestRender, flushDue, flushCooldownMs, coldBuildRequested, clearColdBuildRequest } from './state.js';
 import { readUsage, diffUsage, fmtTokens } from './usage.js';
 import { acquireLock, releaseLock, lockFilePath } from './worker.js';
 import { writeProgress } from './progress.js';
@@ -153,108 +155,112 @@ export async function runWorker(): Promise<number> {
       if (drift) return fail(drift.reason!.split('\n'));
       summary.push('no conversations found yet — talk to your assistant a few times, then run `stratless update`');
     } else {
-      let cats = loadCategories();
-      let changed = false; // categories or assignments changed this run → force the profile rebuild
-      let flush = true; // cold start always flushes; steady state decides (flushDue) — the per-turn-rebuild fix
+      // ── PER RECORD, START TO FINISH (the doctrine, 2026-08-03) ─────────────────────────────
+      //
+      // One pass of this pipeline per assistant on the machine: that record's categories, that
+      // record's frozen engine, that record's counts, that record's file. Nothing below ever holds
+      // two records' moments in one array — the stores make cross-record writes unrepresentable,
+      // and this loop is what keeps the READS honest too.
+      //
+      // This is also where the old machine-global cold-vs-steady branch died. It asked "has this
+      // MACHINE built?", so a second assistant installed after the first build could never reach
+      // its own cold path — the steady branch swallowed it forever. Asking per record makes a new
+      // assistant exactly what it is: a new pair, starting cold.
+      const here = detect();
+      const consented = manual || coldBuildRequested();
+      let consumedConsent = false;
+      const label = (name: string): string => (here.length > 1 ? `${name}: ` : '');
 
-      // COLD when there is no profile yet OR no frozen model to grow against. That second clause is
-      // THE UPGRADE PATH and it is not optional: a machine that ran a previous engine has categories
-      // but no engine.json, and branching on categories alone would send it down the steady path
-      // forever — nothing to join against, nothing placed, silently never updating again.
-      if (!cats.length || !engineReady()) {
-        // COLD START — the one paid run: shape, fingerprint, cluster, then ONE call to name. It only
-        // ever runs on CONSENT: `manual` (STRATLESS_FLUSH, set by a hand-typed update or the door's
-        // yes for THIS worker) OR a DURABLE consent flag (coldBuildRequested), so a lock race that
-        // hands the build to a different worker still honors the yes. A background hook has neither,
-        // so it collects the pile (free, above) and stops HERE — nothing billed. Both signals are set
-        // only by an explicit yes: "no surprise spend" is structural.
-        const consented = manual || coldBuildRequested();
-        if (!consented) {
-          flush = false; // nothing scored, no profile yet — skip the scoreboard/rebuild block below
-          const est = estimateLine(estimateBuild(loadMoments().length));
-          // TWO WAYS TO LAND HERE, and they deserve different words: a fresh machine that has never
-          // built, and a machine whose frozen centroids predate the current runtime/model stamp
-          // (the 0.6.0 migration, or any future versioned change). The second person HAS a profile
-          // — telling them "full build not run yet" would be a wrong reason, and a wrong reason is
-          // worse than none.
-          // Point at the door that will actually work: a 0.5.x machine migrating has no runtime on
-          // disk, so `update` would refuse and bounce them to `init` — say `init` directly. A
-          // machine whose runtime is present (e.g. a batch/stamp migration) goes straight to
-          // `update`. One hop, never two.
-          summary.push(
-            cats.length
-              ? runtimePresent()
-                ? `the engine changed — your patterns need one rebuild to stay honest: run \`stratless update\` (${est})`
-                : `the engine changed — run \`stratless init\` to fetch the new runtime, then \`stratless update\` rebuilds your patterns (${est})`
-              : `collected ${built.total} moment${built.total === 1 ? '' : 's'} · full build not run yet — run \`stratless update\` to build your profile (${est})`,
-          );
-        } else {
-          // COLD START: the engine shapes, fingerprints, clusters, names, and freezes. Everything up
-          // to the naming call is arithmetic on this machine — the whole build is one small call.
-          // The consent is now being taken up: consume the durable flag so it is honored exactly once.
-          clearColdBuildRequest();
+      // THE FLUSH DECISION stays machine-level — cadence is about how often this machine spends
+      // attention, not a property of any one pair — but the waiting count feeding it is the union
+      // of each record's own pending set, since "pending" is per store now.
+      const waiting = here.flatMap((a) => pendingMoments(a.record.id));
+      const flush = flushDue(waiting, readState().lastFlushAt, Date.now(), manual, { maxAgeMs: flushMaxAgeMs() }).flush;
+
+      // Records that finish this loop BUILT (cold or steady) flow into the flush block below.
+      // `changed` is per record: one pair's new moments must not rebuild another pair's file.
+      const ready: { a: (typeof here)[number]; cats: Category[]; changed: boolean; justBuilt: boolean }[] = [];
+      let collectedOnly = 0;
+
+      for (const a of here) {
+        if (stopRequested) break;
+        const record = a.record.id;
+        let cats = loadCategories(record);
+
+        if (!cats.length || !engineReady(record)) {
+          // THIS RECORD'S COLD START — the one paid run, per pair. Consent is machine-level (the
+          // door's yes covers every assistant present when it was given, and its quote summed
+          // them); the flag is consumed once, by the first build that takes it up.
+          if (!consented) {
+            const own = loadMoments().filter((m) => m.record === record).length;
+            const est = estimateLine(estimateBuild(own));
+            // A machine upgraded from the merged era has EMPTY per-record stores and a legacy
+            // engine.json — that person HAS a profile and must hear "the engine changed", never
+            // "full build not run yet": a wrong reason is worse than none.
+            const upgraded = existsSync(join(homedir(), '.stratless', 'engine.json'));
+            summary.push(
+              cats.length || upgraded
+                ? runtimePresent()
+                  ? `${label(a.displayName)}the engine changed — your patterns need one rebuild to stay honest: run \`stratless update\` (${est})`
+                  : `${label(a.displayName)}the engine changed — run \`stratless init\` to fetch the new runtime, then \`stratless update\` rebuilds your patterns (${est})`
+                : `${label(a.displayName)}collected ${own} moment${own === 1 ? '' : 's'} · full build not run yet — run \`stratless update\` to build your profile (${est})`,
+            );
+            continue; // unbuilt and unconsented: nothing further for this record, others proceed
+          }
+          if (!consumedConsent) {
+            clearColdBuildRequest();
+            consumedConsent = true;
+          }
           const buildStart = Date.now();
-          const dr = await coldBuild({
-            onProgress: (l: string) => writeProgress({ phase: 'starting', startedAt, summary: [l] }),
+          const dr = await coldBuild(record, {
+            onProgress: (l: string) => writeProgress({ phase: 'starting', startedAt, summary: [`${label(a.displayName)}${l}`] }),
             shouldStop: () => stopRequested,
           });
           sw.stage('build', Date.now() - buildStart, dr.scored);
-          cats = loadCategories();
+          cats = loadCategories(record);
           if (dr.categories) {
-            changed = true;
             summary.push(
-              `found ${dr.categories} pattern${dr.categories === 1 ? '' : 's'} in ${dr.scored} moment${dr.scored === 1 ? '' : 's'} — fingerprinted on this machine, one call to name them`,
+              `${label(a.displayName)}found ${dr.categories} pattern${dr.categories === 1 ? '' : 's'} in ${dr.scored} moment${dr.scored === 1 ? '' : 's'} — fingerprinted on this machine, one call to name them`,
             );
+            ready.push({ a, cats, changed: true, justBuilt: true });
           } else if (dr.unnamed) {
-            // Say what actually happened. The patterns are there and cached; only the naming call
-            // failed, so the next run picks up exactly where this one stopped.
             summary.push(
-              `found ${dr.piles} pattern${dr.piles === 1 ? '' : 's'}, but ${brain.displayName} did not name them — nothing was lost, run \`stratless update\` to try again`,
+              `${label(a.displayName)}found ${dr.piles} pattern${dr.piles === 1 ? '' : 's'}, but ${(brainFor(record) ?? brain).displayName} did not name them — nothing was lost, run \`stratless update\` to try again`,
             );
           } else if (dr.noModel) {
-            // A wrong reason is worse than none: without this the person is told there is not enough
-            // behaviour to profile, when in fact the engine never arrived (or was deleted).
             summary.push('the local engine is not on this machine yet — run `stratless init` to fetch it, then `stratless update`');
           } else {
-            summary.push('not enough recurring behaviour to build a profile yet — keep working, then run `stratless update`');
+            summary.push(`${label(a.displayName)}not enough recurring behaviour to build a profile yet — keep working, then run \`stratless update\``);
           }
-        }
-      } else {
-        // STEADY STATE: collect always (free, above); only tag + rebuild when a flush is due: you
-        // ran `update` by hand, or it has been past the cooldown (the person's cadence — weekly by
-        // default). Every other nudge just leaves the new moments collected and spends nothing.
-        const waiting = pendingMoments();
-        flush = flushDue(waiting, readState().lastFlushAt, Date.now(), manual, { maxAgeMs: flushMaxAgeMs() }).flush;
-
-        if (!flush) {
-          summary.push(
-            waiting.length
-              ? `collected ${waiting.length} new moment${waiting.length === 1 ? '' : 's'} — nothing to flush yet`
-              : 'nothing new since the last flush',
-          );
-        } else {
-          // STEADY STATE: new moments come to the FROZEN pile centres. No clustering, no naming, no
-          // model call — this path is free. Piles keep their names and birth dates, which is what
-          // makes "rising" and "fading" mean anything: you are watching the same crowd over time,
-          // not comparing this month's piles against last month's different ones.
+        } else if (flush) {
+          // STEADY: this record's new moments meet its own frozen centres. Free.
           const growStart = Date.now();
-          const res = await grow({ shouldStop: () => stopRequested });
+          const res = await grow(record, { shouldStop: () => stopRequested });
           sw.stage('grow', Date.now() - growStart, res.scored);
           if (res.scored) {
-            changed = true;
             summary.push(
-              `placed ${res.scored} new moment${res.scored === 1 ? '' : 's'} against ${cats.length} patterns — free, on this machine`,
+              `${label(a.displayName)}placed ${res.scored} new moment${res.scored === 1 ? '' : 's'} against ${cats.length} patterns — free, on this machine`,
             );
-          } else if (manual) {
-            summary.push('already current — nothing new to place');
           }
-
-          // NOT YET: a moment near NOTHING should be parked, and parked moments that later resemble
-          // each other should be born as a new pile and named. Until that lands, a genuinely new
-          // behaviour is absorbed into the nearest existing pile and cannot surface. This is where
-          // re-discovery used to sit, and it is the next build.
+          ready.push({ a, cats, changed: res.scored > 0, justBuilt: false });
+        } else {
+          collectedOnly += pendingMoments(record).length;
         }
       }
+
+      if (!flush && collectedOnly >= 0 && ready.length === 0 && here.some((a) => loadCategories(a.record.id).length)) {
+        summary.push(
+          collectedOnly
+            ? `collected ${collectedOnly} new moment${collectedOnly === 1 ? '' : 's'} — nothing to flush yet`
+            : 'nothing new since the last flush',
+        );
+      } else if (flush && ready.length && ready.every((r) => !r.changed && !r.justBuilt) && manual) {
+        summary.push('already current — nothing new to place');
+      }
+
+      // NOT YET: a moment near NOTHING should be parked, and parked moments that later resemble
+      // each other should be born as a new pile and named. Until that lands, a genuinely new
+      // behaviour is absorbed into the nearest existing pile and cannot surface. Per record now.
 
       // A stop from either path: everything scored so far is banked, the next run resumes.
       if (stopRequested) {
@@ -265,53 +271,101 @@ export async function runWorker(): Promise<number> {
         return 0; // the finally releases the lock
       }
 
-      // SHARED (flush only): the scoreboard (arithmetic, free), then the profile file (stage 4). A
-      // non-flush nudge skips all of this — the number moves on a flush, which we accepted. Rebuild
-      // the file when the category set or the pile changed, or when no profile exists yet. Stamp the
-      // flush time so the ceiling measures from here.
-      if (flush) {
-        // The scoreboard (the WIDER distress rate — moments the categories flag as correcting, ~13/100)
-        // is RECORDED here but NEVER shown to the user. The one user-facing friction number is the
-        // mirror's course-corrections rate (`mirror` + the init door, ~2.5/100 — literal Escape presses).
-        // Showing both would put two near-identical "corrections per 100" figures on screen, 5x apart —
-        // the exact confusion the mirror's KPI was split out to avoid. Kept in state for the record.
-        const labelledAll = joinLabelled(loadMoments(), loadAssignments());
-        const board = scoreboard(labelledAll, cats);
-        writeState({ ...readState(), scoreboard: { rate: board.rate, at: new Date().toISOString() }, lastFlushAt: new Date().toISOString() });
+      // FLUSH, PER RECORD: the scoreboard (arithmetic, free), the lift pass, then the pair's file.
+      // A record that just cold-built flushes regardless of the cadence — its first file must not
+      // wait a day. Everything in here reads ONE record's slice; nothing sums across two.
+      if (ready.length) {
+        const momentsAll = loadMoments();
+        const scoreboards = { ...(readState().scoreboards ?? {}) };
+        for (const { a, cats, changed, justBuilt } of ready) {
+          if (!flush && !justBuilt) continue;
+          const record = a.record.id;
+          const labelled = joinLabelled(momentsAll.filter((m) => m.record === record), loadAssignments(record));
+          // The wider distress rate, recorded per pair and never shown (the mirror's number is the
+          // user-facing one). Measured inside one relationship — a rate averaged over two would
+          // describe neither.
+          const board = scoreboard(labelled, cats);
+          scoreboards[record] = { rate: board.rate, at: new Date().toISOString() };
 
-        // THE LIFT PASS — the tuning service loop (war room: §The Self-Retune Re-Founding): PROVE
-        // every open patch against its birth baseline, RELEASE what earned an exit, mint what the
-        // whole pipeline cleared — the one worded call, already on the paid path. Arithmetic
-        // decides what exists; the model only words each patch once. A moved patch set forces the
-        // profile rebuild below.
-        const liftStart = Date.now();
-        const lr = runLift(labelledAll, cats, Date.now());
-        sw.stage('lift', Date.now() - liftStart, lr.minted + lr.retired);
-        if (lr.minted) summary.push(`${lr.minted} patch${lr.minted === 1 ? '' : 'es'} minted — the counts decided; the model only worded it`);
-        if (lr.retired) summary.push(`${lr.retired} patch${lr.retired === 1 ? '' : 'es'} retired — the tune thinned`);
+          // THE LIFT PASS, on this record's own evidence: its labelled slice, its categories, its
+          // engine for re-homing, its roots for the ask walk. LIFT grades ONE AI by doctrine, and
+          // now by construction.
+          const liftStart = Date.now();
+          const lr = runLift(labelled, cats, Date.now(), {
+            record,
+            isPrimary: a.id === registry[0].id,
+            roots: a.record.roots(),
+          });
+          sw.stage('lift', Date.now() - liftStart, lr.minted + lr.retired);
+          if (lr.minted) summary.push(`${label(a.displayName)}${lr.minted} patch${lr.minted === 1 ? '' : 'es'} minted — the counts decided; the model only worded it`);
+          if (lr.retired) summary.push(`${label(a.displayName)}${lr.retired} patch${lr.retired === 1 ? '' : 'es'} retired — the tune thinned`);
 
-        if (changed || lr.changed || !existsSync(humanMdPath())) {
-          const writeStart = Date.now();
-          const profile = buildProfile();
-          sw.stage('write', Date.now() - writeStart, profile ? 1 : 0);
-          if (profile && looksLikeProfile(profile.text)) {
-            const builtAt = new Date().toISOString(); // one stamp for BOTH the HUMAN.md header and the sidecar — they must agree
-            // Two steps, deliberately visible: write the one artifact, then get each assistant to
-            // read it. The second is per-tool and the first never is — and it runs on EVERY build
-            // rather than at install, because one of the two delivery shapes is a copy and a copy
-            // written once is a profile that quietly ages.
-            writeProfile(profile.text, undefined, builtAt);
-            loadEverywhere();
-            writeRender('profile', { builtAt, sessions: profile.meta.sessions, exchanges: profile.meta.moments, categories: loadCategories().length });
-            summary.push(
-              `profile written and loaded · ${profile.meta.frame} to offer + ${profile.meta.judge} to catch + ${profile.meta.register} register${profile.meta.rules ? ` + ${profile.meta.rules} to move` : ''}${profile.meta.shorthand ? ` + ${profile.meta.shorthand} shorthand handles` : ''}`,
-            );
-          } else {
-            summary.push('profile not rebuilt — not enough clear evidence yet');
+          if (changed || lr.changed || !existsSync(profilePath(record))) {
+            const writeStart = Date.now();
+            const profile = buildProfile(record);
+            sw.stage('write', Date.now() - writeStart, profile ? 1 : 0);
+            if (profile && looksLikeProfile(profile.text)) {
+              const builtAt = new Date().toISOString(); // one stamp for BOTH the file header and the sidecar — they must agree
+              writeProfile(profile.text, profilePath(record), builtAt);
+              // STAMP THE VOICE, per pair. A change of brain is a change of wording with no other
+              // visible cause; the record of what actually ran makes it answerable.
+              // The stamp records the voice THIS PAIR's build ran with — brainFor, not the global
+              // pick: it is the line that caught the unwired rule, and it must keep telling the truth.
+              const wrote = brainFor(record);
+              const before = latestRender(readRenders(), record)?.brain;
+              writeRender(record, {
+                builtAt,
+                sessions: profile.meta.sessions,
+                exchanges: profile.meta.moments,
+                categories: cats.length,
+                ...(wrote ? { brain: wrote.id } : {}),
+              });
+              if (wrote && before && before !== wrote.id) {
+                const was = brains.find((b) => b.id === before)?.displayName ?? before;
+                summary.push(`${label(a.displayName)}your profile is now worded by ${wrote.displayName}, not ${was}`);
+              }
+              summary.push(
+                `${label(a.displayName)}profile written and loaded · ${profile.meta.frame} to offer + ${profile.meta.judge} to catch + ${profile.meta.register} register${profile.meta.rules ? ` + ${profile.meta.rules} to move` : ''}${profile.meta.shorthand ? ` + ${profile.meta.shorthand} shorthand handles` : ''}`,
+              );
+            } else {
+              summary.push(`${label(a.displayName)}profile not rebuilt — not enough clear evidence yet`);
+            }
           }
         }
+        if (flush) {
+          writeState({ ...readState(), scoreboards, lastFlushAt: new Date().toISOString() });
+        } else {
+          writeState({ ...readState(), scoreboards });
+        }
+        // Get each assistant to read its own pair's file — on every build, because one of the
+        // delivery shapes is a copy and a copy written once is a profile that quietly ages.
+        loadEverywhere();
       }
     }
+
+    // DELIVERY IS NOT A SIDE EFFECT OF REBUILDING.
+    //
+    // The write path above hands the profile to every assistant on every build, which is what keeps
+    // a COPY from silently ageing. It cannot help an assistant that has no copy AT ALL, because
+    // reaching that branch requires a rebuild, and a machine whose profile is already current never
+    // runs one. Two ordinary situations land exactly there: a person adds a second assistant to a
+    // working install (the profile is current, so nothing rebuilds, so the new tool stays empty),
+    // and `stop` — which unloads from every tool and then points at `update`, whose own contract has
+    // always promised that a gated skip still loads.
+    //
+    // So ask the only question delivery actually turns on: does each assistant on this machine HAVE
+    // the profile? Outside every gate above, because none of them are about that — not whether a
+    // flush is due, not whether the pile moved. Cheap when there is nothing to do: one file read per
+    // detected tool, and no write unless somebody is missing it.
+    if (detect().some((a) => existsSync(profilePath(a.record.id))) || existsSync(humanMdPath())) {
+      // Name who it reached, and only who it actually reached — a delivery nobody is told about is
+      // the same invisibility that let this sit unnoticed behind a status line reading "yes".
+      const arrived = deliverMissing();
+      if (arrived.length) {
+        summary.push(`profile loaded into ${arrived.map((a) => a.displayName).join(' and ')} — it was not there yet`);
+      }
+    }
+
     sw.record();
 
     // The daily version line rides ONLY on the installed hook (the consent artifact) — same rule as

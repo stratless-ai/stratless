@@ -25,7 +25,7 @@
  * `# Who you are working with` header and the format marker when it installs, so repeating the
  * header here would double it.
  */
-import { pickBrain } from './brains.js';
+import { brainFor } from './brains.js';
 import { loadCategories } from './categories.js';
 import { loadAssignments } from './assign.js';
 import { loadMoments, type Moment } from './moments.js';
@@ -45,6 +45,70 @@ const QUOTE_TIMEOUT_MS = 900_000;
 /** The anchor pile is built FROM interrupts, so a bare-interruption category re-derives our own
  *  labelling — it never belongs in the file (the prototype's CIRCULAR). */
 const CIRCULAR = new Set(['interjects-single-word-pause']);
+
+/** A break longer than this ends a stretch of history. A month off is a holiday; six months is a
+ *  different era, and a lone session on the far side of one does not describe where a person's
+ *  history is. */
+const WINDOW_GAP_DAYS = 30;
+
+const DAY_MS = 86_400_000;
+
+/**
+ * WHERE THE EVIDENCE ACTUALLY IS — the span the provenance line may claim.
+ *
+ * Naïvely this is min(ts) to max(ts), and that broke the moment a second assistant arrived: one
+ * Codex rollout from December 2025 sat six months before the rest of the corpus and stretched the
+ * stated range to "2025-12-17 to 2026-08-03" over a pile that is 99.98% ten weeks old. True, and
+ * misleading — the line exists to tell a reader where the evidence is.
+ *
+ * PER RECORD, THEN UNION, and the order matters. Continuity belongs to one assistant's own
+ * timeline: a person who worked in Codex through the spring and Claude Code since June has two
+ * unbroken stretches, not one broken one, and judging them together would bridge nothing and drop
+ * the spring entirely. Judged separately and then spanned, both eras are claimed — which is the
+ * truth about that person even though no single tool covers it.
+ *
+ * The span may therefore contain a gap. That is correct: this is a window, not a promise of daily
+ * activity. What it may not do is start at a session that has nothing near it.
+ */
+export function evidenceWindow(moments: Moment[]): { from: string; to: string } {
+  const byRecord = new Map<string, string[]>();
+  for (const m of moments) {
+    if (!m.ts) continue;
+    const day = m.ts.slice(0, 10);
+    const days = byRecord.get(m.record);
+    if (days) days.push(day);
+    else byRecord.set(m.record, [day]);
+  }
+  let from: string | undefined;
+  let to: string | undefined;
+  let rawFrom: string | undefined;
+  let rawTo: string | undefined;
+  for (const days of byRecord.values()) {
+    const uniq = [...new Set(days)].sort();
+    const end = uniq[uniq.length - 1];
+    if (!rawFrom || uniq[0] < rawFrom) rawFrom = uniq[0];
+    if (!rawTo || end > rawTo) rawTo = end;
+    let start = uniq[0];
+    let startIdx = 0;
+    for (let i = 0; i + 1 < uniq.length; i++) {
+      const gap = (Date.parse(uniq[i + 1]) - Date.parse(uniq[i])) / DAY_MS;
+      if (Number.isFinite(gap) && gap > WINDOW_GAP_DAYS) {
+        start = uniq[i + 1];
+        startIdx = i + 1;
+      }
+    }
+    // A SINGLE DAY IS NOT A STRETCH. Without this an assistant whose entire history is one ancient
+    // session still sets the boundary — there is no gap *within* one day to break, so the per-record
+    // rule never fires and the six-month lie comes straight back. Two days of use is the smallest
+    // thing that can honestly be called a period of working.
+    if (uniq.length - startIdx < 2) continue;
+    if (!from || start < from) from = start;
+    if (!to || end > to) to = end;
+  }
+  // Nobody has two days yet — a machine days old. Claim the raw span rather than nothing: there is
+  // no era to distinguish, so there is nothing to be misled about.
+  return { from: from ?? rawFrom ?? '', to: to ?? rawTo ?? '' };
+}
 
 export interface ProfileMeta {
   sessions: number;
@@ -126,6 +190,7 @@ export interface Voiced {
  *  file rather than ship a line whose receipt fails. */
 export function pickAndVoice(
   work: { name: string; description: string; lift: number; cands: Moment[] }[],
+  record: string,
 ): Map<string, Voiced> {
   const body = work
     .map((w) => {
@@ -164,7 +229,7 @@ Reply with JSON only:
 {"picks":[{"name":"<exact name>","section":"frame|judge|register|none","line":"<instruction>","quote":<number or 0>,"signal":"<six words or fewer>"}]}
 
 ${body}`;
-  const brain = pickBrain();
+  const brain = brainFor(record);
   if (!brain) return new Map<string, Voiced>();
   const answer = brain.ask(prompt, { role: 'main', feature: 'write', timeoutMs: QUOTE_TIMEOUT_MS, schema: VOICE_SCHEMA });
   const out = new Map<string, Voiced>();
@@ -233,6 +298,10 @@ function block(claim: string, stat: CategoryStat, sec: Section, cl?: Clause): st
   // earned — never a section of its own (the founder's read killed that: a separate section was
   // the design's internal schema leaking into the file). The receipt then carries both sides:
   // the row's own count and the gap's slip count, with any trend word on the gap itself.
+  // The verdict prints bare — `met`, no owner label — because the FILE is the owner now: every
+  // count and both sides of every verdict in a pair's profile were measured inside that one
+  // relationship (the per-record doctrine). The other assistant has its own file and its own
+  // verdicts; naming tools inside this one would be exactly the cross-pair claim the split removed.
   const bits: string[] = [];
   if (stat.direction && (sec === 'register' || stat.verified)) bits.push(stat.direction);
   if (stat.burst) bits.push('comes in bursts');
@@ -412,12 +481,16 @@ export function looksLikeProfile(text: string): boolean {
  * lines re-stamp fresh while the wording never moves — which also ends the write-side wobble.
  * Null when there is nothing worth shipping. `injectProfile` (load.ts) installs the text.
  */
-export function buildProfile(): { text: string; meta: ProfileMeta } | null {
-  const cats = loadCategories().filter((c) => !CIRCULAR.has(c.name));
+export function buildProfile(record: string): { text: string; meta: ProfileMeta } | null {
+  // ONE PAIR'S FILE FROM ONE PAIR'S EVIDENCE. Everything below — the categories, the slice of the
+  // pile, the assignments, the voice cache, the lift print — is this record's own. A count in the
+  // file it produces was counted inside one relationship, which is what lets every receipt print
+  // bare: the file itself is the owner label.
+  const cats = loadCategories(record).filter((c) => !CIRCULAR.has(c.name));
   if (!cats.length) return null;
-  const moments = loadMoments();
+  const moments = loadMoments().filter((m) => m.record === record);
   if (!moments.length) return null;
-  const labelled = join(moments, loadAssignments());
+  const labelled = join(moments, loadAssignments(record));
   const stats = tally(labelled, cats);
 
   const work = stats
@@ -428,10 +501,10 @@ export function buildProfile(): { text: string; meta: ProfileMeta } | null {
   const bornOf = new Map(cats.map((c) => [c.name, c.bornAt]));
   const plan = voicingPlan(
     work.map((w) => ({ name: w.name, bornAt: bornOf.get(w.name) ?? '', candidateReplies: w.cands.map((m) => m.reply) })),
-    readVoiced(),
+    readVoiced(record),
   );
   const missingWork = work.filter((w) => plan.missing.includes(w.name));
-  const fresh = missingWork.length ? pickAndVoice(missingWork) : new Map<string, Voiced>();
+  const fresh = missingWork.length ? pickAndVoice(missingWork, record) : new Map<string, Voiced>();
   if (fresh.size) {
     const voicedAt = new Date().toISOString();
     rememberVoiced(
@@ -445,6 +518,7 @@ export function buildProfile(): { text: string; meta: ProfileMeta } | null {
         voicedAt,
       })),
       cats.map((c) => ({ name: c.name, bornAt: c.bornAt })),
+      record,
     );
   }
 
@@ -455,17 +529,23 @@ export function buildProfile(): { text: string; meta: ProfileMeta } | null {
   for (const [name, v] of voiced) if (v.signal) signals.set(name, v.signal);
   const sigs = signatures(labelled, cats);
 
-  const times = moments.map((m) => m.ts).filter(Boolean).sort();
+  // EVERY NUMBER IN THE PROVENANCE DESCRIBES THE SAME WINDOW. Counting conversations over the whole
+  // pile while stating a trimmed range would put the seam back in a different place: a reader could
+  // not reconcile "161 conversations" with a span that holds 162. The moment outside it is not
+  // discarded — it is in the piles, it is evidence, it counts toward every row — it simply does not
+  // get to set the boundary or be advertised in it.
+  const win = evidenceWindow(moments);
+  const inWindow = moments.filter((m) => m.ts && m.ts.slice(0, 10) >= win.from && m.ts.slice(0, 10) <= win.to);
   return assemble(
     stats,
     voiced,
     {
-      sessions: new Set(moments.map((m) => m.session)).size,
-      moments: moments.length,
-      from: (times[0] ?? '').slice(0, 10),
-      to: (times[times.length - 1] ?? '').slice(0, 10),
+      sessions: new Set(inWindow.map((m) => m.session)).size,
+      moments: inWindow.length,
+      from: win.from,
+      to: win.to,
     },
     { sigs, signals },
-    liftPrint(),
+    liftPrint(record),
   );
 }

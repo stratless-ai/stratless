@@ -230,14 +230,14 @@ test('C8: startRun().record() merges into existing state — never clobbers, rin
   const f = join(dir, 'state-record.json');
   process.env.STRATLESS_STATE = f;
   try {
-    writeState({ lastFlushAt: '2026-07-16T00:00:00Z', scoreboard: { rate: 12.5, at: '2026-07-16T00:00:00Z' } });
+    writeState({ lastFlushAt: '2026-07-16T00:00:00Z', scoreboards: { 'claude-code': { rate: 12.5, at: '2026-07-16T00:00:00Z' } } });
     const sw = startRun();
     sw.stage('judge', 1234, 5, [200, 300, 250, 180, 304]);
     sw.stage('synthesis', 900, 1);
     sw.record();
     const s = readState();
     assert.equal(s.lastFlushAt, '2026-07-16T00:00:00Z', 'the rest of the state survives');
-    assert.deepEqual(s.scoreboard, { rate: 12.5, at: '2026-07-16T00:00:00Z' });
+    assert.deepEqual(s.scoreboards, { 'claude-code': { rate: 12.5, at: '2026-07-16T00:00:00Z' } }, 'per record — a rate is measured inside one pair');
     assert.equal(s.stopwatch!.length, 1);
     const run = s.stopwatch![0];
     assert.equal(run.stages.length, 2);

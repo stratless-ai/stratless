@@ -75,6 +75,9 @@ import { PASTE_BOUND, isTypedMessage, type DriftReport, type Session, type Turn 
 
 /** Where Codex keeps its rollouts. `CODEX_HOME` moves the whole directory, and honouring it is what
  *  lets a test drive a fixture without touching a real one. */
+/** This Record's id — one source, shared with the registry entry in `adapters.ts`. */
+export const RECORD_ID = 'codex';
+
 export function roots(): string[] {
   return [codexSessions(), archiveSlice()];
 }
@@ -456,7 +459,7 @@ export function* readSessions(rs: string[] = roots()): Generator<Session> {
   const seen = new Set<string>();
   for (const path of transcriptFiles(rs)) {
     const turns = turnsOfFile(path, seen);
-    if (turns.length) yield { path, session: turns[0].session, turns };
+    if (turns.length) yield { path, session: turns[0].session, turns, record: RECORD_ID };
   }
 }
 

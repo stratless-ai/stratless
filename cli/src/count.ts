@@ -181,6 +181,12 @@ export interface SupplyRead {
 }
 
 export function supplyRead(labelled: Labelled[], name: string, adj?: Adjacency): SupplyRead | undefined {
+  // ONE ASSISTANT PER READ, enforced rather than assumed. This is the verdict that says an AI met
+  // this person, and both of its legs are tool-specific: the actions are that tool's tool names, and
+  // a decline means something slightly different in each (a Codex decline covers stopping a running
+  // command as well as refusing one). Averaging two tools here would produce a number that describes
+  // neither. A caller who has not sliced the pile gets nothing back, which is the honest answer.
+  if (new Set(labelled.map((l) => l.moment.record)).size > 1) return undefined;
   const action = actionFor(labelled, name, adj ?? adjacencyOf(labelled));
   if (!action) return undefined;
   // Refuse, don't lie: a pile with no denial data ANYWHERE cannot clear the declines leg — this
@@ -350,7 +356,8 @@ export interface CategoryStat {
   /** The trend was confirmed from BOTH sides of the conversation: met always is; fading is when
    *  the assistant's supply faded with the asking. Only a verified trend may print on a
    *  demand-shaped row (write.ts) — a one-sided fading there instructs sabotage of a working
-   *  adaptation. */
+   *  adaptation. Both sides belong to ONE pair by construction now: tally's input is a single
+   *  record's slice, so a bare `met` needs no owner label — the file it prints in IS the owner. */
   verified?: true;
   /** the assistant action this category's asks are answered with — met's evidence, derived per build */
   action?: string;
@@ -378,6 +385,8 @@ export function tally(labelled: Labelled[], categories: Category[]): CategorySta
     const dir = direction(labelled, c.name);
     // Only a fading ask gets the two-sided read: fading is the one stamp that can instruct an
     // assistant to stop doing something that is working, so it alone must survive both sides.
+    // The labelled set is one record's slice by construction (the per-record doctrine), so the
+    // verdict is that pair's own — `supplyRead`'s mixed-slice refusal is the assertion of that.
     let stamped: 'rising' | 'fading' | 'met' | undefined = dir;
     let verified: true | undefined;
     let action: string | undefined;
@@ -387,7 +396,7 @@ export function tally(labelled: Labelled[], categories: Category[]): CategorySta
       if (read) {
         action = read.action;
         if (read.supplyRatio >= FADE && !read.declinesRose) {
-          stamped = 'met'; // the asking faded because the doing kept happening, untrefused
+          stamped = 'met'; // the asking faded because the doing kept happening, unrefused
           verified = true;
         } else if (read.supplyRatio <= FADE) {
           verified = true; // both sides quiet — the fade is real on the evidence of both

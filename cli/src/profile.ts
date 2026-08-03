@@ -23,7 +23,21 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { atomicWriteFileSync } from './atomic.js';
 
-/** The canonical profile artifact — the file every assistant ultimately reads, one way or another.
+/**
+ * ONE PAIR'S PROFILE — `HUMAN.<record>.md`, one file per HUMAN+AI relationship.
+ *
+ * There is no "the" profile any more (the per-record doctrine, 2026-08-03): what was measured with
+ * one assistant describes that relationship and no other, so each assistant reads the file its own
+ * history earned. The directory is shared; the record id in the name is what keeps a Codex tool
+ * from ever being handed claims measured in Claude Code.
+ */
+export function profilePath(record: string): string {
+  return join(process.env.STRATLESS_PROFILE_DIR || join(homedir(), '.stratless'), `HUMAN.${record}.md`);
+}
+
+/** The merged-era artifact — one file, every assistant. Never WRITTEN any more; still read during
+ *  the interim between an upgrade and the first consented per-record rebuild (the old profile keeps
+ *  serving rather than vanishing), and named to the person by `stop` as their data to keep.
  *  Override with STRATLESS_HUMAN_MD. */
 export function humanMdPath(): string {
   return process.env.STRATLESS_HUMAN_MD || join(homedir(), '.stratless', 'HUMAN.md');

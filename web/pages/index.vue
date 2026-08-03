@@ -135,16 +135,16 @@ useHead({
   <span class="t-b">WHO YOU'RE WORKING WITH</span>
 
   <span class="t-d">##</span> <span class="t-b">What to offer me before I ask</span>
-  - offer to confirm a specific bounded starting
-    scope back to them before proceeding. <span class="t-d">(268×)</span>
+  - offer to enter a planning step before touching
+    any implementation. <span class="t-d">(258× · slip 28×)</span>
 
   <span class="t-d">##</span> <span class="t-b">What to catch for me</span>
-  - catch any unmeasured cost claim, they want the
-    real cost measured before it's trusted. <span class="t-d">(96×)</span>
+  - catch unverified claims of done work; they want it
+    double-checked before being told it's finished. <span class="t-d">(122×)</span>
 
   <span class="t-d">##</span> <span class="t-b">How to talk to me</span>
-  - talk in short exchanges, since a quick 'yes go ahead'
-    means proceed now without re-explaining the plan. <span class="t-d">(149×)</span>
+  - talk in short imperatives back, matching their
+    terse next-action style. <span class="t-d">(302×)</span>
 
   <span class="t-d">not loaded yet · load it into your assistant: stratless update</span>
 

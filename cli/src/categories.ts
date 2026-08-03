@@ -31,12 +31,13 @@
  * NO MODEL CALLS. Everything here is code. Cost is zero.
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { recordDir } from './stores.js';
 
-/** Where the columns live. Override with STRATLESS_CATEGORIES (tests). */
-const storePath = (): string =>
-  process.env.STRATLESS_CATEGORIES || join(homedir(), '.stratless', 'categories.jsonl');
+/** Where ONE RECORD's columns live. Categories are discovered from one assistant's moments and
+ *  describe that pair only, so the store is per record — a name minted for one pair can never
+ *  collide with, retire, or masquerade as another's. Override base with STRATLESS_RECORDS_DIR. */
+export const categoriesPath = (record: string): string => join(recordDir(record), 'categories.jsonl');
 
 export type CategoryEventKind = 'born' | 'revised' | 'retired';
 
@@ -85,7 +86,7 @@ function replay(live: Map<string, Category>, ev: CategoryEvent): void {
 }
 
 /** The live category set — the log folded to what is currently in play. Missing store = no columns. */
-export function loadCategories(file: string = storePath()): Category[] {
+export function loadCategories(record: string, file: string = categoriesPath(record)): Category[] {
   if (!existsSync(file)) return [];
   const live = new Map<string, Category>();
   for (const line of readFileSync(file, 'utf8').split('\n')) {
@@ -109,9 +110,9 @@ export function loadCategories(file: string = storePath()): Category[] {
  */
 export function appendCategories(
   cats: { name: string; description: string; scope?: string }[],
-  opts: { file?: string; at?: string } = {},
+  opts: { record: string; file?: string; at?: string },
 ): number {
-  const file = opts.file ?? storePath();
+  const file = opts.file ?? categoriesPath(opts.record);
   const at = opts.at ?? new Date().toISOString();
   const lines = cats.map((c) =>
     JSON.stringify({
@@ -133,8 +134,8 @@ export function appendCategories(
  * appending its own `born` events — the log keeps every tombstone (auditability), the live set
  * folds to only the current generation. Returns how many were written.
  */
-export function retireCategories(names: string[], opts: { file?: string; at?: string } = {}): number {
-  const file = opts.file ?? storePath();
+export function retireCategories(names: string[], opts: { record: string; file?: string; at?: string }): number {
+  const file = opts.file ?? categoriesPath(opts.record);
   const at = opts.at ?? new Date().toISOString();
   const lines = names.map((name) => JSON.stringify({ event: 'retired', name, description: '', at } as CategoryEvent));
   if (!lines.length) return 0;

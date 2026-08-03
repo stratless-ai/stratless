@@ -37,27 +37,28 @@ Who you are working with              (stratless · read from your own history)
 
 ## In the moment
 
-- "yes plan" · "lets plan" → wants plan before commitment
-- work is about to proceed without a plan laid out
-  → stop and plan it out with me first
+- "yes plan" · "can we plan" → wants a plan before code
+- a new or multi-step task begins → pause and offer
+  a concise plan before implementing anything
 
 ## What to offer me before I ask
 
-- offer a full plan mode with targets, scope, and timeline
-  before executing on anything ambitious — and when work is
-  about to proceed without a plan laid out, stop and plan it
-  out with me first. (238×, met · slip 25×)
+- offer to enter a planning step before touching any
+  implementation — and when a new or multi-step task begins,
+  pause and offer a concise plan before implementing
+  anything. (258× · slip 28×)
 
 ## What to catch for me
 
-- catch unverified claims of completed work, they want a
-  double-check and full explanation before trusting it. (104×)
+- catch unverified claims of done work; they want it
+  double-checked before being told it's finished. (122×)
 
 ## How to talk to me
 
-- talk in a loose, playful register when they riff on content
-  ideas, matching their energy rather than formalizing
-  prematurely. (99×, fading)
+- treat a bare "yes, run X" as full authorization; don't ask
+  for restatement — and when the coding is finished and a run
+  or test is next, check the scope with me before
+  proceeding. (203×, fading · slip 16×)
 ```
 
 Not a rules sheet you wrote. A brief on a person, derived from your real history and nothing you
@@ -114,7 +115,7 @@ No model of ours. No server. No training. No separate bill.
 3. **Count.** Every count is plain arithmetic: how often, over what span, rising, fading, or `met`,
    which means the asking faded because the assistant already does the thing, read from both sides
    of the conversation. The model names, the code counts, so no number in your profile is a guess.
-4. **Load.** `stratless update` writes the profile to `~/.stratless/HUMAN.md` and points your
+4. **Load.** `stratless update` writes one profile per assistant — `~/.stratless/HUMAN.claude-code.md`, `~/.stratless/HUMAN.codex.md` — each derived only from that assistant's own history, and points your
    assistant's config at it, so your next session starts already knowing you. The after-session
    refresh keeps it current; `stratless stop` turns that off and unloads it.
 

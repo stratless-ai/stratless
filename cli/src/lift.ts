@@ -31,12 +31,13 @@
  */
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { recordDir } from './stores.js';
 import { readFileSync } from 'node:fs';
 
 import { atomicWriteFileSync } from './atomic.js';
 import { dot } from './cluster.js';
 import { loadEngine } from './engine.js';
-import { pickBrain } from './brains.js';
+import { brainFor } from './brains.js';
 import type { Category } from './categories.js';
 import {
   gapCandidates,
@@ -59,7 +60,9 @@ import {
   type MetaEvidence,
 } from './asks.js';
 
-const liftPath = (): string => process.env.STRATLESS_LIFT || join(homedir(), '.stratless', 'lift.json');
+/** Per record by doctrine: LIFT grades ONE AI, so its ledger lives on that AI's shelf. The
+ *  PRINT_CAP budget, the meta evidence and the delegated trigger all stop being shared. */
+const liftPath = (record: string): string => join(recordDir(record), 'lift.json');
 
 /* ——— pre-registered constants — mode 1 (2026-07-28, from the gap-leg probes) ——— */
 /** a window needs this many assigned moments before its rates may heal a mode-1 patch */
@@ -128,6 +131,19 @@ export interface Patch {
   form: PatchForm;
   /** the map row this patch edits — THE address (mode 2's global home: ASK_ALTITUDE_HOME) */
   home: string;
+  /**
+   * WHICH ASSISTANT THIS GRADES. LIFT grades the AI, so a patch belongs to one — its evidence is
+   * that AI's actions and that AI's declines, and those are not comparable across tools.
+   *
+   * The HOME it hangs off is shared: ADAPT rows describe the person and are the same row whichever
+   * tool they were typed into. So one universal row can carry a verdict from each assistant, which
+   * is the whole shape of the file.
+   *
+   * ABSENT ON EVERY PATCH MINTED BEFORE THIS EXISTED. They are read as the first registered Record
+   * rather than dropped: they were earned on a machine that had only one, and discarding a proven
+   * patch to avoid writing this sentence would be the worse trade.
+   */
+  record?: string;
   /** the embedding pipeline any stored geometry lives in */
   pipeline: string;
   /** mode-1 re-homing geometry — the BIRTH centroid, never updated */
@@ -161,7 +177,7 @@ export interface LiftStore {
 }
 
 /** Defensive read — corrupt input degrades to empty, never throws (the renders.json discipline). */
-export function readLift(file: string = liftPath()): LiftStore {
+export function readLift(record: string, file: string = liftPath(record)): LiftStore {
   try {
     const raw = JSON.parse(readFileSync(file, 'utf8')) as { patches?: unknown; meta?: unknown; delegatedZones?: unknown };
     if (!Array.isArray(raw.patches)) return { patches: [] };
@@ -180,6 +196,7 @@ export function readLift(file: string = liftPath()): LiftStore {
         mode: o.mode,
         form: o.form === 'sharpen' || o.form === 'trigger' || o.form === 'grow' ? o.form : 'sharpen',
         home: o.home,
+        ...(typeof o.record === 'string' && o.record ? { record: o.record } : {}),
         pipeline: typeof o.pipeline === 'string' ? o.pipeline : '',
         ...(Array.isArray(o.centroid) ? { centroid: o.centroid.filter((n): n is number => typeof n === 'number') } : {}),
         evidence:
@@ -221,7 +238,7 @@ export function readLift(file: string = liftPath()): LiftStore {
   }
 }
 
-export function writeLift(store: LiftStore, file: string = liftPath()): void {
+export function writeLift(store: LiftStore, record: string, file: string = liftPath(record)): void {
   atomicWriteFileSync(file, JSON.stringify(store, null, 1));
 }
 
@@ -386,8 +403,8 @@ export function patchVoiceJobs(labelled: Labelled[], candidates: GapCandidate[])
   }));
 }
 
-export function voicePatches(jobs: PatchVoiceJob[]): Map<string, { x: string; doThis: string; y: string; clause: string }> {
-  const brain = pickBrain();
+export function voicePatches(jobs: PatchVoiceJob[], record: string): Map<string, { x: string; doThis: string; y: string; clause: string }> {
+  const brain = brainFor(record);
   const body = jobs
     .map((j) => {
       const parts = [
@@ -462,17 +479,27 @@ export function runLift(
   labelled: Labelled[],
   categories: Category[],
   nowMs: number,
-  opts: { file?: string; roots?: string[] } = {},
+  opts: { file?: string; roots?: string[]; record: string; isPrimary?: boolean },
 ): LiftRunResult {
-  const file = opts.file ?? liftPath();
-  const store = readLift(file);
-  const engine = loadEngine();
+  const file = opts.file ?? liftPath(opts.record);
+  // LIFT GRADES ONE AI, so the pass sees one AI's turns and nothing else. Everything below reads
+  // `mine`, never `labelled`: a verdict earned in Claude Code must not be computed from moments the
+  // person produced in Codex, because the two tools do not record a decline the same way.
+  const mine = labelled.filter((l) => l.moment.record === opts.record);
+  // A patch minted before patches knew about assistants belongs to the first registered Record —
+  // it was earned on a machine that had only one. Adopting it beats discarding proven work.
+  const owns = (p: Patch): boolean => p.record === opts.record || (!!opts.isPrimary && !p.record);
+  const store = readLift(opts.record, file);
+  const engine = loadEngine(opts.record);
   const engineView = engine
     ? { labels: engine.labels, centroids: engine.centroids as unknown as ArrayLike<number>[], pipeline: engine.pipeline ?? '' }
     : undefined;
   const liveNames = new Set(categories.map((c) => c.name));
   const builtAt = new Date(nowMs).toISOString();
-  const adj = adjacencyOf(labelled);
+  // ONE ADJACENCY, over this record's own moments. Mode 2's evidence is asks, and asks are
+  // moments — so it is per record like everything else (the doctrine, 2026-08-03; this reversed
+  // the earlier prose-is-universal call the same day).
+  const adj = adjacencyOf(mine);
   let storeMoved = false;
   let changed = false;
   let retired = 0;
@@ -481,11 +508,12 @@ export function runLift(
   // evidence snapshot. The walk can be empty (reaped roots, tests): the read then refuses and the
   // snapshot keeps its last honest value; mode-1 work never stalls on it.
   const walk = walkAnswers(opts.roots);
-  const read = asksRead(labelled, adj, walk);
+  const read = asksRead(mine, adj, walk);
   const rituals = read ? new Set(read.rituals) : undefined;
 
   // 1. PROVE + RELEASE every open patch.
   for (const patch of store.patches) {
+    if (!owns(patch)) continue; // another pair's ledger row — not this pass's to touch
     if (patch.state === 'healed' || patch.state === 'lapsed' || patch.state === 'wrong') continue; // terminal
     const at = rehome(patch, liveNames, engineView);
     if ('dormant' in at) {
@@ -505,10 +533,10 @@ export function runLift(
 
     let entry: PatchHistoryEntry;
     if (patch.mode === 1) {
-      const win = gapWindowRead(labelled, patch.home, nowMs);
+      const win = gapWindowRead(mine, patch.home, nowMs);
       entry = { builtAt, fail: win.slipRate, sessions: win.stumbleSessions, sample: win.sample, reach: win.reach, chances: win.chances };
       if (patch.action) {
-        const supply = supplyRead(labelled, patch.home);
+        const supply = supplyRead(mine, patch.home);
         if (supply) {
           entry.hold = supply.supplyRatio;
           entry.refusedRose = supply.declinesRose;
@@ -518,7 +546,7 @@ export function runLift(
       // A mode-2 patch without rituals this release keeps its history unchanged — refuse, don't
       // guess a quiet window out of a failed witness.
       if (!rituals) continue;
-      const win = askWindowRead(labelled, patch.terms ?? [], adj, rituals, nowMs);
+      const win = askWindowRead(mine, patch.terms ?? [], adj, rituals, nowMs);
       entry = { builtAt, fail: win.askRate, sessions: win.sessions, sample: win.sample, engage: win.engageRate, chances: win.sessions };
     }
     patch.history = [...patch.history.filter((e) => e.builtAt !== builtAt), entry].slice(-HISTORY_CAP);
@@ -534,8 +562,9 @@ export function runLift(
   }
 
   // 2. The mode-2 evidence snapshot — the two templated lines' backing, refreshed each release.
+  //    Per record like the store it lives in: each pair's asks, each pair's bounces.
   if (read && rituals) {
-    const delivery = deliverySpec(labelled, rituals);
+    const delivery = deliverySpec(mine, rituals);
     const meta = metaEvidence(read, delivery);
     if (JSON.stringify(store.meta) !== JSON.stringify(meta)) {
       store.meta = meta;
@@ -551,18 +580,18 @@ export function runLift(
 
   // 3. ADMIT + PATCH — mode 1 only (mode 2 has no minting path by construction; see the header).
   //    Covered-forever on (home, mode): a dead patch's axis does not silently re-mint.
-  const covered = new Set(store.patches.filter((p) => p.mode === 1).map((p) => p.home));
-  const candidates = gapCandidates(labelled, categories).filter((c) => !covered.has(c.name));
+  const covered = new Set(store.patches.filter((p) => owns(p) && p.mode === 1).map((p) => p.home));
+  const candidates = gapCandidates(mine, categories).filter((c) => !covered.has(c.name));
   let minted = 0;
   if (candidates.length && engineView) {
-    const jobs = patchVoiceJobs(labelled, candidates);
-    const voiced = voicePatches(jobs);
+    const jobs = patchVoiceJobs(mine, candidates);
+    const voiced = voicePatches(jobs, opts.record);
     for (const j of jobs) {
       const v = voiced.get(j.candidate.name);
       if (!v) continue;
       const idx = engineView.labels.indexOf(j.candidate.name);
       if (idx < 0) continue; // no geometry, no identity — cannot mint
-      const birth = gapWindowRead(labelled, j.candidate.name, nowMs);
+      const birth = gapWindowRead(mine, j.candidate.name, nowMs);
       // An unfalsifiable patch may not exist: the failure must be alive at birth.
       if (birth.slipRate <= 0) continue;
       store.patches.push({
@@ -571,6 +600,7 @@ export function runLift(
         mode: 1,
         form: 'sharpen',
         home: j.candidate.name,
+        record: opts.record,
         pipeline: engineView.pipeline,
         centroid: Array.from(engineView.centroids[idx] as ArrayLike<number>),
         evidence: { reach: j.candidate.reach, slip: j.candidate.slip, stumbleSessions: j.candidate.stumbleSessions.length },
@@ -586,7 +616,7 @@ export function runLift(
     }
   }
 
-  if (storeMoved) writeLift(store, file);
+  if (storeMoved) writeLift(store, opts.record, file);
   return { minted, retired, open: store.patches.filter((p) => p.state === 'open').length, changed };
 }
 
@@ -612,8 +642,8 @@ export interface LiftPrint {
   keyLines: string[];
 }
 
-export function liftPrint(file: string = liftPath()): LiftPrint {
-  const store = readLift(file);
+export function liftPrint(record: string, file: string = liftPath(record)): LiftPrint {
+  const store = readLift(record, file);
   const clauses = new Map<string, Clause>();
   const open = store.patches
     .filter((p) => p.state === 'open' && p.mode === 1 && p.wording.text)

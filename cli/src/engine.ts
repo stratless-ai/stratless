@@ -31,9 +31,12 @@ import { namePiles, type Named } from './name.js';
 import { loadMoments, type Moment } from './moments.js';
 import { shapeOf, vocabulary } from './shape.js';
 import { assignedKeys, writeAssignments, type Assignment } from './assign.js';
+import { recordDir } from './stores.js';
 
-/** Where the frozen model lives. Override with STRATLESS_ENGINE (tests). */
-const statePath = (): string => process.env.STRATLESS_ENGINE || join(homedir(), '.stratless', 'engine.json');
+/** Where ONE RECORD's frozen model lives. A vocabulary and a centroid are derived from one
+ *  assistant's moments and are meaningless against another's — so the file that holds them is that
+ *  record's own, and a cold build can only ever touch the shelf it was asked to build. */
+export const enginePath = (record: string): string => join(recordDir(record), 'engine.json');
 
 /** What this build of the CLI fingerprints with — BOTH halves. The runtime is the accent (native
  *  vs WASM measured at cosine ~0.995 on identical texts); the model is the LANGUAGE (different
@@ -62,7 +65,7 @@ export interface EngineState {
   pipeline?: string;
 }
 
-export function loadEngine(file: string = statePath()): EngineState | undefined {
+export function loadEngine(record: string, file: string = enginePath(record)): EngineState | undefined {
   if (!existsSync(file)) return undefined;
   try {
     return JSON.parse(readFileSync(file, 'utf8')) as EngineState;
@@ -85,12 +88,12 @@ export function loadEngine(file: string = statePath()): EngineState | undefined 
  * the next consented `update` down the cold path — the versioned, announced rebuild — instead of
  * quietly mis-joining new WASM vectors against native centres forever.
  */
-export function engineReady(file: string = statePath()): boolean {
-  const s = loadEngine(file);
+export function engineReady(record: string, file: string = enginePath(record)): boolean {
+  const s = loadEngine(record, file);
   return Boolean(s?.centroids.length && s.centroids.length === s.labels.length && s.pipeline === PIPELINE);
 }
 
-export function saveEngine(state: EngineState, file: string = statePath()): void {
+export function saveEngine(state: EngineState, record: string, file: string = enginePath(record)): void {
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, JSON.stringify(state));
 }
@@ -120,11 +123,14 @@ export interface BuildResult {
  * Writes all three stores together at the end, so an abrupt death leaves nothing half-built: the next
  * run sees no engine state and starts cleanly rather than reading a partial model as if it were whole.
  */
-export async function coldBuild(opts: {
+export async function coldBuild(record: string, opts: {
   onProgress?: (line: string) => void;
   shouldStop?: () => boolean;
 } = {}): Promise<BuildResult> {
-  const moments = loadMoments();
+  // ONE RECORD'S MOMENTS AND NOTHING ELSE. The vocabulary, the centroids, the categories and every
+  // assignment this build writes are derived inside one HUMAN+AI pair — a moment from another
+  // assistant may not shape a centre here, even slightly (the doctrine, 2026-08-03).
+  const moments = loadMoments().filter((m) => m.record === record);
   if (!moments.length) return { categories: 0, scored: 0, piles: 0 };
 
   opts.onProgress?.(`reading ${moments.length} moments`);
@@ -152,24 +158,27 @@ export async function coldBuild(opts: {
   if (opts.shouldStop?.()) return { categories: 0, scored: 0, piles: 0 };
 
   opts.onProgress?.(`naming ${piles.length} patterns`);
-  const named = namePiles(piles, moments);
+  const named = namePiles(piles, moments, record);
   if (!named.length) return { categories: 0, scored: 0, piles: piles.length, unnamed: true };
 
-  return freeze(moments, piles, named, vocab);
+  return freeze(record, moments, piles, named, vocab);
 }
 
 /** Write the three stores and the frozen model, together, once. No scope is stamped — the naming
  *  call no longer rules on person-vs-project (the verdict wobbled; see name.ts). `write.ts` keeps
  *  its project-filter as a dead-man switch that nothing trips. */
-function freeze(moments: Moment[], piles: Pile[], named: Named[], vocab: Set<string>): BuildResult {
+function freeze(record: string, moments: Moment[], piles: Pile[], named: Named[], vocab: Set<string>): BuildResult {
   const at = new Date().toISOString();
   // A cold build REPLACES every assignment below, so the outgoing generation is retired first —
   // otherwise every versioned rebuild stacks ~30 ghost categories that nothing carries (measured:
   // three rebuilds left 90 born, 0 retired). Tombstones keep the log auditable; the live set
   // folds to this build's generation only. A crash between retire and born leaves an empty live
   // set, which routes the next run back down the cold path — safe, never half-alive.
-  retireCategories(loadCategories().map((c) => c.name), { at });
-  appendCategories(named.map((n) => ({ name: n.name, description: n.description })), { at });
+  // Per-record stores make the old cross-record hazards unrepresentable: this retire can only
+  // tombstone THIS record's generation, and the replace below can only truncate THIS record's
+  // assignments. The other shelf is not reachable from here by construction.
+  retireCategories(loadCategories(record).map((c) => c.name), { record, at });
+  appendCategories(named.map((n) => ({ name: n.name, description: n.description })), { record, at });
 
   // A pile that no behaviour claimed contributes nothing — its moments get an empty `kinds`, which is
   // a real answer ("looked, matched nothing"), not an absence.
@@ -187,16 +196,19 @@ function freeze(moments: Moment[], piles: Pile[], named: Named[], vocab: Set<str
   // REPLACE, never append: `count.join()` emits one row per record, so a moment left holding an
   // older record as well would be counted twice and every number in the profile would inflate. A
   // cold build establishes the whole set — an upgrade from a previous engine lands exactly here.
-  writeAssignments(records, undefined, 'replace');
+  writeAssignments(records, record, undefined, 'replace');
 
   const kept = piles.filter((p) => labelOf.has(p.id));
-  saveEngine({
-    vocab: [...vocab],
-    centroids: kept.map((p) => [...p.centroid]),
-    labels: kept.map((p) => labelOf.get(p.id) as string),
-    builtAt: at,
-    pipeline: PIPELINE,
-  });
+  saveEngine(
+    {
+      vocab: [...vocab],
+      centroids: kept.map((p) => [...p.centroid]),
+      labels: kept.map((p) => labelOf.get(p.id) as string),
+      builtAt: at,
+      pipeline: PIPELINE,
+    },
+    record,
+  );
 
   return { categories: named.length, scored: records.length, piles: piles.length };
 }
@@ -219,8 +231,8 @@ export interface GrowResult {
  * learning. Measured at cold build only ~1.3% of moments fail the outlier test, so parking buys
  * little there; in growth it is the ONLY route by which the profile keeps learning, and it is next.
  */
-export async function grow(opts: { shouldStop?: () => boolean } = {}): Promise<GrowResult> {
-  const state = loadEngine();
+export async function grow(record: string, opts: { shouldStop?: () => boolean } = {}): Promise<GrowResult> {
+  const state = loadEngine(record);
   if (!state?.centroids.length) return { scored: 0 };
 
   // NEVER JOIN ACROSS RUNTIMES. engineReady() already routes a stale engine to the cold path, so
@@ -236,8 +248,8 @@ export async function grow(opts: { shouldStop?: () => boolean } = {}): Promise<G
   // seam skips the check: under STRATLESS_FAKE_EMBED nothing can fetch, by construction.)
   if (process.env.STRATLESS_FAKE_EMBED !== '1' && !runtimePresent()) return { scored: 0 };
 
-  const seen = assignedKeys();
-  const fresh = loadMoments().filter((m) => !seen.has(m.key));
+  const seen = assignedKeys(record);
+  const fresh = loadMoments().filter((m) => m.record === record && !seen.has(m.key));
   if (!fresh.length) return { scored: 0 };
 
   const vocab = new Set(state.vocab); // FROZEN — see the header
@@ -251,10 +263,13 @@ export async function grow(opts: { shouldStop?: () => boolean } = {}): Promise<G
 
   const centroids = state.centroids.map((c) => Float32Array.from(c));
   const at = new Date().toISOString();
-  writeAssignments(fresh.map((m, i) => ({
-    key: m.key,
-    at,
-    kinds: [state.labels[nearest(X[i], centroids)]].filter(Boolean),
-  })));
+  writeAssignments(
+    fresh.map((m, i) => ({
+      key: m.key,
+      at,
+      kinds: [state.labels[nearest(X[i], centroids)]].filter(Boolean),
+    })),
+    record,
+  );
   return { scored: fresh.length };
 }

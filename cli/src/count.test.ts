@@ -12,7 +12,7 @@ import { join, tally, computeLift, direction, misfitRate, scoreboard, actionFor,
 
 let seq = 0;
 const lab = (pile: Pile, session: string, kinds: string[], ts = '2026-07-01T10:00:00Z'): Labelled => ({
-  moment: { key: `k${seq++}`, session, ts, pile, reply: 'x', replyLen: 1 },
+  moment: { key: `k${seq++}`, session, record: 'claude-code', ts, pile, reply: 'x', replyLen: 1 },
   kinds,
 });
 const cat = (name: string): Category => ({ name, description: name, bornAt: '2026-06-01T00:00:00Z' });
@@ -26,7 +26,7 @@ test('computeLift: ratio, Infinity for distress-only, zero for never', () => {
 });
 
 test('join: pairs moments to kinds, drops assignments whose moment is gone', () => {
-  const m = (key: string): Moment => ({ key, session: 's', ts: day(1), pile: 'ordinary', reply: 'x', replyLen: 1 });
+  const m = (key: string): Moment => ({ key, session: 's', record: 'claude-code', ts: day(1), pile: 'ordinary', reply: 'x', replyLen: 1 });
   const joined = join([m('a'), m('b')], [
     { key: 'a', at: day(2), kinds: ['x'] },
     { key: 'gone', at: day(2), kinds: ['y'] },
@@ -108,7 +108,7 @@ test('direction: fading when the late half thins', () => {
  * filler so the halves stay populated and the action's base rate stays low. */
 const T = (d: number, h = 10, min = 0): string => `2026-07-${String(d).padStart(2, '0')}T${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}:00Z`;
 const labT = (pile: Pile, session: string, kinds: string[], ts: string, extra: Partial<Moment> = {}): Labelled => ({
-  moment: { key: `k${seq++}`, session, ts, pile, reply: 'x', replyLen: 1, ...extra },
+  moment: { key: `k${seq++}`, session, record: 'claude-code', ts, pile, reply: 'x', replyLen: 1, ...extra },
   kinds,
 });
 
@@ -165,6 +165,24 @@ test('no denial data anywhere in the pile blocks met — absence of refusals mus
   assert.equal(s.direction, 'fading');
   assert.equal(s.verified, undefined);
   assert.equal(s.action, undefined);
+});
+
+test('the verdict machinery never runs across records — a mixed slice is refused, not averaged', () => {
+  // THE DOCTRINE AS AN ASSERTION (2026-08-03): tally's input is one record's slice by construction
+  // now — the per-record stores make a mixed pile unbuildable upstream — and `supplyRead` refuses
+  // one outright as defense in depth. Both sides of a verdict are one tool's: its tool names, its
+  // declines. Averaged across two, the number would describe neither.
+  const rows = askPile({ unpromptedLate: true });
+  for (let i = 0; i < 20; i++) {
+    rows.push(labT('ordinary', `cx${i}`, ['plan'], T(1 + (i % 8), 16), { record: 'codex' }));
+  }
+  assert.equal(supplyRead(rows, 'plan'), undefined, 'a mixed slice is refused, not averaged');
+
+  // Sliced to one record — the only way the pipeline ever calls it now — the verdict returns.
+  const mine = rows.filter((r) => r.moment.record === 'claude-code');
+  const s = tally(mine, [cat('plan')])[0];
+  assert.equal(s.direction, 'met');
+  assert.equal(s.verified, true);
 });
 
 test('actionFor: below the adjacency evidence floor, no mapping', () => {

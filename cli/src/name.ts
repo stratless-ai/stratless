@@ -33,7 +33,7 @@
  * --safe-mode rides on every borrowed call, so the person's own HUMAN.md is never in context while
  * their profile is being derived ([[borrowed-calls-load-human-md]]).
  */
-import { pickBrain } from './brains.js';
+import { brainFor } from './brains.js';
 import type { Moment } from './moments.js';
 import type { Pile } from './cluster.js';
 
@@ -119,9 +119,10 @@ ${piles.map((p) => render(p, moments)).join('\n\n')}`;
  * Name every pile in one call. Returns [] when the assistant is unavailable or the reply is
  * unusable — refuse, don't lie: a build with no names writes no profile, which is the honest outcome.
  */
-export function namePiles(piles: Pile[], moments: Moment[]): Named[] {
+export function namePiles(piles: Pile[], moments: Moment[], record: string): Named[] {
   if (!piles.length) return [];
-  const brain = pickBrain();
+  // The pair's own voice names the pair's own piles — the rule, applied at the first paid call.
+  const brain = brainFor(record);
   if (!brain) return [];
   const answer = brain.ask(prompt(piles, moments), { role: 'main', feature: 'name', timeoutMs: TIMEOUT_MS, schema: SCHEMA });
   if (!answer) return [];

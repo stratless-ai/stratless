@@ -82,8 +82,10 @@ function makeHome(name: string, files: { exchanges: number; fat?: number }[]): {
     STRATLESS_RENDERS: join(st, 'renders.json'),
     STRATLESS_BUILD: join(st, 'build.json'),
     STRATLESS_MOMENTS: join(st, 'moments.jsonl'),
-    STRATLESS_CATEGORIES: join(st, 'categories.jsonl'),
-    STRATLESS_ASSIGNMENTS: join(st, 'assignments.jsonl'),
+    STRATLESS_RECORDS_DIR: join(st, 'records'),
+    STRATLESS_PROFILE_DIR: st,
+    STRATLESS_CATEGORIES: join(st, 'records', 'claude-code', 'categories.jsonl'),
+    STRATLESS_ASSIGNMENTS: join(st, 'records', 'claude-code', 'assignments.jsonl'),
     STRATLESS_HUMAN_MD: join(home, '.claude', 'HUMAN.md'),
     STRATLESS_CLAUDE_MD: join(home, '.claude', 'CLAUDE.md'),
   };
@@ -229,7 +231,7 @@ test('C3: kill the worker twice mid-build — nothing half-written, and the next
   assert.equal(await waitTerminal(env, 8000), 'done', 'the final run completes');
 
   const moments = loadMoments(env.STRATLESS_MOMENTS);
-  const rows = loadAssignments(env.STRATLESS_ASSIGNMENTS);
+  const rows = loadAssignments('claude-code', env.STRATLESS_ASSIGNMENTS);
   assert.ok(moments.length > 0, 'the pile got built — collecting is free and survives every kill');
   assert.equal(rows.length, moments.length, 'every moment carries exactly one record');
   assert.equal(new Set(rows.map((r) => r.key)).size, rows.length, 'no moment written twice');
@@ -481,7 +483,7 @@ test('cold start is spend-gated: a background hook collects the pile but never b
   await new Promise((r) => w.on('close', r));
 
   assert.ok(!existsSync(counter), 'the assistant was NEVER called — nothing was spent');
-  assert.equal(loadCategories(env.STRATLESS_CATEGORIES).length, 0, 'no categories minted on a hook run');
+  assert.equal(loadCategories('claude-code', env.STRATLESS_CATEGORIES).length, 0, 'no categories minted on a hook run');
   assert.ok(loadMoments(env.STRATLESS_MOMENTS).length > 0, 'but the pile WAS collected, for free');
   const p = readProgress(env.STRATLESS_PROGRESS);
   assert.ok(p?.summary?.some((l) => l.includes('full build not run')), `and it says the build has not run (${JSON.stringify(p?.summary)})`);
@@ -501,7 +503,7 @@ test('cold start builds when consented: a TTY invocation (STRATLESS_FLUSH) mints
   await new Promise((r) => w.on('close', r));
 
   assert.ok(existsSync(counter), 'the consented build DID call the assistant');
-  assert.ok(loadCategories(env.STRATLESS_CATEGORIES).length > 0, 'and minted at least one category');
+  assert.ok(loadCategories('claude-code', env.STRATLESS_CATEGORIES).length > 0, 'and minted at least one category');
 });
 
 test('a DURABLE consent flag makes even a non-TTY worker build — consent survives a lock race', async () => {
@@ -516,7 +518,7 @@ test('a DURABLE consent flag makes even a non-TTY worker build — consent survi
   await new Promise((r) => w.on('close', r));
 
   assert.ok(existsSync(counter), 'the durable consent triggered the build with no env flag');
-  assert.ok(loadCategories(env.STRATLESS_CATEGORIES).length > 0, 'categories minted');
+  assert.ok(loadCategories('claude-code', env.STRATLESS_CATEGORIES).length > 0, 'categories minted');
   assert.equal(coldBuildRequested(env.STRATLESS_STATE), false, 'and the flag was consumed exactly once');
 });
 
@@ -531,8 +533,16 @@ test('profile: reads HUMAN.md (the pipeline output), not the dead profile.txt, h
     human,
     '# Who you are working with\n# (managed by stratless — do not edit)\n<!-- humanmd/v3 -->\n\nDerived from 12 conversations.\n\n## What to catch for me\n\n**Catch unverified numbers** — 99 times\n',
   );
+  // ISOLATED HOME on purpose: `profile` reads the machine's pair files and detected adapters, so
+  // inheriting the developer's real HOME makes the test's outcome depend on whether THEIR machine
+  // has built — which is exactly what happened the night the first real pair files appeared.
+  const isolatedHome = join(dir, 'profile-look-home');
+  mkdirSync(join(isolatedHome, '.claude', 'projects', 'p'), { recursive: true });
+  writeFileSync(join(isolatedHome, '.claude', 'projects', 'p', 's.jsonl'), '{}\n');
   const env = {
     ...process.env,
+    HOME: isolatedHome,
+    STRATLESS_PROFILE_DIR: join(dir, 'profile-look-profiles'),
     STRATLESS_HUMAN_MD: human,
     STRATLESS_RENDERS: join(dir, 'profile-renders.json'),
     STRATLESS_CLAUDE_MD: join(dir, 'profile-CLAUDE.md'),
@@ -545,8 +555,12 @@ test('profile: reads HUMAN.md (the pipeline output), not the dead profile.txt, h
 });
 
 test('profile: says "nothing built" only when HUMAN.md is absent', () => {
+  const isolatedHome = join(dir, 'profile-absent-home');
+  mkdirSync(join(isolatedHome, '.claude', 'projects'), { recursive: true });
   const env = {
     ...process.env,
+    HOME: isolatedHome,
+    STRATLESS_PROFILE_DIR: join(dir, 'profile-absent-profiles'),
     STRATLESS_HUMAN_MD: join(dir, 'profile-absent-HUMAN.md'),
     STRATLESS_RENDERS: join(dir, 'profile-absent-renders.json'),
     STRATLESS_CLAUDE_MD: join(dir, 'profile-absent-CLAUDE.md'),
@@ -577,25 +591,100 @@ test('status names the loaded build, flags a stale one, and never guesses withou
   const childEnv = { ...process.env, ...env };
   const run = (): string =>
     execFileSync(process.execPath, [cli, 'status'], { encoding: 'utf8', env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
-  // loaded = HUMAN.md exists AND CLAUDE.md carries the managed block — same rule as profileLoaded().
-  writeFileSync(env.STRATLESS_CLAUDE_MD, '<!-- stratless:start -->\n@HUMAN.md\n<!-- stratless:end -->\n');
+  // loaded = the PAIR file exists AND CLAUDE.md carries the managed block. Each pair has its own
+  // file, its own stamp, and its own latest in the sidecar (the per-record doctrine).
+  const pairFile = join(env.STRATLESS_PROFILE_DIR, 'HUMAN.claude-code.md');
+  writeFileSync(env.STRATLESS_CLAUDE_MD, '<!-- stratless:start -->\n@HUMAN.claude-code.md\n<!-- stratless:end -->\n');
   const meta = { builtAt: '2026-07-26T16:01:22.000Z', sessions: 136, exchanges: 5751, categories: 30 };
-  writeFileSync(env.STRATLESS_RENDERS, JSON.stringify({ profile: meta, history: [meta] }));
+  writeFileSync(env.STRATLESS_RENDERS, JSON.stringify({ profiles: { 'claude-code': meta }, histories: { 'claude-code': [meta] } }));
 
   // 1. the loaded file IS the latest build → the line says which, with the stamp
-  writeFileSync(env.STRATLESS_HUMAN_MD, '# Who you are working with\n# (managed by stratless)\n# built 2026-07-26 16:01 UTC\n\nbody\n');
+  writeFileSync(pairFile, '# Who you are working with\n# (managed by stratless)\n# built 2026-07-26 16:01 UTC\n\nbody\n');
   assert.match(run(), /this build \(2026-07-26 16:01 UTC\)/, 'loaded == latest names the build');
 
   // 2. the loaded file is an older build → flagged loudly, both stamps, and the fix
-  writeFileSync(env.STRATLESS_HUMAN_MD, '# Who you are working with\n# built 2026-07-24 02:12 UTC\n\nbody\n');
+  writeFileSync(pairFile, '# Who you are working with\n# built 2026-07-24 02:12 UTC\n\nbody\n');
   const stale = run();
   assert.match(stale, /OLDER build \(2026-07-24 02:12 UTC\)/, 'a stale load is named, not hidden');
   assert.match(stale, /latest is 2026-07-26 16:01 UTC/, 'with the stamp it should be on');
   assert.match(stale, /stratless update/, 'and the one command that fixes it');
 
   // 3. no `# built` header (a pre-0.4.0 file) → the plain line, no claim it cannot back
-  writeFileSync(env.STRATLESS_HUMAN_MD, 'no header here\n');
+  writeFileSync(pairFile, 'no header here\n');
   const plain = run();
-  assert.match(plain, /profile loaded\s+yes/, 'still honestly loaded');
+  assert.match(plain, /profile loaded\s+Claude Code\s+yes/, 'still honestly loaded');
   assert.ok(!plain.includes('this build') && !plain.includes('OLDER'), 'no stamp, no claim');
+});
+
+test('status reports each assistant on the machine by name, so one loaded tool cannot speak for an empty one', () => {
+  // THE BUG THIS PINS: the line used to be a single boolean over every adapter, so a person running
+  // two assistants with the profile in only one of them was told `profile loaded  yes`. That is the
+  // one state on this line worth catching, and it was the one state it could not show.
+  const { home, env } = makeHome('loaded-per-assistant', [{ exchanges: 2 }]);
+  const codexHome = join(home, '.codex');
+  mkdirSync(join(codexHome, 'sessions'), { recursive: true });
+  const childEnv = { ...process.env, ...env, CODEX_HOME: codexHome };
+  const run = (): string =>
+    execFileSync(process.execPath, [cli, 'status'], { encoding: 'utf8', env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+
+  const meta = { builtAt: '2026-07-26T16:01:22.000Z', sessions: 136, exchanges: 5751, categories: 30 };
+  writeFileSync(env.STRATLESS_RENDERS, JSON.stringify({ profiles: { 'claude-code': meta }, histories: { 'claude-code': [meta] } }));
+  writeFileSync(join(env.STRATLESS_PROFILE_DIR, 'HUMAN.claude-code.md'), '# Who you are working with\n# built 2026-07-26 16:01 UTC\n\nbody\n');
+  // Claude Code carries its pair's profile; Codex's pair exists on the machine and has never earned
+  // a file — the honest state of a freshly-added assistant.
+  writeFileSync(env.STRATLESS_CLAUDE_MD, '<!-- stratless:start -->\n@HUMAN.claude-code.md\n<!-- stratless:end -->\n');
+
+  const partial = run();
+  assert.match(partial, /profile loaded\s+Claude Code\s+yes/, 'the tool that has it is named');
+  assert.match(partial, /Codex\s+no\s+.*not enough history yet/, 'the pair with no file yet is told the truth, not blamed');
+  assert.ok(!/profile loaded\s+yes/.test(partial), 'no bare aggregate yes stands in for both');
+
+  // The Codex pair earns a file and it is delivered — the same command says so, per tool.
+  writeFileSync(join(env.STRATLESS_PROFILE_DIR, 'HUMAN.codex.md'), '# Who you are working with\n# built 2026-07-27 09:00 UTC\n\ncodex body\n');
+  writeFileSync(
+    join(codexHome, 'AGENTS.md'),
+    '<!-- stratless:start -->\n# built 2026-07-27 09:00 UTC\ncodex body\n<!-- stratless:end -->\n',
+  );
+  const both = run();
+  assert.match(both, /Claude Code\s+yes/);
+  assert.match(both, /Codex\s+yes/);
+  assert.ok(!both.includes('load it:'), 'nothing left to fix, so nothing is suggested');
+
+  // TWO files now, each named on its own row — the one-artifact assumption is gone.
+  assert.ok(both.includes('HUMAN.claude-code.md'), "Claude Code's row names its own file");
+  assert.ok(both.includes('HUMAN.codex.md'), "Codex's row names its own file");
+});
+
+test('a machine with one assistant is never told about a tool it does not run', () => {
+  // The other half of the same rule: rows come from `detect()`, so an assistant that is not on this
+  // machine is not mentioned. A Codex-only person should never read the words "Claude Code" here.
+  const { home, env } = makeHome('loaded-codex-only', [{ exchanges: 2 }]);
+  const codexHome = join(home, '.codex');
+  mkdirSync(join(codexHome, 'sessions'), { recursive: true });
+  rmSync(join(home, '.claude', 'projects'), { recursive: true, force: true }); // Claude Code was never here
+  const childEnv = { ...process.env, ...env, CODEX_HOME: codexHome };
+
+  const meta = { builtAt: '2026-07-26T16:01:22.000Z', sessions: 136, exchanges: 5751, categories: 30 };
+  writeFileSync(env.STRATLESS_RENDERS, JSON.stringify({ profiles: { codex: meta }, histories: { codex: [meta] } }));
+  writeFileSync(join(env.STRATLESS_PROFILE_DIR, 'HUMAN.codex.md'), '# Who you are working with\n# built 2026-07-26 16:01 UTC\n\nbody\n');
+  writeFileSync(
+    join(codexHome, 'AGENTS.md'),
+    '<!-- stratless:start -->\n# built 2026-07-26 16:01 UTC\nbody\n<!-- stratless:end -->\n',
+  );
+
+  const out = execFileSync(process.execPath, [cli, 'status'], { encoding: 'utf8', env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+  assert.match(out, /profile loaded\s+Codex\s+yes/, 'the one assistant present is named');
+
+  // Scoped to the rows on purpose. Elsewhere in `status` the spend line names the BRAIN — the model
+  // that put this history into words — and that is provider-bound, deliberately not an adapter leg:
+  // a Codex-only machine borrowing a Claude brain is the common case, not a contradiction. What must
+  // not appear is an absent tool in the list of who is being handed the profile.
+  const lines = out.split('\n');
+  const start = lines.findIndex((l) => l.includes('profile loaded'));
+  const rows = [lines[start]];
+  for (const l of lines.slice(start + 1)) {
+    if (!/^\s{24,}\S/.test(l)) break; // a continuation row is the only thing indented this far
+    rows.push(l);
+  }
+  assert.ok(!rows.join('\n').includes('Claude Code'), 'an assistant that is not on this machine is never listed');
 });

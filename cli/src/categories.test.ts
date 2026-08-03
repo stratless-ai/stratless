@@ -22,9 +22,9 @@ const file = (): string => join(dir, `cats-${n++}.jsonl`);
 test('append then load: born events become the live set, stamped with the birth date', () => {
   const f = file();
   const at = '2026-07-01T00:00:00Z';
-  const wrote = appendCategories([{ name: 'a', description: 'first' }, { name: 'b', description: 'second' }], { file: f, at });
+  const wrote = appendCategories([{ name: 'a', description: 'first' }, { name: 'b', description: 'second' }], { record: 'claude-code', file: f, at });
   assert.equal(wrote, 2);
-  const live = loadCategories(f);
+  const live = loadCategories('claude-code', f);
   assert.equal(live.length, 2);
   const a = live.find((c) => c.name === 'a')!;
   assert.equal(a.description, 'first');
@@ -42,7 +42,7 @@ test('replay: revised re-words but keeps the birth date; retired drops', () => {
       JSON.stringify({ event: 'retired', name: 'y', description: '', at: '2026-07-02T00:00:00Z' }),
     ].join('\n') + '\n',
   );
-  const live = loadCategories(f);
+  const live = loadCategories('claude-code', f);
   assert.equal(live.length, 1, 'y retired, only x remains');
   assert.equal(live[0].name, 'x');
   assert.equal(live[0].description, 'v2', 'wording moved');
@@ -52,22 +52,22 @@ test('replay: revised re-words but keeps the birth date; retired drops', () => {
 test('a torn last line is skipped, not fatal', () => {
   const f = file();
   writeFileSync(f, JSON.stringify({ event: 'born', name: 'a', description: 'd', at: '2026-06-01T00:00:00Z' }) + '\n{ broken');
-  const live = loadCategories(f);
+  const live = loadCategories('claude-code', f);
   assert.equal(live.length, 1);
   assert.equal(live[0].name, 'a');
 });
 
 test('missing store is no columns, never a throw', () => {
-  assert.deepEqual(loadCategories(join(dir, 'nope.jsonl')), []);
+  assert.deepEqual(loadCategories('claude-code', join(dir, 'nope.jsonl')), []);
 });
 
 test('a cold rebuild retires the outgoing generation — the live set never stacks', () => {
   const file = join(dir, 'generations.jsonl');
-  appendCategories([{ name: 'gen1-a', description: 'a' }, { name: 'gen1-b', description: 'b' }], { file, at: '2026-07-01T00:00:00Z' });
+  appendCategories([{ name: 'gen1-a', description: 'a' }, { name: 'gen1-b', description: 'b' }], { record: 'claude-code', file, at: '2026-07-01T00:00:00Z' });
   // the rebuild: retire everything live, then the new generation is born
-  retireCategories(loadCategories(file).map((c) => c.name), { file, at: '2026-07-15T00:00:00Z' });
-  appendCategories([{ name: 'gen2-a', description: 'a2' }, { name: 'gen1-b', description: 'b2' }], { file, at: '2026-07-15T00:00:00Z' });
-  const live = loadCategories(file);
+  retireCategories(loadCategories('claude-code', file).map((c) => c.name), { record: 'claude-code', file, at: '2026-07-15T00:00:00Z' });
+  appendCategories([{ name: 'gen2-a', description: 'a2' }, { name: 'gen1-b', description: 'b2' }], { record: 'claude-code', file, at: '2026-07-15T00:00:00Z' });
+  const live = loadCategories('claude-code', file);
   assert.equal(live.length, 2, 'only the current generation is live — no ghosts');
   assert.ok(live.every((c) => c.bornAt === '2026-07-15T00:00:00Z'), 'a reborn name is a NEW column — its assignments were replaced wholesale');
   const lines = readFileSync(file, 'utf8').trim().split('\n');

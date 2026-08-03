@@ -45,11 +45,11 @@ const work = (o: Partial<VoiceWork> = {}): VoiceWork => ({
 // ── the store ───────────────────────────────────────────────────────────────────────────────────
 
 test('read: missing file, corrupt JSON, and malformed rows all degrade to empty — never throw', () => {
-  assert.deepEqual(readVoiced(join(dir, 'absent.json')), { rows: [] });
+  assert.deepEqual(readVoiced('claude-code', join(dir, 'absent.json')), { rows: [] });
 
   const corrupt = join(dir, 'corrupt.json');
   writeFileSync(corrupt, '{not json');
-  assert.deepEqual(readVoiced(corrupt), { rows: [] });
+  assert.deepEqual(readVoiced('claude-code', corrupt), { rows: [] });
 
   const malformed = join(dir, 'malformed.json');
   writeFileSync(
@@ -63,7 +63,7 @@ test('read: missing file, corrupt JSON, and malformed rows all degrade to empty 
       ],
     }),
   );
-  const got = readVoiced(malformed);
+  const got = readVoiced('claude-code', malformed);
   assert.equal(got.rows.length, 1);
   assert.equal(got.rows[0].name, 'plan-first');
 });
@@ -71,8 +71,8 @@ test('read: missing file, corrupt JSON, and malformed rows all degrade to empty 
 test('write/read round-trips every field, voicedAt included', () => {
   const file = join(dir, 'roundtrip.json');
   const r = row({ section: 'register', quote: 'the exact reply text' });
-  writeVoiced({ rows: [r] }, file);
-  assert.deepEqual(readVoiced(file), { rows: [r] });
+  writeVoiced({ rows: [r] }, 'claude-code', file);
+  assert.deepEqual(readVoiced('claude-code', file), { rows: [r] });
 });
 
 // ── voicingPlan — the split decision ────────────────────────────────────────────────────────────
@@ -123,20 +123,20 @@ test('frame and judge rows need no quote-proof — an empty quote reuses regardl
 test('remember: adds new rows, prunes dead generations, and skips the write when nothing moved', () => {
   const file = join(dir, 'remember.json');
   const dead = row({ name: 'retired', bornAt: '2026-06-01T00:00:00Z' });
-  writeVoiced({ rows: [row(), dead] }, file);
+  writeVoiced({ rows: [row(), dead] }, 'claude-code', file);
 
   const live = [
     { name: 'plan-first', bornAt: GEN },
     { name: 'fresh', bornAt: GEN },
   ];
-  rememberVoiced([row({ name: 'fresh', section: 'frame' })], live, file);
-  const after1 = readVoiced(file);
+  rememberVoiced([row({ name: 'fresh', section: 'frame' })], live, 'claude-code', file);
+  const after1 = readVoiced('claude-code', file);
   assert.deepEqual(after1.rows.map((r) => r.name).sort(), ['fresh', 'plan-first']);
 
   // an existing key is never overwritten (voiced once), a dead-generation new row is never kept,
   // and a no-op call leaves the file bytes untouched
   const bytes = readFileSync(file, 'utf8');
-  rememberVoiced([row({ line: 'a re-rolled wording that must not land' }), dead], live, file);
+  rememberVoiced([row({ line: 'a re-rolled wording that must not land' }), dead], live, 'claude-code', file);
   assert.equal(readFileSync(file, 'utf8'), bytes);
-  assert.equal(readVoiced(file).rows.find((r) => r.name === 'plan-first')?.line, row().line);
+  assert.equal(readVoiced('claude-code', file).rows.find((r) => r.name === 'plan-first')?.line, row().line);
 });

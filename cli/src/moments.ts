@@ -45,7 +45,8 @@ const storePath = (): string => process.env.STRATLESS_MOMENTS || join(homedir(),
  * shape could not re-derive. Independent of the assignment and discovery versions on purpose: a
  * change to what a moment IS should not throw away paid-for assignments, and vice versa.
  */
-export const MOMENTS_V = 3; // 3: `aiTerms` + `saidLen` added — the answer channel (asks/lift read them)
+export const MOMENTS_V = 4; // 4: `record` added — which assistant produced the moment (per-assistant LIFT)
+// 3: `aiTerms` + `saidLen` added — the answer channel (asks/lift read them)
 
 /** The reply is stored capped — enough to read and to quote from, not the whole paste. The TRUE
  *  length rides alongside in `replyLen`, because size is itself a signal and the cap would hide it. */
@@ -64,6 +65,17 @@ export interface Moment {
   key: string;
   /** which conversation — the 3-DIFFERENT-conversations admission floor, and the scoreboard */
   session: string;
+  /**
+   * WHICH ASSISTANT THIS CAME FROM. The engine does not read it and must not: what recurs about a
+   * person is the same finding whichever tool they typed it into, and the shape channel has already
+   * dropped everything tool-flavoured before a vector is ever built.
+   *
+   * It exists for the one question that IS per-assistant. LIFT grades an AI, so a verdict has to
+   * know whose turns earned it — and the tools a person declined mean different things in different
+   * tools (see `record-codex.ts`: a Codex decline is broader than a Claude one, "comparable within a
+   * tool, not across them"). Counting them together would average two different measurements.
+   */
+  record: string;
   /** ISO timestamp of the reply — trend direction, and the time-split */
   ts: string;
   /** what recorded EVENT the moment carries — the split the file is built on, and (at assignment)
@@ -108,6 +120,7 @@ export function toMoment(ex: Exchange): Moment {
   const m: Moment = {
     key: ex.hash,
     session: ex.session,
+    record: ex.record,
     ts: ex.ts,
     pile: pileOf(ex),
     reply: ex.reaction.slice(0, REPLY_CAP),
@@ -128,6 +141,11 @@ export function toMoment(ex: Exchange): Moment {
   return m;
 }
 
+/** The dedup identity: (record, content hash). The hash alone deduped fine while one assistant
+ *  existed; with two, the same words typed into both tools are two moments in two relationships,
+ *  and collapsing them would silently hand one pair the other's evidence. */
+const seenKey = (record: string, key: string): string => `${record}\u0000${key}`;
+
 /** The keys already in the store — the seen-set / watermark. Torn lines (a crash mid-append) fail
  *  to parse and are skipped; their moment simply re-derives. */
 function storedKeys(file: string): Set<string> {
@@ -136,7 +154,8 @@ function storedKeys(file: string): Set<string> {
   for (const line of readFileSync(file, 'utf8').split('\n')) {
     if (!line) continue;
     try {
-      keys.add((JSON.parse(line) as Moment).key);
+      const m = JSON.parse(line) as Moment;
+      keys.add(seenKey(m.record ?? '', m.key));
     } catch {
       /* torn line — skip; the moment re-derives next run */
     }
@@ -212,8 +231,9 @@ export function buildMoments(opts: { roots?: string[]; file?: string } = {}): Bu
   // stop, because no cheap ordering reliably says "everything past here is stored" (see the header).
   for (const ex of iterateExchangesNewestFirst(opts.roots)) {
     scanned++;
-    if (seen.has(ex.hash)) continue;
-    seen.add(ex.hash);
+    const k = seenKey(ex.record, ex.hash);
+    if (seen.has(k)) continue;
+    seen.add(k);
     fresh.push(toMoment(ex));
   }
 

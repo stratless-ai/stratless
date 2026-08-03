@@ -29,7 +29,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, sep } from 'node:path';
 import { atomicWriteFileSync } from './atomic.js';
-import { humanMdPath } from './profile.js';
+import { profilePath } from './profile.js';
+import { RECORD_ID } from './record-claude-code.js';
 
 /** The global file Claude Code loads every session. Override with STRATLESS_CLAUDE_MD (tests). */
 export function claudeMdPath(): string {
@@ -66,7 +67,7 @@ export interface Injected {
  * Only ever touches what is between our markers; anything the person wrote themselves is left
  * exactly as it was.
  */
-export function loadInto(humanTarget: string = humanMdPath(), claudeTarget: string = claudeMdPath()): Injected {
+export function loadInto(humanTarget: string = profilePath(RECORD_ID), claudeTarget: string = claudeMdPath()): Injected {
   upsertBlock(humanTarget, claudeTarget);
   return { humanMd: humanTarget, claudeMd: claudeTarget };
 }
@@ -99,7 +100,7 @@ function upsertBlock(humanTarget: string, claudeTarget: string): void {
  * A gated `update` (no synthesis due) uses this to guarantee the profile stays loaded — e.g. after a
  * `stop` — without spending a fresh build. Returns true iff a HUMAN.md existed to point at.
  */
-export function ensureLoaded(humanTarget: string = humanMdPath(), claudeTarget: string = claudeMdPath()): boolean {
+export function ensureLoaded(humanTarget: string = profilePath(RECORD_ID), claudeTarget: string = claudeMdPath()): boolean {
   if (!existsSync(humanTarget)) return false;
   upsertBlock(humanTarget, claudeTarget);
   return true;
@@ -113,7 +114,7 @@ export function ensureLoaded(humanTarget: string = humanMdPath(), claudeTarget: 
  * ran `stratless stop` turned the profile off deliberately, and a housekeeping move must not undo
  * a decision they made.
  */
-export function reaimIfLoaded(humanTarget: string = humanMdPath(), claudeTarget: string = claudeMdPath()): boolean {
+export function reaimIfLoaded(humanTarget: string = profilePath(RECORD_ID), claudeTarget: string = claudeMdPath()): boolean {
   if (!existsSync(claudeTarget) || !readFileSync(claudeTarget, 'utf8').includes(START)) return false;
   upsertBlock(humanTarget, claudeTarget);
   return true;

@@ -36,7 +36,7 @@
 import { readFileSync, readdirSync, statSync, type Dirent } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, sep } from 'node:path';
-import { PASTE_BOUND, isTypedMessage, type Turn, type DriftReport } from './seam.js';
+import { PASTE_BOUND, isTypedMessage, type Session, type Turn, type DriftReport } from './seam.js';
 
 /** Per-file size ceiling — one pathological transcript cannot blow the heap. */
 const FILE_CAP_BYTES = 96 * 1024 * 1024;
@@ -51,6 +51,9 @@ const FILE_CAP_BYTES = 96 * 1024 * 1024;
  * as the snapshot the existing default parameters use, derived from here so exactly one place knows
  * where a transcript lives.
  */
+/** This Record's id — one source, shared with the registry entry in `adapters.ts`. */
+export const RECORD_ID = 'claude-code';
+
 export function roots(): string[] {
   return [join(homedir(), '.claude', 'projects'), archiveRoot()];
 }
@@ -282,11 +285,11 @@ function deniedOf(content: unknown, ids: Map<string, string>): string[] | undefi
  * `seen` carries uuid state across files, so a record replayed by a session resume — or present in
  * both roots — is emitted once, ever.
  */
-export function* readSessions(roots: string[] = DEFAULT_ROOTS): Generator<{ path: string; session: string; turns: Turn[] }> {
+export function* readSessions(roots: string[] = DEFAULT_ROOTS): Generator<Session> {
   const seen = new Set<string>();
   for (const path of transcriptFiles(roots)) {
     const turns = turnsOfFile(path, seen);
-    if (turns.length) yield { path, session: turns[0].session, turns };
+    if (turns.length) yield { path, session: turns[0].session, turns, record: RECORD_ID };
   }
 }
 

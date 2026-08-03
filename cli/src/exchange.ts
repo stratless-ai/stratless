@@ -58,6 +58,9 @@ export interface Exchange {
   ts: string;
   /** which session this came from */
   session: string;
+  /** which Record read it — carried from the `Session`, never derived from the path. The engine
+   *  ignores this; the per-assistant half of the profile is the only thing that reads it. */
+  record: string;
   /** stable content hash — the cache key. Read once, ever. */
   hash: string;
   /**
@@ -211,7 +214,7 @@ export function projectOf(cwd: string): string {
  *
  * Control actions seen while the assistant was talking ride along on the exchange they belong to.
  */
-export function exchangesOfTurns(turns: Turn[], session: string): Exchange[] {
+export function exchangesOfTurns(turns: Turn[], session: string, record: string): Exchange[] {
   const out: Exchange[] = [];
   let prompt = '';
   let said: string[] = [];
@@ -270,6 +273,7 @@ export function exchangesOfTurns(turns: Turn[], session: string): Exchange[] {
         reaction: r,
         ts: t.ts || saidTs,
         session,
+        record,
         hash: hashOf(p, saidText, r),
         // The head is a fact, outside the hash — the same slice discipline as `said`, from the other
         // end. Absent when the assistant said nothing at all.
@@ -332,7 +336,8 @@ export function markFirstOfDay(sorted: Exchange[]): Exchange[] {
 
 /** One transcript's exchanges. Kept as a named seam so a single file can be parsed directly. */
 export function parseExchanges(path: string): Exchange[] {
-  return exchangesOfTurns(recordFor(path).turnsOf(path), basename(path, '.jsonl'));
+  const owner = recordFor(path);
+  return exchangesOfTurns(owner.turnsOf(path), basename(path, '.jsonl'), owner.id);
 }
 
 /** A file's mtime only APPROXIMATES its newest exchange's ts, so once we have enough we read a few
@@ -354,7 +359,7 @@ export function loadRecentExchanges(
   let i = 0;
   let enoughAt = -1;
   for (const session of sessionsIn(roots)) {
-    for (const e of exchangesOfTurns(session.turns, basename(session.path, '.jsonl'))) {
+    for (const e of exchangesOfTurns(session.turns, basename(session.path, '.jsonl'), session.record)) {
       if (seen.has(e.hash)) continue;
       seen.add(e.hash);
       all.push(e);
@@ -377,12 +382,16 @@ export function loadRecentExchanges(
  * Nothing accumulates but the dedup set.
  */
 export function* iterateExchangesNewestFirst(roots?: string[]): Generator<Exchange> {
+  // Dedup is per (record, hash): the vault holds COPIES of one record's live sessions — those must
+  // collapse — but the same words typed into two different assistants are two exchanges in two
+  // relationships, and collapsing THOSE would silently hand one pair the other's evidence.
   const seen = new Set<string>();
   for (const session of sessionsIn(roots)) {
-    const ex = exchangesOfTurns(session.turns, basename(session.path, '.jsonl'));
+    const ex = exchangesOfTurns(session.turns, basename(session.path, '.jsonl'), session.record);
     for (let k = ex.length - 1; k >= 0; k--) {
-      if (seen.has(ex[k].hash)) continue;
-      seen.add(ex[k].hash);
+      const key = `${session.record}\u0000${ex[k].hash}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
       yield ex[k];
     }
   }
@@ -405,7 +414,7 @@ export function findExchange(session: string, hash: string, roots?: string[]): E
     // Tolerant of either naming: the file's name (what the cache stores) or the record's own
     // sessionId. A receipt written before or after this refactor dereferences the same way.
     if (name !== session && s.session !== session) continue;
-    for (const e of exchangesOfTurns(s.turns, name)) if (e.hash === hash) return e;
+    for (const e of exchangesOfTurns(s.turns, name, s.record)) if (e.hash === hash) return e;
   }
   return undefined;
 }
