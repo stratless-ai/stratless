@@ -144,7 +144,7 @@ useHead({
 
   <span class="t-d">##</span> <span class="t-b">How to talk to me</span>
   - talk in short imperatives back, matching their
-    terse next-action style. <span class="t-d">(302×)</span>
+    terse next-action style. <span class="t-d">(304×)</span>
 
   <span class="t-d">not loaded yet · load it into your assistant: stratless update</span>
 

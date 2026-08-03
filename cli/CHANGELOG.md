@@ -6,6 +6,29 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+## [0.10.0] · 2026-08-03 · one profile per pair
+
+### Changed
+- **One profile per assistant.** How you work with Claude Code and how you work with Codex are two
+  different collaborations, so each now gets its own profile — `HUMAN.claude-code.md`,
+  `HUMAN.codex.md` — derived only from that assistant's own history. Nothing measured in one tool
+  is ever presented to the other as a claim about it. On a machine with one assistant, nothing
+  changes: same patterns, same counts, same file shape.
+- **Each profile is worded by its own assistant.** Your Codex profile is written by `codex exec` on
+  your own ChatGPT plan, your Claude Code profile by `claude -p` on your own Claude plan. If a
+  pair's assistant is not installed as a command-line tool, the build borrows whichever is present
+  rather than refusing, and every build records which model wrote it.
+- **Your first `update` after upgrading announces one rebuild and quotes it, per assistant, before
+  spending a cent.** Until you say yes, your existing profile keeps serving exactly as it is.
+  Nothing is deleted; the wording re-rolls once, as it does on any engine change.
+
+### Added
+- `stratless status` shows each assistant's profile on its own row, with its own build stamp and
+  its own file — a stale copy in one tool can no longer hide behind a fresh one in another.
+- `stratless profile <assistant>` shows one pair's profile; bare `profile` shows each in turn.
+- `stratless mcp` serves every pair's profile, each labelled with the relationship it was measured
+  in — a tool stratless has never read is told exactly what it is holding, and what it is not.
+
 ## [0.9.0] · 2026-08-01 · reads Claude Code and Codex today
 
 ### Added
