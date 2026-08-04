@@ -61,7 +61,7 @@ and each version matches its `cli-v*` git tag.
 ### Added
 - `stratless status` shows each assistant's profile on its own row, with its own build stamp and
   its own file — a stale copy in one tool can no longer hide behind a fresh one in another.
-- `stratless profile <assistant>` shows one pair's profile; bare `profile` shows each in turn.
+- `stratless profile` shows each detected pair's profile in turn.
 - `stratless mcp` serves every pair's profile, each labelled with the relationship it was measured
   in — a tool stratless has never read is told exactly what it is holding, and what it is not.
 

@@ -20,8 +20,8 @@ machine.**
 
 You need three things, and you probably have all of them: **Claude Code or Codex** installed and
 signed in (the `claude` or `codex` command), **Node 18+**, and a few sessions of history on this
-machine. That's it. Use both and they read as one person: a single profile, built from everything
-you do, loaded back into each of them.
+machine. That's it. Use both and each gets its own profile, built only from the history you made
+together and loaded back into that assistant.
 
 ---
 
