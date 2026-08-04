@@ -10,7 +10,7 @@ import { strict as assert } from 'node:assert';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test, before, after } from 'node:test';
 
@@ -75,7 +75,6 @@ function makeHome(name: string, files: { exchanges: number; fat?: number }[]): {
   mkdirSync(st, { recursive: true });
   const env: Record<string, string> = {
     HOME: home,
-    STRATLESS_CACHE: join(st, 'judgments.json'),
     STRATLESS_STATE: join(st, 'state.json'),
     STRATLESS_USAGE: join(st, 'usage.json'),
     STRATLESS_PATTERNS: join(st, 'patterns.json'),
@@ -94,47 +93,11 @@ function makeHome(name: string, files: { exchanges: number; fat?: number }[]): {
   return { home, env };
 }
 
-/** The counting fake claude: streamed turns answer after `delayMs`, each bumping a counter file. */
-function writeCountingBin(name: string, delayMs: number): string {
-  const p = join(dir, name);
-  writeFileSync(
-    p,
-    `#!/usr/bin/env node
-const fs = require('fs');
-const args = process.argv.slice(2);
-if (args.includes('stream-json')) {
-  let buf = '';
-  process.stdin.on('data', (d) => {
-    buf += d;
-    let i;
-    while ((i = buf.indexOf('\\n')) >= 0) {
-      const line = buf.slice(0, i); buf = buf.slice(i + 1);
-      if (!line.trim()) continue;
-      let n = 0;
-      try { n = Number(fs.readFileSync(process.env.FAKE_COUNTER, 'utf8')) || 0; } catch {}
-      fs.writeFileSync(process.env.FAKE_COUNTER, String(n + 1));
-      setTimeout(() => {
-        process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: '{"verdict":"transferred","topic":"t","behavior":"b"}', usage: { input_tokens: 1, output_tokens: 1 }, total_cost_usd: 0.0001 }) + '\\n');
-      }, ${delayMs});
-    }
-  });
-  process.stdin.on('end', () => setTimeout(() => process.exit(0), ${delayMs} + 100));
-} else {
-  process.stdout.write(JSON.stringify({ result: 'WHAT THEY KNOW\\nSteady, verified, concrete. Flat text for the smoke profile.', is_error: false, total_cost_usd: 0.0001, usage: { input_tokens: 1, output_tokens: 1 } }));
-}
-`,
-  );
-  chmodSync(p, 0o755);
-  return p;
-}
-
-/** A fake `claude` for the ASSIGN path (one-shot JSON, not streaming): counts every call, optionally
- *  sync-delays to keep the worker busy, and returns an empty-kinds assignment for every moment it was
- *  shown — enough to exercise the store's kill-safety without asserting on labels. */
 /**
- * A fake `claude` that answers the ONE call the engine makes: naming the piles. v2 called a model
- * once per batch of moments; v3 calls it once per build, so the delay here is the whole paid stage
- * and is what makes a run long enough to interrupt.
+ * A fake `claude` that answers the cold build's naming call. v2 called a model once per batch of
+ * moments; v3 names every pile in one call, so the delay here makes that stage long enough to
+ * interrupt. A completed first build also asks once to voice its new rows; that call receives the
+ * same valid envelope, records its receipt, and intentionally yields no picks.
  */
 function writeNameBin(name: string, delayMs: number): string {
   const p = join(dir, name);
@@ -277,11 +240,23 @@ test('C7: stopWorker stops a busy worker within grace, cleans the lock, labels t
 
 // ── Wake semantics — five doorbells, one worker, zero double-spend ─────────────────────────────
 
-test('wake: five simultaneous updates ring one worker; every doorbell returns fast', { skip: "stage 0: the worker finishes instantly with no pipeline behind it, so there is nothing to kill mid-run. The plumbing under test is untouched — un-skip when assign lands in stage 2." }, async () => {
-  const { env } = makeHome('wake-home', [{ exchanges: 24 }]);
-  const bin = writeCountingBin('counting-claude-wake', 80);
+test('wake: five simultaneous updates ring one worker; every doorbell returns fast', async () => {
+  const { env } = makeHome('wake-home', Array.from({ length: 6 }, () => ({ exchanges: 6 })));
+  // `update` resolves `claude` again at the detach boundary, so put the fake under that exact name
+  // first on PATH. Otherwise a developer with Claude Code installed could accidentally replace the
+  // test pin with their real binary — the test must never spend a person's plan.
+  const bin = writeNameBin('claude', 1500);
   const counter = join(dir, 'counter-wake');
-  const childEnv = { ...process.env, ...env, STRATLESS_CLAUDE_BIN: bin, FAKE_COUNTER: counter, STRATLESS_JUDGE_LIMIT: '24' };
+  writeFileSync(counter, '0');
+  requestColdBuild(env.STRATLESS_STATE);
+  const childEnv = {
+    ...process.env,
+    ...env,
+    PATH: `${dirname(bin)}${delimiter}${process.env.PATH ?? ''}`,
+    STRATLESS_CLAUDE_BIN: bin,
+    STRATLESS_FAKE_EMBED: '1',
+    FAKE_COUNTER: counter,
+  };
 
   const t0 = Date.now();
   const rings = await Promise.all(
@@ -297,8 +272,15 @@ test('wake: five simultaneous updates ring one worker; every doorbell returns fa
 
   assert.equal(await waitTerminal(env, 30_000), 'done', 'the one worker finishes');
   const calls = Number(readFileSync(counter, 'utf8'));
-  assert.ok(calls <= 24 + 12, `no parallel double-judging (${calls} calls for 24 exchanges)`);
-  assert.equal(Object.keys(JSON.parse(readFileSync(env.STRATLESS_CACHE, 'utf8'))).length, 24, 'the cache holds each exchange once');
+  const usage = readUsage(env.STRATLESS_USAGE);
+  assert.equal(calls, 2, 'one cold build made its two expected borrowed calls, with no duplicate worker spend');
+  assert.equal(usage.byFeature.name?.calls, 1, 'the five doorbells still produce exactly one naming call');
+  assert.equal(usage.byFeature.write?.calls, 1, 'the new generation is voiced once');
+  const moments = loadMoments(env.STRATLESS_MOMENTS);
+  const rows = loadAssignments('claude-code', env.STRATLESS_ASSIGNMENTS);
+  assert.ok(loadCategories('claude-code', env.STRATLESS_CATEGORIES).length > 0, 'the one worker completed the cold build');
+  assert.equal(rows.length, moments.length, 'every collected moment was assigned exactly once');
+  assert.equal(new Set(rows.map((r) => r.key)).size, rows.length, 'no worker duplicated an assignment');
 });
 
 // ── Strict args (0.3.5 rider): a typo is a refusal, never a different request ──────────────────
@@ -380,7 +362,7 @@ test('Codex-only status is on after approval, and stop warns when later hook tru
 
 // ── The Phase 2 review fixes (2026-07-18): each verified finding pinned ────────────────────────
 
-test('review: stopWorker never kills an unverified holder — a recycled PID is not a worker', { skip: "stage 0: the worker finishes instantly with no pipeline behind it, so there is nothing to kill mid-run. The plumbing under test is untouched — un-skip when assign lands in stage 2." }, async () => {
+test('review: stopWorker never kills an unverified holder — a recycled PID is not a worker', async () => {
   const lockFile = join(dir, 'unverified.lock');
   const innocent = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 8000)'], { stdio: 'ignore' });
   await sleep(80);
@@ -400,7 +382,7 @@ test('review: stopWorker never kills an unverified holder — a recycled PID is 
   }
 });
 
-test('review: update respects a foreground COMMAND lock — no tail, no spawn, honest message', { skip: "stage 0: the worker finishes instantly with no pipeline behind it, so there is nothing to kill mid-run. The plumbing under test is untouched — un-skip when assign lands in stage 2." }, async () => {
+test('review: update respects a foreground COMMAND lock — no tail, no spawn, honest message', async () => {
   const { env } = makeHome('cmdlock-home', [{ exchanges: 4 }]);
   const holder = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 6000)'], { stdio: 'ignore' });
   await sleep(80);
@@ -474,18 +456,32 @@ test('receipt: diffUsage isolates one run\'s spend, including per-model ground t
   assert.equal(d2.byModel['claude-sonnet-5'], undefined, 'models that spent nothing stay off the receipt');
 });
 
-test('receipt: a finished run carries its spend line; status can read it after the fact', { skip: "stage 0: nothing spends yet, so a finished run carries no receipt. The receipt plumbing is untouched — un-skip when assign lands in stage 2." }, async () => {
-  const { env } = makeHome('receipt-home', [{ exchanges: 6 }]);
-  const bin = writeCountingBin('counting-claude-receipt', 20);
-  const childEnv = { ...process.env, ...env, STRATLESS_CLAUDE_BIN: bin, FAKE_COUNTER: join(dir, 'counter-receipt'), STRATLESS_JUDGE_LIMIT: '6' };
+test('receipt: a finished run carries its spend line; status can read it after the fact', async () => {
+  const { env } = makeHome('receipt-home', Array.from({ length: 6 }, () => ({ exchanges: 6 })));
+  const bin = writeNameBin('name-claude-receipt', 20);
+  const counter = join(dir, 'counter-receipt');
+  writeFileSync(counter, '0');
+  const childEnv = {
+    ...process.env,
+    ...env,
+    STRATLESS_CLAUDE_BIN: bin,
+    STRATLESS_FAKE_EMBED: '1',
+    STRATLESS_FLUSH: '1',
+    FAKE_COUNTER: counter,
+  };
   const w = spawn(process.execPath, [cli, '__worker'], { env: childEnv, stdio: 'ignore' });
   await new Promise((r) => w.on('close', r));
   assert.equal(await waitTerminal(env, 3000), 'done');
   const p = readProgress(env.STRATLESS_PROGRESS)!;
   assert.ok(p.spend, 'the run carries its receipt');
-  assert.ok(/this run: .*tokens/.test(p.spend!), `tokens first (${p.spend})`);
-  assert.ok(/\$\d/.test(p.spend!), 'with the API-equivalent cost');
+  assert.equal(p.spend, 'this run: 4 tokens · < $0.01 at API rates', 'tokens first, with the honest sub-cent API-equivalent cost');
   assert.ok(p.summary!.some((l) => l === p.spend), 'and the tail prints it with the summary');
+  const status = execFileSync(process.execPath, [cli, 'status'], {
+    encoding: 'utf8',
+    env: { ...childEnv, NO_COLOR: '1' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  assert.match(status, /last run\s+4 tokens · < \$0\.01 at API rates/, 'status carries the finished run forward');
 });
 
 // ── THE COLD-START SPEND GATE (0.4.0) ────────────────────────────────────────────────────────────
