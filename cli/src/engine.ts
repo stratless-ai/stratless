@@ -19,12 +19,13 @@
  * against a different vocabulary cannot be compared to a frozen centre. It would look like drift and
  * be an artefact. So the vocabulary is part of the frozen model, not something recomputed per run.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { appendCategories, loadCategories, retireCategories } from './categories.js';
-import { buildPiles, join as nearest, type Pile } from './cluster.js';
+import { bandFor, buildPiles, dot, K_MAX, type Pile } from './cluster.js';
+import { MIN_CONVERSATIONS } from './count.js';
 import { MODEL, embedAll, runtimePresent } from './embed.js';
 import { MODEL_WEIGHTS_SHA256, RUNTIME_VERSION } from './fetch.js';
 import { namePiles, type Named } from './name.js';
@@ -63,6 +64,15 @@ export interface EngineState {
    *  reads as stale, exactly right: those centres came from the native runtime and must not be
    *  joined against. */
   pipeline?: string;
+  /** how many distinct conversations the build read — the young trigger's baseline ([[outgrown]]).
+   *  The RAW fact, not the derived K: what the history supported is re-derived under current
+   *  constants, so the rule can evolve without re-stamping. Absent on pre-0.11.0 files (the
+   *  fallback is labels.length). */
+  sessionsAtBuild?: number;
+  /** how snugly build-day moments sat against their own centres — the mature trigger's frozen
+   *  baseline. Recorded now, consumed later: the drift margin gets pre-registered from measured
+   *  wobble (fit.jsonl) before anything reads this. Absent on pre-0.11.0 files. */
+  fit?: { median: number; p10: number; n: number };
 }
 
 export function loadEngine(record: string, file: string = enginePath(record)): EngineState | undefined {
@@ -96,6 +106,59 @@ export function engineReady(record: string, file: string = enginePath(record)): 
 export function saveEngine(state: EngineState, record: string, file: string = enginePath(record)): void {
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, JSON.stringify(state));
+}
+
+/**
+ * THE YOUNG TRIGGER — has the history outgrown the map?
+ *
+ * A pair cold-built on thin history gets a small map (K is capped by conversations, cluster.ts
+ * `bandFor`), and without this check it would keep that day-one map forever — `engineReady` routes
+ * it down the steady path for life. So: rebuild when the history could support roughly DOUBLE what
+ * it supported when the map was made.
+ *
+ *   base = what the history supported AT BUILD (from `sessionsAtBuild` — never the built pile
+ *          count: admission pruning can keep fewer piles than the history supported, and measuring
+ *          against the pruned count would re-fire immediately after every rebuild, a paid loop)
+ *   now  = what it supports today (bandFor, capped at K_MAX)
+ *   outgrown ⇔ now >= 2·base AND now >= base + 3
+ *
+ * Self-damping by construction: each fire resets the base, doublings space out geometrically
+ * (a 3-pile pair fires near 18, 36, 72 conversations), and the K_MAX cap means any base ≥ 15 can
+ * never fire again — maturity is not a mode, it is what doubling runs out of. The `base + 3` floor
+ * keeps a tiny pair from churning 1→2→4. Pure arithmetic; deciding whether a rebuild may SPEND is
+ * the caller's job (loop.ts: consent, or the standing growth consent).
+ */
+export function outgrown(state: EngineState, moments: Moment[]): boolean {
+  const base = state.sessionsAtBuild != null
+    ? Math.min(K_MAX, Math.max(1, Math.floor(state.sessionsAtBuild / MIN_CONVERSATIONS)))
+    : state.labels.length; // pre-0.11.0 file: the built count is the only baseline it kept
+  if (base < 1) return false;
+  const now = bandFor(moments).hi;
+  return now >= 2 * base && now >= base + 3;
+}
+
+/** Where ONE RECORD's grow-fit ledger lives: one summary line per flush of how snugly the new
+ *  moments sat. The mature trigger's raw material — written now, read by nothing shipped yet, so
+ *  its drift margin can be pre-registered from MEASURED wobble instead of an armchair number. */
+export const fitPath = (record: string): string => join(recordDir(record), 'fit.jsonl');
+
+/** Median / p10 over nearest-centre similarities, rounded so the stores stay byte-stable. */
+function fitStats(sims: number[]): { median: number; p10: number; n: number } {
+  const s = [...sims].sort((a, b) => a - b);
+  const at = (p: number) => s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))] ?? 0;
+  const r = (v: number) => Math.round(v * 1000) / 1000;
+  return { median: r(at(50)), p10: r(at(10)), n: s.length };
+}
+
+function recordFit(record: string, at: string, sims: number[]): void {
+  if (!sims.length) return;
+  try {
+    const { median, p10, n } = fitStats(sims);
+    mkdirSync(dirname(fitPath(record)), { recursive: true });
+    appendFileSync(fitPath(record), `${JSON.stringify({ at, n, median, p10 })}\n`);
+  } catch {
+    /* best-effort: a fit line must never break a flush */
+  }
 }
 
 export interface BuildResult {
@@ -161,13 +224,13 @@ export async function coldBuild(record: string, opts: {
   const named = namePiles(piles, moments, record);
   if (!named.length) return { categories: 0, scored: 0, piles: piles.length, unnamed: true };
 
-  return freeze(record, moments, piles, named, vocab);
+  return freeze(record, moments, X, piles, named, vocab);
 }
 
 /** Write the three stores and the frozen model, together, once. No scope is stamped — the naming
  *  call no longer rules on person-vs-project (the verdict wobbled; see name.ts). `write.ts` keeps
  *  its project-filter as a dead-man switch that nothing trips. */
-function freeze(record: string, moments: Moment[], piles: Pile[], named: Named[], vocab: Set<string>): BuildResult {
+function freeze(record: string, moments: Moment[], X: Float32Array[], piles: Pile[], named: Named[], vocab: Set<string>): BuildResult {
   const at = new Date().toISOString();
   // A cold build REPLACES every assignment below, so the outgoing generation is retired first —
   // otherwise every versioned rebuild stacks ~30 ghost categories that nothing carries (measured:
@@ -199,6 +262,18 @@ function freeze(record: string, moments: Moment[], piles: Pile[], named: Named[]
   writeAssignments(records, record, undefined, 'replace');
 
   const kept = piles.filter((p) => labelOf.has(p.id));
+  // The two frozen baselines the growth triggers read later: what the history supported (the young
+  // trigger's base) and how snugly build-day moments sat against the kept centres (the mature
+  // trigger's yardstick — same geometry `grow` joins against, so drift is comparable).
+  const keptCentroids = kept.map((p) => p.centroid);
+  const sims = X.map((x) => {
+    let best = -2;
+    for (const c of keptCentroids) {
+      const s = dot(x, c);
+      if (s > best) best = s;
+    }
+    return best;
+  });
   saveEngine(
     {
       vocab: [...vocab],
@@ -206,6 +281,8 @@ function freeze(record: string, moments: Moment[], piles: Pile[], named: Named[]
       labels: kept.map((p) => labelOf.get(p.id) as string),
       builtAt: at,
       pipeline: PIPELINE,
+      sessionsAtBuild: new Set(moments.map((m) => m.session)).size,
+      fit: fitStats(sims),
     },
     record,
   );
@@ -223,13 +300,18 @@ export interface GrowResult {
 /**
  * GROW — every run after the first. Embeds only what is new and attaches each moment to its nearest
  * frozen centre. FREE: no model call, because nothing is being named. New behaviours are not
- * discovered here (see the note below) — this is the join half of the living loop.
+ * discovered here — they surface when a rebuild trigger fires (see below).
  *
- * NOT YET: a moment near NOTHING should be parked, and parked moments that later resemble each other
- * should be born as a new pile and named. Without that, a genuinely new behaviour is absorbed into
- * whatever pile happens to be closest and can never surface — the profile would quietly stop
- * learning. Measured at cold build only ~1.3% of moments fail the outlier test, so parking buys
- * little there; in growth it is the ONLY route by which the profile keeps learning, and it is next.
+ * ⚠️ PARKING WAS MEASURED AND FALSIFIED (2026-08-04). The planned fix here — park a moment "near
+ * nothing", birth a pile when parked moments bunch — assumed a distance floor exists in the data.
+ * It does not: nearest-centre similarities form ONE continuous smear on real pairs (no gap, no
+ * knee), any fixed line means different things per pair (0.70 cuts 2.6% of one real corpus and 32%
+ * of another — the scale is pair-relative), and the farthest moments sit BETWEEN piles, not off
+ * the map. So the profile keeps learning through REBUILD TRIGGERS instead: the young trigger
+ * ([[outgrown]]) re-derives an under-built map when the history doubles, and the mature trigger
+ * (fit drift against `EngineState.fit`, not yet wired) will catch a person outgrowing a stable
+ * map. The fit line recorded below is that trigger's groundwork — its margin gets pre-registered
+ * from measured wobble, never guessed.
  */
 export async function grow(record: string, opts: { shouldStop?: () => boolean } = {}): Promise<GrowResult> {
   const state = loadEngine(record);
@@ -263,13 +345,20 @@ export async function grow(record: string, opts: { shouldStop?: () => boolean } 
 
   const centroids = state.centroids.map((c) => Float32Array.from(c));
   const at = new Date().toISOString();
+  const sims: number[] = [];
   writeAssignments(
-    fresh.map((m, i) => ({
-      key: m.key,
-      at,
-      kinds: [state.labels[nearest(X[i], centroids)]].filter(Boolean),
-    })),
+    fresh.map((m, i) => {
+      let best = -2;
+      let atC = 0;
+      for (let c = 0; c < centroids.length; c++) {
+        const s = dot(X[i], centroids[c]);
+        if (s > best) { best = s; atC = c; }
+      }
+      sims.push(best);
+      return { key: m.key, at, kinds: [state.labels[atC]].filter(Boolean) };
+    }),
     record,
   );
+  recordFit(record, at, sims);
   return { scored: fresh.length };
 }

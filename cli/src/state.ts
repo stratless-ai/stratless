@@ -57,6 +57,12 @@ export interface SynthState {
    *  Durable on purpose: consent must survive a lock race or a killed process, never live only in one
    *  worker's env. Its presence always traces to an explicit yes, so it can never cause surprise spend. */
   buildRequestedAt?: string;
+  /** STANDING consent for young-map rebuilds (the growth trigger, 0.11.0): a pair whose history has
+   *  outgrown its first map may be rebuilt by the background worker — cents, announced, never asked
+   *  again. Stamped by any flushing run (a typed `update`, or the door's yes), because those are the
+   *  surfaces whose copy says this out loud. Standing, never consumed — unlike `buildRequestedAt`,
+   *  which covers exactly one cold start. A background hook never sets it. */
+  growthConsentedAt?: string;
   /** how often the worker may auto-rebuild on its own — set with `stratless update --daily|--weekly`.
    *  Absent = weekly, the default. `stratless update` always rebuilds now regardless of this. */
   flushCadence?: FlushCadence;
@@ -82,6 +88,7 @@ export function readState(file: string = statePath()): SynthState {
     }
     if (typeof raw.lastFlushAt === 'string') out.lastFlushAt = raw.lastFlushAt;
     if (typeof raw.buildRequestedAt === 'string') out.buildRequestedAt = raw.buildRequestedAt;
+    if (typeof raw.growthConsentedAt === 'string') out.growthConsentedAt = raw.growthConsentedAt;
     if (raw.flushCadence === 'daily' || raw.flushCadence === 'weekly') out.flushCadence = raw.flushCadence;
     return out;
   } catch {
@@ -140,6 +147,25 @@ export function clearColdBuildRequest(file: string = statePath()): void {
   const s = readState(file);
   delete s.buildRequestedAt;
   writeState(s, file);
+}
+
+// ── the standing growth consent (the young trigger, 0.11.0) ────────────────────────────────────
+// One consent covers every young-map rebuild: the flushing surfaces (`update` in a terminal, the
+// door's yes) say "while this history is young I'll rebuild the map as it grows — cents each",
+// and stamping here is what makes that true for the background worker afterwards. Standing by
+// design: the trigger is self-damping (each fire doubles the next fire's distance), so this can
+// never authorize unbounded spend.
+
+/** Record the standing consent for young-map rebuilds. Idempotent; keeps the first stamp. */
+export function recordGrowthConsent(file: string = statePath()): void {
+  const s = readState(file);
+  if (s.growthConsentedAt) return;
+  writeState({ ...s, growthConsentedAt: new Date().toISOString() }, file);
+}
+
+/** May the background worker rebuild an outgrown young map? */
+export function growthConsented(file: string = statePath()): boolean {
+  return !!readState(file).growthConsentedAt;
 }
 
 // ── the render sidecar (the polish release): looking is free, and the header stays honest ──────

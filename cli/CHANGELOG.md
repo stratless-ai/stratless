@@ -6,6 +6,20 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+### Added
+- **Young profiles now grow.** A profile built on thin history starts with a small map — honest,
+  but until now it stayed that small forever. When your history could support roughly double the
+  patterns it supported at the last build, stratless now rebuilds the map: cents, on your refresh
+  cadence, announced in `status`, covered by one standing consent taken at the door (a typed
+  `stratless update` counts too, and rebuilds immediately). The rebuilds space themselves out — each one doubles the distance to the next — and stop
+  on their own once the map matures; a mature profile is never touched by this. A profile built
+  before this version announces the rebuild and waits for your next typed `update`, which also
+  turns the standing consent on.
+- Every build now freezes two baselines into its frozen model — the conversations it read, and how
+  snugly its own moments sat — and each refresh keeps a one-line fit ledger per assistant.
+  Groundwork that spends nothing: a later release will use it to notice when *you* have changed,
+  measured against your own baseline instead of a guessed threshold.
+
 ## [0.10.0] · 2026-08-03 · one profile per pair
 
 ### Changed
