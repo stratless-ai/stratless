@@ -6,6 +6,8 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+## [0.11.0] · 2026-08-04 · young profiles grow
+
 ### Added
 - **Young profiles now grow.** A profile built on thin history starts with a small map — honest,
   but until now it stayed that small forever. When your history could support roughly double the
