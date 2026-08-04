@@ -3,9 +3,9 @@
 The published tool (`npm: stratless`). TypeScript, **zero runtime dependencies** (see below), shipped standalone.
 Both matter: the "audit the whole thing in an afternoon" trust argument depends on a small, dep-free surface.
 
-Pipeline: a **Record** (parse one tool's raw history) → `moments.ts` (the persisted pile: what you
+Pipeline (`src/pipeline/`): a **Record** (parse one tool's raw history) → `moments.ts` (the persisted pile: what you
 typed and what the assistant was doing) → `shape.ts` (keep the person's own words, drop the subject) →
-`embed.ts` (a fingerprint per moment, local model, free) → `cluster.ts` (k-means, K derived per
+`embedding/embed.ts` (a fingerprint per moment, local model, free) → `cluster.ts` (k-means, K derived per
 person, overlap-merge, and the join loop) → `name.ts` (the one paid stage of a cold build: one call
 that names each pile, nothing more — no scope stamp, no merge; those verdicts wobbled and became
 arithmetic) → `count.ts` (pure arithmetic over the checkmarks, no model) → `lift.ts` (the
@@ -15,19 +15,19 @@ category is voiced once and cached in `voiced.ts` — a steady-state rebuild spe
 and the centroids, and every run
 after joins new moments to those frozen centres, so piles keep their names. Supporting: `assign.ts`
 (the assignment store — no model calls left in it), `mirror.ts` (the free, zero-side-effect read),
-`worker.ts`/`loop.ts` (the after-session refresh), `profile.ts` (the one artifact), `index.ts` (CLI entry).
+`runner/worker.ts`/`runner/loop.ts` (the after-session refresh), `storage/profile.ts` (the one artifact), `index.ts` (stable bin bootstrap), and `cli/` (commands and terminal UI).
 
-**THE SEAM — read this before adding an assistant.** `seam.ts` states what the engine understands
-with no idea whose tool produced it (`Turn`, and the three leg contracts). `adapters.ts` is the
-compiled-in registry; `brains.ts` is a SEPARATE registry, because a brain is provider-bound rather
+**THE SEAM — read this before adding an assistant.** `src/integrations/contracts.ts` states what the engine understands
+with no idea whose tool produced it (`Turn`, and the three leg contracts). `src/integrations/assistants/registry.ts` is the
+compiled-in registry; `src/integrations/brains/registry.ts` is a SEPARATE registry, because a brain is provider-bound rather
 than tool-bound and one brain can read any tool's history. Per tool, three files and no engine edits:
 
 | Leg | Claude Code | Codex |
 |---|---|---|
-| **Record** — its history → `Turn`s | `record-claude-code.ts` | `record-codex.ts` |
-| **Rhythm** — the after-session trigger, and protecting the history | `rhythm-claude-code.ts` | `rhythm-codex.ts` |
-| **Load** — the profile back into it | `load-claude-code.ts` | `load-codex.ts` |
-| *Brain* — the borrowed model (NOT a leg; provider-bound) | `brain-claude-code.ts` | `brain-codex.ts` |
+| **Record** — its history → `Turn`s | `integrations/assistants/claude-code/record.ts` | `integrations/assistants/codex/record.ts` |
+| **Rhythm** — the after-session trigger, and protecting the history | `integrations/assistants/claude-code/rhythm.ts` | `integrations/assistants/codex/rhythm.ts` |
+| **Load** — the profile back into it | `integrations/assistants/claude-code/load.ts` | `integrations/assistants/codex/load.ts` |
+| *Brain* — the borrowed model (NOT a leg; provider-bound) | `integrations/brains/claude-code.ts` | `integrations/brains/codex.ts` |
 
 The rule that makes it worth having: adding an assistant costs one new file per leg and **zero** edits
 to exchange/moments/shape/embed/cluster/name/count/write/lift. If it ever forces one, the seam has
@@ -35,7 +35,7 @@ leaked — fix the boundary, not the symptom.
 
 **The two ways the profile reaches an assistant.** A `load-*` module writes it where a tool already
 looks (an import line for Claude Code, an inline copy for Codex, which expands no import syntax).
-`mcp.ts` serves it to any tool that speaks MCP, over stdio,
+`integrations/mcp.ts` serves it to any tool that speaks MCP, over stdio,
 so a new client costs a config line instead of an adapter — the Return leg of the seam, done once.
 Read-only, one tool, hand-rolled JSON-RPC (no SDK, the dep-free rule holds). Two rungs because
 clients differ, and the split is MEASURED: the connect-time `instructions` field is truncated at
@@ -48,7 +48,7 @@ exactly 2048 chars (Claude Code, 2026-07-30), so it carries a short complete hoo
 ```
 npm run typecheck    # tsc --noEmit
 npm run build        # tsc → dist/    ← REQUIRED before test (tests run compiled dist/)
-npm test             # node --test dist/*.test.js
+npm test             # scripts/test.mjs recursively runs compiled dist/**/*.test.js
 ```
 
 Uses **npm**, not pnpm: the cli publishes standalone, and CI builds it from a clean `npm install`
@@ -67,7 +67,7 @@ caches it protected (`atomic.ts`).
 
 **The person's own files are REFUSED, never clobbered.** Their `settings.json`, their `hooks.json`,
 their `CLAUDE.md` hold automation we did not write, and overwriting one we cannot parse destroys it.
-Real example (`rhythm-codex.ts`):
+Real example (`src/integrations/assistants/codex/rhythm.ts`):
 
 ```ts
 const read = readHooks(path);
@@ -90,7 +90,7 @@ means the format moved, so stratless refuses rather than building a profile of a
   one that names what the arithmetic found. But its runtime does not ride in `dependencies`
   (declaring it made `npx stratless` cost strangers 116MB): it arrives ONCE, at `init`, after the
   person's yes — `@stratless/runtime` (~3MB, our own pre-bundled WASM, see `runtime/AGENTS.md`) plus
-  the weights (~34MB), into `~/.stratless/`, pinned by exact version + hashes in `src/fetch.ts`.
+  the weights (~34MB), into `~/.stratless/`, pinned by exact version + hashes in `src/pipeline/embedding/config.ts`.
   WASM is the canonical runtime, **standard over speed**: identical bits on every machine, and any
   runtime or model change is a versioned, announced rebuild (the `pipeline` stamp in `engine.ts`),
   never silent drift. `npx stratless` runs `mirror`, which needs no model at all, and must stay

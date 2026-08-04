@@ -119,6 +119,10 @@ No model of ours. No server. No training. No separate bill.
    assistant's config at it, so your next session starts already knowing you. The after-session
    refresh keeps it current; `stratless stop` turns that off and unloads it.
 
+   Codex keys hook approval by position. If you add another `SessionEnd` hook after stratless and
+   later run `stratless stop`, removing stratless shifts that hook; stop warns that Codex will ask
+   you to approve the later hook again rather than leaving the surprise for your next session.
+
 It spends your own plan's tokens, never a separate bill (`stratless status` shows the running
 total). It reads all of your history, deduped and cached, so the first build is the one real cost
 and every update after only pays for what is new — plus, while a profile is still young, a few
