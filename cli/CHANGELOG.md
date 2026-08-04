@@ -6,6 +6,24 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+### Fixed
+- **`stop` now turns the refresh off everywhere.** On a machine with more than one assistant, the
+  off switch removed only Claude Code's after-session hook and left Codex's armed. It now disarms
+  every assistant it knows, and `status`'s "after-session refresh" line (and the once-daily version
+  check that rides on it) reads every assistant's hook too — a Codex-only machine with an armed
+  hook shows "on" instead of "off".
+
+### Added
+- **`stop` warns before Codex re-asks about your own hooks.** Codex keys hook approval by position,
+  so removing stratless's `SessionEnd` hook shifts any hook you added after it, and Codex will ask
+  you to approve the shifted hook again. `stop` now says exactly that, instead of leaving it to
+  look like your own automation silently broke. Your hook itself is never touched.
+
+### Changed
+- **Internal: the cli's source grew a floor plan** — per-assistant code behind `integrations/`, the
+  engine stages in `pipeline/`, the worker in `runner/`, persistence in `storage/`. No command,
+  flag, file format, or consent behavior changed; the npm package keeps the same entrypoint.
+
 ## [0.11.0] · 2026-08-04 · young profiles grow
 
 ### Added

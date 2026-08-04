@@ -20,18 +20,20 @@ name: pool
 on:
   pull_request:
     paths:
-      - 'cli/src/embed.ts'
-      - 'cli/src/embedworker.ts'
-      - 'cli/src/embedpool.test.ts'
-      - 'cli/src/fetch.ts'          # RUNTIME_VERSION and the weights hash live here
+      - 'cli/src/pipeline/embedding/embed.ts'
+      - 'cli/src/pipeline/embedding/embedworker.ts'
+      - 'cli/src/pipeline/embedding/embedpool.test.ts'
+      - 'cli/src/pipeline/embedding/config.ts'         # RUNTIME_VERSION and the weights hash live here
+      - 'cli/src/pipeline/embedding/fetch.ts'
       - '.github/workflows/pool.yml'
   push:
     branches: [main]
     paths:
-      - 'cli/src/embed.ts'
-      - 'cli/src/embedworker.ts'
-      - 'cli/src/embedpool.test.ts'
-      - 'cli/src/fetch.ts'
+      - 'cli/src/pipeline/embedding/embed.ts'
+      - 'cli/src/pipeline/embedding/embedworker.ts'
+      - 'cli/src/pipeline/embedding/embedpool.test.ts'
+      - 'cli/src/pipeline/embedding/config.ts'
+      - 'cli/src/pipeline/embedding/fetch.ts'
       - '.github/workflows/pool.yml'
   workflow_dispatch:
 
@@ -56,8 +58,8 @@ jobs:
         id: id
         run: |
           set -euo pipefail
-          rv="$(grep -oE "RUNTIME_VERSION = '[^']+'" cli/src/fetch.ts | grep -oE "[0-9.]+")"
-          wh="$(grep -oE "MODEL_WEIGHTS_SHA256 = '[a-f0-9]+'" cli/src/fetch.ts | grep -oE "[a-f0-9]{64}")"
+          rv="$(grep -oE "RUNTIME_VERSION = '[^']+'" cli/src/pipeline/embedding/config.ts | grep -oE "[0-9.]+")"
+          wh="$(grep -oE "MODEL_WEIGHTS_SHA256 = '[a-f0-9]+'" cli/src/pipeline/embedding/config.ts | grep -oE "[a-f0-9]{64}")"
           [ -n "$rv" ] && [ -n "$wh" ] || { echo "::error::could not read the pinned runtime/weights identity"; exit 1; }
           echo "runtime=$rv" >> "$GITHUB_OUTPUT"
           echo "weights=${wh:0:12}" >> "$GITHUB_OUTPUT"
@@ -85,7 +87,7 @@ jobs:
         run: |
           set -euo pipefail
           node -e "
-            import('./cli/dist/embed.js').then(async (m) => {
+            import('./cli/dist/pipeline/embedding/embed.js').then(async (m) => {
               if (m.runtimePresent()) { console.log('  cache hit — nothing fetched'); return }
               console.log('  cache miss — fetching the pinned runtime and weights')
               await m.ensureRuntime()
@@ -101,7 +103,7 @@ jobs:
           STRATLESS_MODELS: ${{ github.workspace }}/../.stratless-ci/models
         run: |
           set -euo pipefail
-          out="$(node --test cli/dist/embedpool.test.js 2>&1)" || { echo "$out"; exit 1; }
+          out="$(node --test cli/dist/pipeline/embedding/embedpool.test.js 2>&1)" || { echo "$out"; exit 1; }
           echo "$out"
           grep -qE '^# skipped 0' <<<"$out" \
             || { echo "::error::the byte-identity test SKIPPED — it is not actually running, which is the bug this job exists to fix"; exit 1; }

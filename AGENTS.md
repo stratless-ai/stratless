@@ -14,7 +14,7 @@ product's *output*: a profile of a person.
 
 ## Layout
 
-- `cli/` — the tool. TypeScript, **zero** runtime deps (the embedding runtime arrives at `init`'s consent, never via npm — see `cli/AGENTS.md`), published standalone to npm. Per-assistant code sits behind `cli/src/seam.ts`; adding one costs a file per leg and no engine edits.
+- `cli/` — the tool. TypeScript, **zero** runtime deps (the embedding runtime arrives at `init`'s consent, never via npm — see `cli/AGENTS.md`), published standalone to npm. Per-assistant code sits behind `cli/src/integrations/contracts.ts`; adding one costs a file per leg and no engine edits.
 - `runtime/` — `@stratless/runtime`: the embedding runtime (transformers.js + ONNX WASM), pre-bundled by us, fetched once at consent. Zero deps of its own; changes here are versioned rebuild events (see `runtime/AGENTS.md`).
 - `web/` — stratless.com. Nuxt 3, no modules, prerendered to static HTML.
 
@@ -54,6 +54,6 @@ plus network throttling, because a warm DNS/TLS connection is most of what a fir
 - ⚠️ **Ask before flipping the published cli or the live site** — both are one-way doors; don't ship an unproven change to either.
 - ✅ **Docs move with the code.** A PR that changes `cli/` behavior updates `web/content/docs/` and `cli/README.md` in the same PR — the site describing a previous version is a trust bug. (CI nudges: `.github/workflows/docs-nudge.yml`.)
 - ✅ **Numbers in copy are computed, never typed.** The site's version badge comes from the build (`web/nuxt.config.ts` reads `cli/package.json`); never hand-write it, anywhere.
-- ✅ **One sample profile, one source.** `web/content/samples/HUMAN.md` is a real build, checked in verbatim; the landing renders it in full. Every excerpt surface — the hero terminal (`web/pages/index.vue`), the README hero image (`assets/profile-hero.svg` + its `alt`), the npm README (`cli/README.md`), the docs sample (`web/content/docs/1.human-md.md`) — shows rows from that same build, in the format `cli/src/write.ts` currently emits. Update them together or not at all; pull rows from the real build, never invent them.
+- ✅ **One sample profile, one source.** `web/content/samples/HUMAN.md` is a real build, checked in verbatim; the landing renders it in full. Every excerpt surface — the hero terminal (`web/pages/index.vue`), the README hero image (`assets/profile-hero.svg` + its `alt`), the npm README (`cli/README.md`), the docs sample (`web/content/docs/1.human-md.md`) — shows rows from that same build, in the format `cli/src/pipeline/write.ts` currently emits. Update them together or not at all; pull rows from the real build, never invent them.
 - ✅ **Fonts: two lists that must agree.** The `@font-face` sources in `web/assets/css/main.css` and the `<link rel=preload>` list in `web/nuxt.config.ts` describe the same set. They drifted once and shipped a four-day outage. `pnpm --filter ./web check:fonts` enforces it; CI runs it before deploy.
 - ✅ Leave `pnpm -r typecheck`, `pnpm -r build`, and `pnpm test` green before handing work back. For `web/` changes that touch rendering, also leave `pnpm --filter ./web check:fonts` green.
