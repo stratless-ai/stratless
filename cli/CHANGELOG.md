@@ -6,6 +6,8 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+## [0.12.0] · 2026-08-04 · stop reaches every assistant
+
 ### Fixed
 - **`stop` now turns the refresh off everywhere.** On a machine with more than one assistant, the
   off switch removed only Claude Code's after-session hook and left Codex's armed. It now disarms
