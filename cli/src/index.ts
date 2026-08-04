@@ -23,7 +23,7 @@ import { loadRecentExchanges } from './exchange.js';
 import { humanMdPath, installedVersion, migrateLegacyProfile, profilePath } from './profile.js';
 import { reaimIfLoaded, claudeMdPath } from './load-claude-code.js';
 import { detect as detectAdapters, loadedInto, registry, unloadEverywhere } from './adapters.js';
-import { readRenders, latestRender, type RenderMeta, requestColdBuild, coldBuildRequested, readState, setFlushCadence, type FlushCadence } from './state.js';
+import { readRenders, latestRender, type RenderMeta, requestColdBuild, coldBuildRequested, recordGrowthConsent, readState, setFlushCadence, type FlushCadence } from './state.js';
 import { readUsage } from './usage.js';
 import { readLock, lockIsStale, stopWorker, spawnDetached, resolveBinPath } from './worker.js';
 import { runWorker, JUDGE_WINDOW } from './loop.js';
@@ -489,6 +489,10 @@ async function update(_rest: string[], opts: { consented?: boolean } = {}): Prom
   // built for one tool and then gained a second is exactly the person this must not skip.
   const consentedColdBuild = flushing && detectAdapters().some((a) => loadCategories(a.record.id).length === 0);
   if (consentedColdBuild) requestColdBuild();
+  // A flushing run also stamps the STANDING growth consent: its surfaces (the door's quote, this
+  // typed `update`) are the ones whose copy says young maps get rebuilt as history grows. After
+  // this one stamp, the background worker may take a young rebuild on its own — announced, cents.
+  if (flushing) recordGrowthConsent();
 
   const holder = readLock();
   const alive = !!(holder && !lockIsStale(holder));
@@ -903,6 +907,9 @@ async function main(): Promise<void> {
     }
     const est = pile > 0 ? estimateBuild(pile) : estimateFromMessages(mirror!.scale.messages);
     console.log(`\n  ${C.dim('Full profile:')}    ${C.b(estimateLine(est))}   ${C.dim(`built on your own ${brains.filter((b) => b.detect()).length > 1 ? 'assistants' : (pickBrain()?.displayName ?? 'assistant')}, nothing leaves.`)}`);
+    // THE STANDING PART OF THE ASK. Young history outgrows its first map; saying yes here also
+    // covers those few later rebuilds — said out loud now, so they can announce instead of knock.
+    console.log(`  ${C.dim('While it grows:')}  ${C.dim(`a young history outgrows its first map — stratless rebuilds it a few times as you go, cents each, announced in ${hint('stratless status')}.`)}`);
     // THE DOWNLOAD IS PART OF THE ASK. Most of the build now runs on a small local model, which is
     // why it costs cents instead of dollars — but the engine (~3MB runtime) and its weights (~34MB)
     // have to arrive once, and neither is in the npm package. Consenting to a build must mean

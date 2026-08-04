@@ -8,8 +8,9 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { PIPELINE, engineReady, loadEngine, saveEngine } from './engine.js';
+import { PIPELINE, engineReady, loadEngine, outgrown, saveEngine, type EngineState } from './engine.js';
 import { writeAssignments, loadAssignments } from './assign.js';
+import type { Moment } from './moments.js';
 
 const scratch = (name: string): string => join(mkdtempSync(join(tmpdir(), 'engine-')), name);
 
@@ -51,6 +52,38 @@ test('a corrupt engine file reads as not-ready rather than crashing a background
   writeFileSync(f, '{ not json');
   assert.equal(loadEngine('claude-code', f), undefined);
   assert.equal(engineReady('claude-code', f), false);
+});
+
+test('outgrown: the young trigger fires on doubled history, and only then', () => {
+  // The pre-registered rule (parking-probe findings, 2026-08-04): base = supported-at-build,
+  // now = supported today; fire ⇔ now >= 2·base AND now >= base + 3.
+  const convs = (n: number): Moment[] =>
+    Array.from({ length: n }, (_, i) => ({ session: `s${i}` }) as unknown as Moment);
+  const state = (sessionsAtBuild: number | undefined, k: number): EngineState => ({
+    vocab: [],
+    centroids: Array.from({ length: k }, () => [1, 0]),
+    labels: Array.from({ length: k }, (_, i) => `p${i}`),
+    builtAt: 'x',
+    pipeline: PIPELINE,
+    ...(sessionsAtBuild != null ? { sessionsAtBuild } : {}),
+  });
+
+  // base 3 (built at 9 conversations): 15 convs support 5 — quiet; 18 support 6 — fires.
+  assert.equal(outgrown(state(9, 3), convs(15)), false, 'not before the doubling');
+  assert.equal(outgrown(state(9, 3), convs(18)), true, 'fires exactly at the doubling');
+  // tiny pair, base 1: doubling alone would fire at supported 2 — the +3 floor holds it to 4.
+  assert.equal(outgrown(state(3, 1), convs(6)), false, 'the tiny-pair floor');
+  assert.equal(outgrown(state(3, 1), convs(12)), true);
+  // mature pair, base 27: supported caps at K_MAX 30 < 54 — can never fire.
+  assert.equal(outgrown(state(81, 27), convs(300)), false, 'maturity is what doubling runs out of');
+  // the boundary: base 15 is the last base that can ever fire (2×15 = K_MAX).
+  assert.equal(outgrown(state(45, 15), convs(90)), true);
+  // legacy engine.json (no sessionsAtBuild): the built count is the only baseline it kept.
+  assert.equal(outgrown(state(undefined, 3), convs(18)), true, 'legacy fallback');
+  assert.equal(outgrown(state(undefined, 3), convs(15)), false);
+  // THE PRUNING GUARD — why the base is sessions-at-build, never the built pile count: 4 piles
+  // kept from history that supported 10 must NOT re-fire while the history still supports 10.
+  assert.equal(outgrown(state(30, 4), convs(30)), false, 'admission pruning cannot cause a paid loop');
 });
 
 test('writeAssignments replace TRUNCATES — a cold build must not double every count', () => {
@@ -143,6 +176,31 @@ process.stdout.write(JSON.stringify({ result: JSON.stringify({ groups }), is_err
     // …and the claude-code shelf is BYTE-IDENTICAL: not retired, not truncated, not touched.
     for (const [f, text] of Object.entries(before)) {
       assert.equal(readFileSync(join(ccDir, f), 'utf8'), text, `claude-code/${f} untouched by another record's cold build`);
+    }
+
+    // THE FROZEN BASELINES (0.11.0): the build stamps what its history supported (the young
+    // trigger's base) and how snugly build-day moments sat (the mature trigger's yardstick).
+    const cx = loadEngine('codex');
+    assert.equal(cx?.sessionsAtBuild, 4, 'the raw conversation count at build');
+    assert.equal(cx?.fit?.n, 32, 'fit measured over every build moment');
+    assert.ok((cx?.fit?.median ?? -2) >= -1 && (cx?.fit?.median ?? 2) <= 1, 'fit is a cosine');
+
+    // GROW keeps the fit ledger: one new moment joins, one summary line lands in fit.jsonl.
+    writeFileSync(
+      join(home, 'moments.jsonl'),
+      readFileSync(join(home, 'moments.jsonl'), 'utf8') +
+        JSON.stringify({ key: 'cx-new-1', session: 'codex:s9', record: 'codex', ts: '2026-07-20T10:00:00Z', pile: 'ordinary', reply: 'please run the checks again variant 1', replyLen: 30 }) + '\n',
+    );
+    const { grow } = await import('./engine.js');
+    const gr = await grow('codex');
+    assert.equal(gr.scored, 1, 'the new moment was placed');
+    const fitLines = readFileSync(join(home, 'records', 'codex', 'fit.jsonl'), 'utf8').trim().split('\n');
+    const lastFit = JSON.parse(fitLines[fitLines.length - 1]) as { n: number; median: number; p10: number };
+    assert.equal(lastFit.n, 1, 'one joined moment, one measured fit');
+    assert.ok(lastFit.median >= -1 && lastFit.median <= 1);
+    // …and the other shelf is STILL untouched after growth.
+    for (const [f, text] of Object.entries(before)) {
+      assert.equal(readFileSync(join(ccDir, f), 'utf8'), text, `claude-code/${f} untouched by another record's growth`);
     }
   } finally {
     for (const [k, v] of Object.entries(saved)) {

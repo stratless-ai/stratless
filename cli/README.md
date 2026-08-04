@@ -121,7 +121,9 @@ No model of ours. No server. No training. No separate bill.
 
 It spends your own plan's tokens, never a separate bill (`stratless status` shows the running
 total). It reads all of your history, deduped and cached, so the first build is the one real cost
-and every update after only pays for what is new. If the assistant can't answer honestly, it writes
+and every update after only pays for what is new — plus, while a profile is still young, a few
+cents-sized map rebuilds as your history grows into it: announced in `status`, covered by the one
+consent, and self-stopping as the map matures. If the assistant can't answer honestly, it writes
 nothing: a confidently-wrong profile is the one failure that would end this, so silence always beats
 a guess.
 

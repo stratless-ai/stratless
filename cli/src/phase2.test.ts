@@ -20,7 +20,8 @@ import { readUsage, diffUsage } from './usage.js';
 import { loadCategories } from './categories.js';
 import { loadAssignments } from './assign.js';
 import { loadMoments } from './moments.js';
-import { requestColdBuild, coldBuildRequested } from './state.js';
+import { requestColdBuild, coldBuildRequested, recordGrowthConsent, readState, writeState } from './state.js';
+import { loadEngine } from './engine.js';
 import { isYes } from './index.js';
 
 let dir: string;
@@ -520,6 +521,115 @@ test('a DURABLE consent flag makes even a non-TTY worker build — consent survi
   assert.ok(existsSync(counter), 'the durable consent triggered the build with no env flag');
   assert.ok(loadCategories('claude-code', env.STRATLESS_CATEGORIES).length > 0, 'categories minted');
   assert.equal(coldBuildRequested(env.STRATLESS_STATE), false, 'and the flag was consumed exactly once');
+});
+
+// ── THE YOUNG TRIGGER (0.11.0) ───────────────────────────────────────────────────────────────────
+// A pair cold-built on thin history must not keep its day-one map forever. When the history could
+// support double what it supported at build (engine.ts `outgrown`), the worker rebuilds — riding
+// the STANDING growth consent, which only a flushing surface stamps. Three gates under test:
+// standing consent lets a background worker take a YOUNG rebuild (and only a young one — the
+// cold-start tests above stay the proof it cannot leak into first builds); no standing consent
+// means announce-only; and no trigger means no spend, consent or not.
+
+/** Grow a fixture HOME's history: `extra` more sessions appended after the first `already`. */
+function addSessions(home: string, name: string, already: number, extra: number, exchanges = 6): void {
+  const proj = join(home, '.claude', 'projects', 'proj');
+  const base = Date.parse('2026-07-01T00:00:00Z');
+  for (let i = 0; i < extra; i++) {
+    const n = already + i;
+    writeFileSync(join(proj, `session-${String(n).padStart(3, '0')}.jsonl`), transcript(exchanges, base + n * 86_400_000, 60, `${name}-late-${n}`));
+  }
+}
+
+/** First consented build over the fixture, so the young tests start from a real frozen map. */
+async function firstBuild(env: Record<string, string>, bin: string, counter: string): Promise<number> {
+  const childEnv = { ...process.env, ...env, STRATLESS_CLAUDE_BIN: bin, FAKE_COUNTER: counter, STRATLESS_FAKE_EMBED: '1', STRATLESS_FLUSH: '1' };
+  const w = spawn(process.execPath, [cli, '__worker'], { env: childEnv, stdio: 'ignore' });
+  await new Promise((r) => w.on('close', r));
+  assert.ok(loadCategories('claude-code', env.STRATLESS_CATEGORIES).length > 0, 'the first build minted the map');
+  return Number(readFileSync(counter, 'utf8')) || 0;
+}
+
+test('young trigger: standing consent lets a background worker rebuild an outgrown map', async () => {
+  const { home, env } = makeHome('young-standing', Array.from({ length: 9 }, () => ({ exchanges: 6 })));
+  const counter = join(home, 'calls');
+  const bin = writeNameCounterBin('fake-young-standing');
+  const calls = await firstBuild(env, bin, counter);
+  const built = loadEngine('claude-code', join(env.STRATLESS_RECORDS_DIR, 'claude-code', 'engine.json'));
+  assert.equal(built?.sessionsAtBuild, 9, 'the base the trigger measures from');
+
+  // The history doubles (9 → 18 conversations), and the standing consent is on disk — as a typed
+  // `update` would have left it. The worker runs exactly as the hook does: no TTY, no env flag.
+  // The flush cadence must be DUE for a background rebuild (the retry bound) — age the last flush
+  // past the weekly default, as a real week of use would have.
+  addSessions(home, 'young-standing', 9, 9);
+  recordGrowthConsent(env.STRATLESS_STATE);
+  writeState({ ...readState(env.STRATLESS_STATE), lastFlushAt: new Date(Date.now() - 8 * 86_400_000).toISOString() }, env.STRATLESS_STATE);
+  const childEnv = { ...process.env, ...env, STRATLESS_CLAUDE_BIN: bin, FAKE_COUNTER: counter, STRATLESS_FAKE_EMBED: '1' }; // no STRATLESS_FLUSH
+  const w = spawn(process.execPath, [cli, '__worker'], { env: childEnv, stdio: 'ignore' });
+  await new Promise((r) => w.on('close', r));
+
+  assert.ok(Number(readFileSync(counter, 'utf8')) > calls, 'the rebuild called the assistant');
+  const after = loadEngine('claude-code', join(env.STRATLESS_RECORDS_DIR, 'claude-code', 'engine.json'));
+  assert.equal(after?.sessionsAtBuild, 18, 'the map was re-frozen on the doubled history');
+  const p = readProgress(env.STRATLESS_PROGRESS);
+  assert.ok(p?.summary?.some((l) => l.includes('outgrew')), `and the rebuild announced its reason (${JSON.stringify(p?.summary)})`);
+});
+
+test('young trigger without standing consent: announce only, nothing spent', async () => {
+  const { home, env } = makeHome('young-announce', Array.from({ length: 9 }, () => ({ exchanges: 6 })));
+  const counter = join(home, 'calls');
+  const bin = writeNameCounterBin('fake-young-announce');
+  const calls = await firstBuild(env, bin, counter);
+
+  addSessions(home, 'young-announce', 9, 9); // outgrown — but no growth consent was ever stamped
+  const childEnv = { ...process.env, ...env, STRATLESS_CLAUDE_BIN: bin, FAKE_COUNTER: counter, STRATLESS_FAKE_EMBED: '1' };
+  const w = spawn(process.execPath, [cli, '__worker'], { env: childEnv, stdio: 'ignore' });
+  await new Promise((r) => w.on('close', r));
+
+  assert.equal(Number(readFileSync(counter, 'utf8')), calls, 'the assistant was NEVER called');
+  const after = loadEngine('claude-code', join(env.STRATLESS_RECORDS_DIR, 'claude-code', 'engine.json'));
+  assert.equal(after?.sessionsAtBuild, 9, 'the map was not rebuilt');
+  const p = readProgress(env.STRATLESS_PROGRESS);
+  assert.ok(p?.summary?.some((l) => /outgrown its \d+-pattern map/.test(l)), `it announces and points at \`update\` (${JSON.stringify(p?.summary)})`);
+});
+
+test('young trigger rides the cadence: standing consent + trigger, but flush not due — no spend', async () => {
+  // THE RETRY BOUND. A rebuild whose naming call fails leaves the trigger true and the consent
+  // standing; without the cadence gate the worker would re-attempt the paid call on every wake.
+  const { home, env } = makeHome('young-cadence', Array.from({ length: 9 }, () => ({ exchanges: 6 })));
+  const counter = join(home, 'calls');
+  const bin = writeNameCounterBin('fake-young-cadence');
+  const calls = await firstBuild(env, bin, counter);
+
+  addSessions(home, 'young-cadence', 9, 9); // outgrown, consent standing — but the flush just ran
+  recordGrowthConsent(env.STRATLESS_STATE);
+  const childEnv = { ...process.env, ...env, STRATLESS_CLAUDE_BIN: bin, FAKE_COUNTER: counter, STRATLESS_FAKE_EMBED: '1' };
+  const w = spawn(process.execPath, [cli, '__worker'], { env: childEnv, stdio: 'ignore' });
+  await new Promise((r) => w.on('close', r));
+
+  assert.equal(Number(readFileSync(counter, 'utf8')), calls, 'no paid call before the cadence is due');
+  const after = loadEngine('claude-code', join(env.STRATLESS_RECORDS_DIR, 'claude-code', 'engine.json'));
+  assert.equal(after?.sessionsAtBuild, 9, 'the map waits for the next scheduled refresh');
+  const p = readProgress(env.STRATLESS_PROGRESS);
+  assert.ok(p?.summary?.some((l) => l.includes('next scheduled refresh')), `and says it is only waiting (${JSON.stringify(p?.summary)})`);
+});
+
+test('no trigger, no rebuild: standing consent alone never spends on a map that still fits', async () => {
+  const { home, env } = makeHome('young-quiet', Array.from({ length: 9 }, () => ({ exchanges: 6 })));
+  const counter = join(home, 'calls');
+  const bin = writeNameCounterBin('fake-young-quiet');
+  const calls = await firstBuild(env, bin, counter);
+
+  addSessions(home, 'young-quiet', 9, 3); // 12 conversations support 4 — under both bars (6)
+  recordGrowthConsent(env.STRATLESS_STATE); // consent IS standing; the trigger is what's absent
+  const childEnv = { ...process.env, ...env, STRATLESS_CLAUDE_BIN: bin, FAKE_COUNTER: counter, STRATLESS_FAKE_EMBED: '1' };
+  const w = spawn(process.execPath, [cli, '__worker'], { env: childEnv, stdio: 'ignore' });
+  await new Promise((r) => w.on('close', r));
+
+  assert.equal(Number(readFileSync(counter, 'utf8')), calls, 'nothing was spent');
+  const after = loadEngine('claude-code', join(env.STRATLESS_RECORDS_DIR, 'claude-code', 'engine.json'));
+  assert.equal(after?.sessionsAtBuild, 9, 'the frozen map is untouched');
 });
 
 test('isYes: only an explicit y/yes builds; everything else defers (the default-NO spend gate)', () => {

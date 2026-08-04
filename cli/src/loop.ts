@@ -33,7 +33,7 @@ import { loadAssignments, pendingMoments } from './assign.js';
 import { join as joinLabelled, scoreboard } from './count.js';
 import { runLift } from './lift.js';
 import { buildProfile, looksLikeProfile } from './write.js';
-import { coldBuild, engineReady, grow } from './engine.js';
+import { coldBuild, engineReady, grow, loadEngine, outgrown } from './engine.js';
 import { runtimePresent } from './embed.js';
 import { estimateBuild, estimateLine } from './estimate.js';
 import { humanMdPath, installedVersion, profilePath, writeProfile } from './profile.js';
@@ -41,7 +41,7 @@ import { deliverMissing, loadEverywhere } from './adapters.js';
 import { startRun } from './stopwatch.js';
 import { dailyCheck } from './notify.js';
 import { refreshArmed } from './rhythm-claude-code.js';
-import { readState, writeState, writeRender, readRenders, latestRender, flushDue, flushCooldownMs, coldBuildRequested, clearColdBuildRequest } from './state.js';
+import { readState, writeState, writeRender, readRenders, latestRender, flushDue, flushCooldownMs, coldBuildRequested, clearColdBuildRequest, growthConsented } from './state.js';
 import { readUsage, diffUsage, fmtTokens } from './usage.js';
 import { acquireLock, releaseLock, lockFilePath } from './worker.js';
 import { writeProgress } from './progress.js';
@@ -177,6 +177,11 @@ export async function runWorker(): Promise<number> {
       const waiting = here.flatMap((a) => pendingMoments(a.record.id));
       const flush = flushDue(waiting, readState().lastFlushAt, Date.now(), manual, { maxAgeMs: flushMaxAgeMs() }).flush;
 
+      // ONE read of the pile for the whole pass — the per-record slices below (the young-trigger
+      // check, the cold quote, the flush block) all cut from this. Collection already happened
+      // above, so the file is stable for the rest of the run.
+      const pile = loadMoments();
+
       // Records that finish this loop BUILT (cold or steady) flow into the flush block below.
       // `changed` is per record: one pair's new moments must not rebuild another pair's file.
       const ready: { a: (typeof here)[number]; cats: Category[]; changed: boolean; justBuilt: boolean }[] = [];
@@ -186,14 +191,39 @@ export async function runWorker(): Promise<number> {
         if (stopRequested) break;
         const record = a.record.id;
         let cats = loadCategories(record);
+        const mine = pile.filter((m) => m.record === record);
+        // THE YOUNG TRIGGER: an under-built map whose history has doubled re-derives from the
+        // whole pile (engine.ts `outgrown` — pure arithmetic, self-damping). Detection is free
+        // and runs every wake; whether the rebuild may SPEND is decided at the gate below.
+        const eng = loadEngine(record);
+        const young = Boolean(cats.length && eng && engineReady(record) && outgrown(eng, mine));
 
-        if (!cats.length || !engineReady(record)) {
-          // THIS RECORD'S COLD START — the one paid run, per pair. Consent is machine-level (the
-          // door's yes covers every assistant present when it was given, and its quote summed
-          // them); the flag is consumed once, by the first build that takes it up.
-          if (!consented) {
-            const own = loadMoments().filter((m) => m.record === record).length;
+        if (!cats.length || !engineReady(record) || young) {
+          // THIS RECORD'S PAID RUN — a cold start, or a young map rebuilding. Cold-start consent
+          // is machine-level and consumed once (the door's yes covers every assistant present
+          // when it was given, and its quote summed them); a YOUNG rebuild may also ride the
+          // STANDING growth consent — stamped by a flushing run whose copy says so — and only a
+          // young rebuild may: `young` requires categories AND a ready engine, so a first build
+          // can never reach the paid arm on the standing flag. The `flush` bound is the RETRY
+          // bound: a rebuild whose naming call fails leaves the trigger true and the consent
+          // standing, and without it the worker would re-attempt the paid call on every wake.
+          // Successes are self-damping; the cadence is what damps failures. A typed `update`
+          // (`consented`) still rebuilds immediately.
+          const allowed = consented || (young && growthConsented() && flush);
+          if (!allowed) {
+            const own = mine.length;
             const est = estimateLine(estimateBuild(own));
+            if (young) {
+              // Outgrown but not building on THIS wake: with standing consent it is only waiting
+              // for the cadence; without (a pair built before the consent copy said this out
+              // loud), the next typed `update` takes it.
+              summary.push(
+                growthConsented()
+                  ? `${label(a.displayName)}your history has outgrown its ${cats.length}-pattern map — rebuilding on the next scheduled refresh (${est})`
+                  : `${label(a.displayName)}your history has outgrown its ${cats.length}-pattern map — the next \`stratless update\` rebuilds it (${est})`,
+              );
+              continue;
+            }
             // A machine upgraded from the merged era has EMPTY per-record stores and a legacy
             // engine.json — that person HAS a profile and must hear "the engine changed", never
             // "full build not run yet": a wrong reason is worse than none.
@@ -220,7 +250,7 @@ export async function runWorker(): Promise<number> {
           cats = loadCategories(record);
           if (dr.categories) {
             summary.push(
-              `${label(a.displayName)}found ${dr.categories} pattern${dr.categories === 1 ? '' : 's'} in ${dr.scored} moment${dr.scored === 1 ? '' : 's'} — fingerprinted on this machine, one call to name them`,
+              `${label(a.displayName)}${young ? 'your history outgrew its map — rebuilt: ' : ''}found ${dr.categories} pattern${dr.categories === 1 ? '' : 's'} in ${dr.scored} moment${dr.scored === 1 ? '' : 's'} — fingerprinted on this machine, one call to name them`,
             );
             ready.push({ a, cats, changed: true, justBuilt: true });
           } else if (dr.unnamed) {
@@ -258,9 +288,9 @@ export async function runWorker(): Promise<number> {
         summary.push('already current — nothing new to place');
       }
 
-      // NOT YET: a moment near NOTHING should be parked, and parked moments that later resemble
-      // each other should be born as a new pile and named. Until that lands, a genuinely new
-      // behaviour is absorbed into the nearest existing pile and cannot surface. Per record now.
+      // Growth of the category set happens through rebuild triggers: the young check above, and
+      // later the mature fit-drift trigger (unbuilt — its noise band is being measured first).
+      // Parking was the earlier plan and was falsified by measurement; the record is in engine.ts.
 
       // A stop from either path: everything scored so far is banked, the next run resumes.
       if (stopRequested) {
@@ -275,7 +305,7 @@ export async function runWorker(): Promise<number> {
       // A record that just cold-built flushes regardless of the cadence — its first file must not
       // wait a day. Everything in here reads ONE record's slice; nothing sums across two.
       if (ready.length) {
-        const momentsAll = loadMoments();
+        const momentsAll = pile;
         const scoreboards = { ...(readState().scoreboards ?? {}) };
         for (const { a, cats, changed, justBuilt } of ready) {
           if (!flush && !justBuilt) continue;

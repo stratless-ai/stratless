@@ -220,11 +220,13 @@ export function admits(pile: Pile, moments: Moment[]): boolean {
  * destroying the stable identities that make "rising" and "fading" mean anything, because you would
  * be comparing this month's piles against last month's different piles.
  *
- * NOT YET: a moment near NOTHING should be parked, and parked moments that later bunch together
- * should be born as a new pile. Without it a genuinely new behaviour is absorbed into whatever pile
- * is nearest and can never be discovered. Measured at cold build only ~1.3% of moments fail the
- * outlier test, so parking buys little there — but in growth it is the ONLY route by which the
- * profile keeps learning, and it is the next build.
+ * ⚠️ THERE IS DELIBERATELY NO DISTANCE FLOOR. Parking ("near nothing" → a cart → a born pile) was
+ * the planned fix and was FALSIFIED by measurement (2026-08-04): similarities to the nearest centre
+ * form one continuous smear on real pairs — no gap, no knee, no honest absolute line (a 0.70 floor
+ * cuts 2.6% of one real corpus and 32% of another) — and the farthest moments sit BETWEEN centres
+ * (runner-up margins down to 0.006), not outside the map. A floor would need RELATIVE structure and
+ * evidence from more than one corpus — the same bar the merge note above refused to guess at. The
+ * profile keeps learning through rebuild triggers instead (engine.ts [[outgrown]]).
  */
 export function join(vector: Float32Array, centroids: Float32Array[]): number {
   let best = -2;
