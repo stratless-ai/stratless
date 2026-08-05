@@ -81,6 +81,7 @@ test('full cache hit: zero missing, every row reused — the steady-state flush 
   const store = { rows: [row(), row({ name: 'terse-briefs', section: 'frame', signal: '' })] };
   const plan = voicingPlan([work(), work({ name: 'terse-briefs' })], store);
   assert.deepEqual(plan.missing, []);
+  assert.deepEqual(plan.replace, []);
   assert.equal(plan.reuse.size, 2);
   assert.equal(plan.reuse.get('plan-first')?.line, 'offer to enter plan mode before touching code');
 });
@@ -118,6 +119,16 @@ test('frame and judge rows need no quote-proof — an empty quote reuses regardl
   assert.equal(plan.reuse.size, 2);
 });
 
+test('model-authored numerals make only that cached row a replaceable miss', () => {
+  const invalid = row({ line: 'offer 2 options', signal: 'wants ２ choices' });
+  const stable = row({ name: 'stable' });
+  const plan = voicingPlan([work(), work({ name: 'stable' })], { rows: [invalid, stable] });
+  assert.deepEqual(plan.missing, ['plan-first']);
+  assert.deepEqual(plan.replace, ['plan-first']);
+  assert.equal(plan.reuse.has('plan-first'), false);
+  assert.equal(plan.reuse.get('stable'), stable);
+});
+
 // ── rememberVoiced — persist + prune ────────────────────────────────────────────────────────────
 
 test('remember: adds new rows, prunes dead generations, and skips the write when nothing moved', () => {
@@ -139,4 +150,12 @@ test('remember: adds new rows, prunes dead generations, and skips the write when
   rememberVoiced([row({ line: 'a re-rolled wording that must not land' }), dead], live, 'claude-code', file);
   assert.equal(readFileSync(file, 'utf8'), bytes);
   assert.equal(readVoiced('claude-code', file).rows.find((r) => r.name === 'plan-first')?.line, row().line);
+});
+
+test('remember: an explicitly invalid cache row is replaced in place, without moving its identity', () => {
+  const file = join(dir, 'replace.json');
+  writeVoiced({ rows: [row({ line: 'offer 2 options' })] }, 'claude-code', file);
+  const replacement = row({ line: 'offer options before implementation', voicedAt: '2026-08-05T00:00:00Z' });
+  rememberVoiced([replacement], [{ name: replacement.name, bornAt: replacement.bornAt }], 'claude-code', file, [replacement.name]);
+  assert.deepEqual(readVoiced('claude-code', file).rows, [replacement]);
 });

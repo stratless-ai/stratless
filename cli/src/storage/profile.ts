@@ -1,10 +1,10 @@
 /**
- * THE ARTIFACT — one HUMAN.md, written once, wherever the person's assistants can be pointed at it.
+ * THE ARTIFACT — one HUMAN.<record>.md per HUMAN+AI pair.
  *
  * This is the waist's last step and it belongs to nobody's tool. Writing the profile and DELIVERING
  * it are two jobs that lived in one file until a second assistant made the difference matter: a
- * profile has to exist before anything can carry it, and it has to exist in ONE place or two tools
- * would be reading two versions of a person.
+ * profile has to exist before anything can carry it, and each pair needs its own file so one tool
+ * can never receive claims measured inside another relationship.
  *
  * So: this module owns the file. The `load-*` modules own getting each assistant to read it, and
  * they differ more than you would expect — Claude Code follows a one-line import, Codex has no
@@ -43,7 +43,7 @@ export function humanMdPath(): string {
   return process.env.STRATLESS_HUMAN_MD || join(homedir(), '.stratless', 'HUMAN.md');
 }
 
-/** Where the profile lived before it became one artifact many assistants point at. */
+/** Where the profile lived before pair-specific artifacts replaced the merged one. */
 function legacyHumanMdPath(): string {
   return join(homedir(), '.claude', 'HUMAN.md');
 }

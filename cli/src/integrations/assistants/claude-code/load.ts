@@ -1,17 +1,17 @@
 /**
  * THE LOAD — put the profile where the assistant will read it.
  *
- * The canonical artifact is HUMAN.md — one file that describes the person, the thing every tool loads
- * to know who it's talking to. Claude Code can't be pointed at an arbitrary filename, but it DOES
- * expand `@import` lines inside the CLAUDE.md it already auto-loads. So the load is two writes:
+ * Claude Code's artifact is HUMAN.claude-code.md — the profile measured inside this pair. Claude
+ * Code can't be pointed at an arbitrary filename, but it DOES expand `@import` lines inside the
+ * CLAUDE.md it already auto-loads. So the load is two writes:
  *
- *   1. write the profile to ~/.stratless/HUMAN.md       — the canonical artifact
- *   2. put a one-line `@~/.stratless/HUMAN.md` redirect  — inside a managed block in CLAUDE.md
+ *   1. write the profile to ~/.stratless/HUMAN.claude-code.md
+ *   2. put a one-line redirect to that file inside CLAUDE.md
  *
  * CLAUDE.md becomes a pointer, not a copy — and every other route to the same file is a variation on
  * that one theme: a tool that takes a path reads it directly (aider's `read:`), a tool with no import
  * syntax gets the text copied into the block instead of a line pointing at it (codex's AGENTS.md),
- * and `stratless mcp` serves it to anything that asks. One artifact, many entry points.
+ * and `stratless mcp` serves every labelled pair to anything that asks.
  *
  * WHY IT LIVES IN ~/.stratless AND NOT ~/.claude (moved 2026-07-31). The profile is the PERSON'S, not
  * a tool's: keeping it inside Claude Code's directory meant uninstalling that tool took the profile
@@ -50,7 +50,7 @@ function importLine(humanPath: string): string {
 }
 
 export interface Injected {
-  /** the canonical artifact we wrote the profile to */
+  /** this pair's artifact */
   humanMd: string;
   /** the file we pointed at it */
   claudeMd: string;

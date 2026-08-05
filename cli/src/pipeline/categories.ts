@@ -9,24 +9,21 @@
  * THREE PROPERTIES, all borrowed from moments.ts on purpose:
  *
  *   1. APPEND-ONLY JSONL. Every change is a new line — never a rewrite. `born` when a category is
- *      first named, `revised` when its wording is refined, `retired` when it stops earning its keep.
+ *      first named and `retired` when its generation stops earning its keep.
  *      A torn last line from a crash mid-append fails to parse and is skipped; nothing else is lost.
  *
  *   2. THE BIRTH DATE IS IMMUTABLE. `born.at` is the one date counts and trend are computed from
- *      (frozen-once: a category only ever labels moments processed at or after it was born). A
- *      `revised` event may change the wording, never the birth — so a re-worded column keeps its
- *      history instead of resetting to "new".
+ *      (frozen-once: a category only ever labels moments processed at or after it was born).
  *
- *   3. THE LIVE SET IS A REPLAY. `loadCategories` folds the log: born adds, revised re-words,
- *      retired removes. Unknown event kinds are ignored, so a newer writer never breaks an older
- *      reader.
+ *   3. THE LIVE SET IS A REPLAY. `loadCategories` folds the log: born adds, retired removes.
+ *      Unknown event kinds are ignored, so a newer writer never breaks an older reader.
  *
  * WRITERS emit `born` (the seed script, and the engine at cold build) and — since 2026-07-30 —
  * `retired`: a cold rebuild REPLACES every assignment, so it retires the entire outgoing
  * generation before appending its own. Without that, every versioned rebuild stacked ~30 ghost
  * categories that nothing carried (measured on the reference machine: three rebuilds, 90 born,
- * 0 retired, 89 "live"). `revised` is recognised on read; its writer arrives with steady-state
- * revision.
+ * 0 retired, 89 "live"). Wording moves only when a cold rebuild retires the complete generation
+ * and births its replacement; steady growth never renames or re-words a frozen map.
  *
  * NO MODEL CALLS. Everything here is code. Cost is zero.
  */
@@ -39,7 +36,7 @@ import { recordDir } from '../storage/stores.js';
  *  collide with, retire, or masquerade as another's. Override base with STRATLESS_RECORDS_DIR. */
 export const categoriesPath = (record: string): string => join(recordDir(record), 'categories.jsonl');
 
-export type CategoryEventKind = 'born' | 'revised' | 'retired';
+export type CategoryEventKind = 'born' | 'retired';
 
 /** One line in the log. `at` is ISO; for `born` it is the birth date the whole column is dated from. */
 export interface CategoryEvent {
@@ -61,8 +58,8 @@ export interface Category {
   scope?: string;
 }
 
-/** Fold one event into the live set. born adds, revised re-words (keeping the birth), retired drops.
- *  Unknown kinds are ignored — a newer writer must never break an older reader. */
+/** Fold one event into the live set. born adds, retired drops. Unknown kinds are ignored — a newer
+ *  writer must never break an older reader. */
 function replay(live: Map<string, Category>, ev: CategoryEvent): void {
   switch (ev.event) {
     case 'born':
@@ -73,12 +70,6 @@ function replay(live: Map<string, Category>, ev: CategoryEvent): void {
         ...(ev.scope ? { scope: ev.scope } : {}),
       });
       break;
-    case 'revised': {
-      // the wording (and scope) may move; the BIRTH DATE never does — trend is computed from it.
-      const cur = live.get(ev.name);
-      if (cur) live.set(ev.name, { ...cur, description: ev.description, ...(ev.scope ? { scope: ev.scope } : {}) });
-      break;
-    }
     case 'retired':
       live.delete(ev.name);
       break;
@@ -143,4 +134,3 @@ export function retireCategories(names: string[], opts: { record: string; file?:
   appendFileSync(file, lines.join('\n') + '\n');
   return lines.length;
 }
-

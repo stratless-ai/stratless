@@ -6,6 +6,21 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+### Fixed
+- **`stop` no longer claims everything is off when it cannot safely identify the process holding
+  the worker lock.** It still removes every refresh hook and unloads every profile, but it leaves the
+  uncertain process untouched, names its PID and exits non-zero. A foreground command is reported
+  separately and is never signalled from another terminal.
+- **Model-authored numerals cannot enter a profile.** Counts, dates and quantitative receipts come
+  only from code; if profile or patch wording contains a numeric character, the whole response is
+  refused, no partial wording is cached, the previous profile stays loaded, and the spend still
+  appears on the run receipt.
+
+### Changed
+- **Internal: category generations have only two events, `born` and `retired`.** The never-written
+  `revised` event belonged to an older steady-revision design; current maps freeze until a complete,
+  consented rebuild replaces their generation.
+
 ## [0.12.0] · 2026-08-04 · stop reaches every assistant
 
 ### Fixed

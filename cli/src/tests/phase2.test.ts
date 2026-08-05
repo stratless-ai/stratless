@@ -17,11 +17,11 @@ import { test, before, after } from 'node:test';
 import { stopWorker, readLock, processCommand } from '../runner/worker.js';
 import { readProgress } from '../runner/progress.js';
 import { readUsage, diffUsage } from '../runner/usage.js';
-import { loadCategories } from '../pipeline/categories.js';
-import { loadAssignments } from '../pipeline/assign.js';
+import { appendCategories, loadCategories } from '../pipeline/categories.js';
+import { loadAssignments, writeAssignments } from '../pipeline/assign.js';
 import { loadMoments } from '../pipeline/moments.js';
 import { requestColdBuild, coldBuildRequested, recordGrowthConsent, readState, writeState } from '../runner/state.js';
-import { loadEngine } from '../pipeline/engine.js';
+import { loadEngine, PIPELINE, saveEngine } from '../pipeline/engine.js';
 import { isYes } from '../index.js';
 
 let dir: string;
@@ -112,6 +112,52 @@ if (${delayMs}) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${d
 const ids = [...input.matchAll(/### PILE (\\d+)/g)].map((m) => Number(m[1]));
 const groups = ids.map((id) => ({ name: 'pattern-' + id, description: 'does thing ' + id, quote: 'go', pile: id }));
 process.stdout.write(JSON.stringify({ result: JSON.stringify({ groups }), is_error: false, total_cost_usd: 0.0001, usage: { input_tokens: 1, output_tokens: 1 } }));
+`,
+  );
+  chmodSync(p, 0o755);
+  return p;
+}
+
+/** A valid naming answer followed by profile wording carrying unsupported precision. */
+function writeNumeralBin(name: string): string {
+  const p = join(dir, name);
+  writeFileSync(
+    p,
+    `#!/usr/bin/env node
+const args = process.argv.slice(2);
+const input = args.find((a) => a.includes('PILE ') || a.includes('CATEGORY:')) || '';
+let answer;
+if (input.includes('PILE ')) {
+  const ids = [...input.matchAll(/### PILE (\\d+)/g)].map((m) => Number(m[1]));
+  answer = { groups: ids.map((id) => ({ name: 'pattern-' + id, description: 'offers a bounded choice', quote: 'go', pile: id })) };
+} else {
+  const names = [...input.matchAll(/CATEGORY: ([^\\s]+)/g)].map((m) => m[1]);
+  answer = { picks: names.map((category) => ({ name: category, section: 'frame', line: 'offer 2 bounded choices', quote: 1, signal: 'wants bounded choices' })) };
+}
+process.stdout.write(JSON.stringify({ result: JSON.stringify(answer), is_error: false, total_cost_usd: 0.0001, usage: { input_tokens: 1, output_tokens: 1 } }));
+`,
+  );
+  chmodSync(p, 0o755);
+  return p;
+}
+
+/** One borrowed brain, two pair outcomes: Claude's row refuses while Codex's remains valid. */
+function writePairNumeralBin(name: string): string {
+  const p = join(dir, name);
+  writeFileSync(
+    p,
+    `#!/usr/bin/env node
+const args = process.argv.slice(2);
+const input = args.find((a) => a.includes('CATEGORY:')) || '';
+const names = [...input.matchAll(/CATEGORY: (\\S+)/g)].map((m) => m[1]);
+const picks = names.map((n) => ({
+  name: n,
+  section: 'frame',
+  line: n === 'claude-row' ? 'offer 2 checks before completion' : 'offer proof before completion',
+  quote: 1,
+  signal: 'wants proof before completion',
+}));
+process.stdout.write(JSON.stringify({ result: JSON.stringify({ picks }), is_error: false, total_cost_usd: 0.0001, usage: { input_tokens: 1, output_tokens: 1 } }));
 `,
   );
   chmodSync(p, 0o755);
@@ -223,7 +269,7 @@ test('C7: stopWorker stops a busy worker within grace, cleans the lock, labels t
   try {
     const t0 = Date.now();
     const res = await stopWorker(3000);
-    assert.equal(res.killed, true, 'a worker was there to stop');
+    assert.equal(res.status, 'stopped', 'a worker was there to stop');
     assert.ok(Date.now() - t0 < 4500, 'stopped within the grace window');
     assert.equal(readLock(env.STRATLESS_LOCK), undefined, 'the lock is cleaned');
     const p = readProgress(env.STRATLESS_PROGRESS);
@@ -281,6 +327,86 @@ test('wake: five simultaneous updates ring one worker; every doorbell returns fa
   assert.ok(loadCategories('claude-code', env.STRATLESS_CATEGORIES).length > 0, 'the one worker completed the cold build');
   assert.equal(rows.length, moments.length, 'every collected moment was assigned exactly once');
   assert.equal(new Set(rows.map((r) => r.key)).size, rows.length, 'no worker duplicated an assignment');
+});
+
+test('promise layer: model-authored numerals refuse the build with no partial cache or profile', async () => {
+  const { env } = makeHome('numeral-home', Array.from({ length: 6 }, () => ({ exchanges: 6 })));
+  const bin = writeNumeralBin('numeral-claude');
+  const child = spawn(process.execPath, [cli, '__worker'], {
+    env: { ...process.env, ...env, STRATLESS_CLAUDE_BIN: bin, STRATLESS_FAKE_EMBED: '1', STRATLESS_FLUSH: '1' },
+    stdio: 'ignore',
+  });
+  const code = await new Promise<number | null>((resolve) => child.on('close', resolve));
+  assert.equal(code, 1, 'a refused rendering is a failed worker outcome');
+  const progress = readProgress(env.STRATLESS_PROGRESS);
+  assert.equal(progress?.phase, 'failed');
+  assert.ok(progress?.summary?.some((line) => line.includes('model-authored profile wording contained a numeral')));
+  assert.ok(progress?.summary?.some((line) => line.includes('this run:')), 'the refused spend is still receipted');
+  assert.equal(existsSync(join(env.STRATLESS_PROFILE_DIR, 'HUMAN.claude-code.md')), false, 'nothing unsupported is written');
+  assert.equal(existsSync(join(env.STRATLESS_RECORDS_DIR, 'claude-code', 'voiced.json')), false, 'no part of the refused response is cached');
+  const usage = readUsage(env.STRATLESS_USAGE);
+  assert.equal(usage.byFeature.name?.calls, 1);
+  assert.equal(usage.byFeature.write?.calls, 1);
+});
+
+test('promise layer: one pair refusing numerals does not block another pair from writing', async () => {
+  const { home, env } = makeHome('numeral-pairs-home', []);
+  const codexHome = join(home, '.codex');
+  mkdirSync(join(codexHome, 'sessions'), { recursive: true });
+  const at = '2026-07-01T00:00:00.000Z';
+  const pairs = [
+    { record: 'claude-code', name: 'claude-row', key: 'claude-moment' },
+    { record: 'codex', name: 'codex-row', key: 'codex-moment' },
+  ];
+  const reply = 'please verify the result before calling this complete';
+  writeFileSync(
+    env.STRATLESS_MOMENTS,
+    pairs.map(({ record, key }) => JSON.stringify({
+      key,
+      session: `${record}:session`,
+      record,
+      ts: at,
+      pile: 'ordinary',
+      reply,
+      replyLen: reply.length,
+    })).join('\n') + '\n',
+  );
+  for (const { record, name, key } of pairs) {
+    const shelf = join(env.STRATLESS_RECORDS_DIR, record);
+    appendCategories([{ name, description: 'asks for proof before completion' }], {
+      record,
+      file: join(shelf, 'categories.jsonl'),
+      at,
+    });
+    saveEngine(
+      { vocab: ['proof'], centroids: [[1]], labels: [name], builtAt: at, pipeline: PIPELINE, sessionsAtBuild: 1 },
+      record,
+      join(shelf, 'engine.json'),
+    );
+    writeAssignments([{ key, at, kinds: [name] }], record, join(shelf, 'assignments.jsonl'), 'replace');
+  }
+
+  const bin = writePairNumeralBin('pair-numeral-claude');
+  const child = spawn(process.execPath, [cli, '__worker'], {
+    env: {
+      ...process.env,
+      ...env,
+      CODEX_HOME: codexHome,
+      STRATLESS_CLAUDE_BIN: bin,
+      STRATLESS_BRAIN: 'claude',
+      STRATLESS_FAKE_EMBED: '1',
+      STRATLESS_FLUSH: '1',
+    },
+    stdio: 'ignore',
+  });
+  const code = await new Promise<number | null>((resolve) => child.on('close', resolve));
+  assert.equal(code, 1, 'the overall run still reports the refused pair');
+  assert.equal(existsSync(join(env.STRATLESS_PROFILE_DIR, 'HUMAN.claude-code.md')), false, 'the refused pair writes nothing');
+  const codexProfile = readFileSync(join(env.STRATLESS_PROFILE_DIR, 'HUMAN.codex.md'), 'utf8');
+  assert.ok(codexProfile.includes('offer proof before completion'), 'the clean pair still writes its own profile');
+  const progress = readProgress(env.STRATLESS_PROGRESS);
+  assert.ok(progress?.summary?.some((line) => line.includes('Claude Code: refused')), 'the refused pair is named');
+  assert.ok(progress?.summary?.some((line) => line.includes('Codex: profile written and loaded')), 'the successful pair is named too');
 });
 
 // ── Strict args (0.3.5 rider): a typo is a refusal, never a different request ──────────────────
@@ -372,12 +498,53 @@ test('review: stopWorker never kills an unverified holder — a recycled PID is 
     process.env.STRATLESS_LOCK = lockFile;
     process.env.STRATLESS_PROGRESS = join(dir, 'unverified-progress.json');
     const res = await stopWorker(500);
-    assert.equal(res.killed, false, 'the kill is refused');
-    assert.equal(res.unverified, true, 'and says why');
+    assert.equal(res.status, 'unverified', 'the kill is refused and says why');
     assert.equal(innocent.exitCode, null, 'the innocent process is untouched');
   } finally {
     delete process.env.STRATLESS_LOCK;
     delete process.env.STRATLESS_PROGRESS;
+    innocent.kill('SIGKILL');
+  }
+});
+
+test('review: stopWorker names a foreground command and never signals it', async () => {
+  const lockFile = join(dir, 'foreground.lock');
+  const command = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 8000)'], { stdio: 'ignore' });
+  await sleep(80);
+  try {
+    writeFileSync(lockFile, `${JSON.stringify({ pid: command.pid, startedAt: new Date().toISOString(), kind: 'command' })}\n`);
+    process.env.STRATLESS_LOCK = lockFile;
+    const res = await stopWorker(500);
+    assert.deepEqual(res, { status: 'foreground', pid: command.pid });
+    assert.equal(command.exitCode, null, 'the person\'s foreground command is untouched');
+  } finally {
+    delete process.env.STRATLESS_LOCK;
+    command.kill('SIGKILL');
+  }
+});
+
+test('review: stop refuses an unverified process loudly instead of claiming it is off', async () => {
+  const { env } = makeHome('stop-unverified-home', []);
+  const innocent = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 8000)'], { stdio: 'ignore' });
+  await sleep(80);
+  try {
+    writeFileSync(env.STRATLESS_LOCK, `${JSON.stringify({ pid: innocent.pid, startedAt: '2026-01-01T00:00:00Z', kind: 'worker' })}\n`);
+    const result = await new Promise<{ code: number; out: string }>((resolve) => {
+      execFile(
+        process.execPath,
+        [cli, 'stop'],
+        { env: { ...process.env, ...env }, timeout: 15_000 },
+        (err, stdout, stderr) => resolve({ code: (err as NodeJS.ErrnoException & { code?: number } | null)?.code ?? 0, out: `${stdout}${stderr}` }),
+      );
+    });
+    assert.equal(result.code, 1, 'an incomplete stop exits non-zero');
+    assert.ok(result.out.includes('not fully off'), 'the headline tells the truth');
+    assert.ok(result.out.includes(`pid ${innocent.pid}`), 'the surviving process is identified');
+    assert.ok(result.out.includes('could not be verified'), 'the safety refusal is explained');
+    assert.ok(!result.out.includes('nothing to stop'), 'it never denies the live process');
+    assert.ok(!result.out.includes('stratless is off.'), 'it never claims total shutdown');
+    assert.equal(innocent.exitCode, null, 'the unverified process survives');
+  } finally {
     innocent.kill('SIGKILL');
   }
 });

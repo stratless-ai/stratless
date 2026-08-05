@@ -213,18 +213,28 @@ export function verifiedWorker(holder: LockHolder): boolean {
 }
 
 /**
- * Kill a running worker (C7 — `stop` is total): SIGTERM first so it can label itself and die at a
- * checkpoint, a short grace, then SIGKILL. Whatever it leaves behind is cleaned: its lock removed,
- * its progress labeled "stopped by you" if it died too fast to say so itself. Returns whether a
- * worker was actually there to kill. Stopping never wastes paid work — the hash-keyed cache means
- * the next run re-asks at most one chunk.
+ * Kill a verified running worker (C7): SIGTERM first so it can label itself and die at a checkpoint,
+ * a short grace, then SIGKILL. Whatever it leaves behind is cleaned: its lock removed,
+ * its progress labeled "stopped by you" if it died too fast to say so itself. The result says
+ * exactly what happened: absent, stopped, a respected foreground command, or a worker whose identity
+ * could not be proved. Stopping never wastes paid work — the hash-keyed cache means the next run
+ * re-asks at most one chunk.
  */
-export async function stopWorker(graceMs = 3000): Promise<{ killed: boolean; pid?: number; unverified?: boolean }> {
+export type StopWorkerResult =
+  | { status: 'not-running' }
+  | { status: 'stopped'; pid: number }
+  | { status: 'foreground'; pid: number }
+  | { status: 'unverified'; pid: number };
+
+export async function stopWorker(graceMs = 3000): Promise<StopWorkerResult> {
   const holder = readLock();
-  if (!holder || lockIsStale(holder)) return { killed: false };
+  if (!holder || lockIsStale(holder)) return { status: 'not-running' };
+  // A foreground command belongs to the terminal that started it. `stop` may turn off every future
+  // refresh around it, but it never signals a command the person is actively running elsewhere.
+  if (holder.kind === 'command') return { status: 'foreground', pid: holder.pid };
   // The kill demands verified identity (C7 hardening, review 2026-07-18): a stale lock whose PID
   // was recycled by the person's dev server must never get that server killed by `stop`.
-  if (!verifiedWorker(holder)) return { killed: false, pid: holder.pid, unverified: true };
+  if (!verifiedWorker(holder)) return { status: 'unverified', pid: holder.pid };
   // A detached worker leads its own process GROUP, and its borrowed claude children (including
   // the SYNCHRONOUS naming/write calls that block its signal handler) live in that group — kill
   // the group, so 'stopped' means the SPENDING stopped, not just the bookkeeper.
@@ -233,7 +243,7 @@ export async function stopWorker(graceMs = 3000): Promise<{ killed: boolean; pid
   try {
     process.kill(signalTarget, 'SIGTERM');
   } catch {
-    return { killed: false }; // died between the read and the signal — nothing to stop
+    return { status: 'not-running' }; // died between the read and the signal — nothing to stop
   }
   const deadline = Date.now() + graceMs;
   while (Date.now() < deadline && isAlive(holder.pid)) await sleep(100);
@@ -264,7 +274,7 @@ export async function stopWorker(graceMs = 3000): Promise<{ killed: boolean; pid
       summary: ['stopped by you — everything collected so far is banked; the next run picks up where this one stopped'],
     });
   }
-  return { killed: true, pid: holder.pid };
+  return { status: 'stopped', pid: holder.pid };
 }
 
 /**

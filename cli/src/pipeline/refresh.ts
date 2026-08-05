@@ -35,6 +35,7 @@ export async function refreshProfiles(opts: {
 }): Promise<RefreshResult> {
   const { startedAt, manual, brain, shouldStop, receipt } = opts;
   const summary: string[] = [];
+  const refusals: string[] = [];
 
     // THE ENGINE, in a harness (lock, progress frames, receipt, version check) that predates it and
     // stays put. Build the pile (free) · place the new moments against the frozen centres (free) ·
@@ -225,12 +226,26 @@ export async function refreshProfiles(opts: {
           sw.stage('lift', Date.now() - liftStart, lr.minted + lr.retired);
           if (lr.minted) summary.push(`${label(a.displayName)}${lr.minted} patch${lr.minted === 1 ? '' : 'es'} minted — the counts decided; the model only worded it`);
           if (lr.retired) summary.push(`${label(a.displayName)}${lr.retired} patch${lr.retired === 1 ? '' : 'es'} retired — the tune thinned`);
+          if (lr.refusedNumerals) {
+            const preserved = existsSync(profilePath(record)) ? 'the previous profile is unchanged' : 'no profile was written';
+            refusals.push(
+              `${label(a.displayName)}refused: model-authored profile wording contained a numeral — ${preserved} and the wording will be retried`,
+            );
+            continue;
+          }
 
           if (changed || lr.changed || !existsSync(profilePath(record))) {
             const writeStart = Date.now();
             const profile = buildProfile(record);
-            sw.stage('write', Date.now() - writeStart, profile ? 1 : 0);
-            if (profile && looksLikeProfile(profile.text)) {
+            sw.stage('write', Date.now() - writeStart, profile.status === 'built' ? 1 : 0);
+            if (profile.status === 'refused-numerals') {
+              const preserved = existsSync(profilePath(record)) ? 'the previous profile is unchanged' : 'no profile was written';
+              refusals.push(
+                `${label(a.displayName)}refused: model-authored profile wording contained a numeral — ${preserved} and the wording will be retried`,
+              );
+              continue;
+            }
+            if (profile.status === 'built' && looksLikeProfile(profile.text)) {
               const builtAt = new Date().toISOString(); // one stamp for BOTH the file header and the sidecar — they must agree
               writeProfile(profile.text, profilePath(record), builtAt);
               // STAMP THE VOICE, per pair. A change of brain is a change of wording with no other
@@ -294,5 +309,6 @@ export async function refreshProfiles(opts: {
 
     sw.record();
 
-  return { summary };
+    if (refusals.length) return { summary, failure: [...summary, ...refusals] };
+    return { summary };
 }

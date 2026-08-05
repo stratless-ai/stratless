@@ -6,7 +6,7 @@
  * byte for byte, the strings the pre-rebuild machinery printed (frozen here as literals).
  */
 import { strict as assert } from 'node:assert';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, before, after } from 'node:test';
@@ -18,6 +18,7 @@ import {
   nextPatchState,
   liftPrint,
   runLift,
+  voicePatches,
   ASK_ALTITUDE_HOME,
   PRINT_CAP,
   type Patch,
@@ -76,6 +77,96 @@ test('the wording survives the store verbatim — voiced once, never re-worded',
   writeLift({ patches: [patch({ wording: { text } })] }, 'claude-code', p);
   const print = liftPrint('claude-code', p);
   assert.equal(print.clauses.get('plan')!.clause, text, 'the stored text is the printed text, byte for byte');
+});
+
+test('patch voicing refuses the whole model response when any persisted field contains a numeral', () => {
+  const bin = join(dir, 'numeral-brain');
+  writeFileSync(
+    bin,
+    `#!/usr/bin/env node
+const result = { rules: [{ name: 'plan', x: 'misses 2 checks', do: 'verify first', y: 'proof before claims', clause: 'when proof is missing, verify first' }] };
+process.stdout.write(JSON.stringify({ result: JSON.stringify(result), is_error: false, total_cost_usd: 0.0001, usage: { input_tokens: 1, output_tokens: 1 } }));
+`,
+  );
+  chmodSync(bin, 0o755);
+  const before = {
+    bin: process.env.STRATLESS_CLAUDE_BIN,
+    brain: process.env.STRATLESS_BRAIN,
+    usage: process.env.STRATLESS_USAGE,
+  };
+  process.env.STRATLESS_CLAUDE_BIN = bin;
+  process.env.STRATLESS_BRAIN = 'claude';
+  process.env.STRATLESS_USAGE = join(dir, 'numeral-usage.json');
+  try {
+    const result = voicePatches(
+      [{
+        candidate: { name: 'plan', reach: 40, slip: 8, slipSessions: 4, stumbleSessions: ['a', 'b'], guardedSessions: 0 },
+        reachQuotes: ['please verify the work before calling it done'],
+        stumbleQuotes: ['that was not actually verified before you said it was complete'],
+      }],
+      'claude-code',
+    );
+    assert.deepEqual(result, { status: 'refused-numerals' });
+  } finally {
+    if (before.bin === undefined) delete process.env.STRATLESS_CLAUDE_BIN; else process.env.STRATLESS_CLAUDE_BIN = before.bin;
+    if (before.brain === undefined) delete process.env.STRATLESS_BRAIN; else process.env.STRATLESS_BRAIN = before.brain;
+    if (before.usage === undefined) delete process.env.STRATLESS_USAGE; else process.env.STRATLESS_USAGE = before.usage;
+  }
+});
+
+test('an old numeral-bearing patch is revoiced without changing its identity or measured history', () => {
+  const bin = join(dir, 'repair-brain');
+  writeFileSync(
+    bin,
+    `#!/usr/bin/env node
+const result = { rules: [{ name: 'plan', x: 'the check arrives late', do: 'verify before declaring completion', y: 'proof before claims', clause: 'when proof is missing, verify before declaring completion' }] };
+process.stdout.write(JSON.stringify({ result: JSON.stringify(result), is_error: false, total_cost_usd: 0.0001, usage: { input_tokens: 1, output_tokens: 1 } }));
+`,
+  );
+  chmodSync(bin, 0o755);
+  const file = join(dir, 'repair-lift.json');
+  const original = patch({
+    wording: { text: 'when proof is missing, run 2 checks', x: 'the 2nd check arrives late', doThis: 'do', y: 'y' },
+    history: [entry()],
+  });
+  writeLift({ patches: [original] }, 'claude-code', file);
+  const before = {
+    bin: process.env.STRATLESS_CLAUDE_BIN,
+    brain: process.env.STRATLESS_BRAIN,
+    usage: process.env.STRATLESS_USAGE,
+    records: process.env.STRATLESS_RECORDS_DIR,
+  };
+  process.env.STRATLESS_CLAUDE_BIN = bin;
+  process.env.STRATLESS_BRAIN = 'claude';
+  process.env.STRATLESS_USAGE = join(dir, 'repair-usage.json');
+  process.env.STRATLESS_RECORDS_DIR = dir;
+  try {
+    const result = runLift(
+      [],
+      [{ name: 'plan', description: 'asks for proof', bornAt: '2026-07-01T00:00:00Z' }],
+      NOW,
+      { file, roots: [dir], record: 'claude-code', isPrimary: true },
+    );
+    assert.equal(result.refusedNumerals, undefined);
+    assert.equal(result.changed, true);
+    const repaired = readLift('claude-code', file).patches[0];
+    assert.equal(repaired.id, original.id);
+    assert.equal(repaired.bornAt, original.bornAt);
+    assert.deepEqual(repaired.baseline, original.baseline);
+    assert.deepEqual(repaired.evidence, original.evidence);
+    assert.equal(repaired.history[0].builtAt, original.history[0].builtAt, 'the earlier evidence remains in place');
+    assert.deepEqual(repaired.wording, {
+      text: 'when proof is missing, verify before declaring completion',
+      x: 'the check arrives late',
+      doThis: 'verify before declaring completion',
+      y: 'proof before claims',
+    });
+  } finally {
+    if (before.bin === undefined) delete process.env.STRATLESS_CLAUDE_BIN; else process.env.STRATLESS_CLAUDE_BIN = before.bin;
+    if (before.brain === undefined) delete process.env.STRATLESS_BRAIN; else process.env.STRATLESS_BRAIN = before.brain;
+    if (before.usage === undefined) delete process.env.STRATLESS_USAGE; else process.env.STRATLESS_USAGE = before.usage;
+    if (before.records === undefined) delete process.env.STRATLESS_RECORDS_DIR; else process.env.STRATLESS_RECORDS_DIR = before.records;
+  }
 });
 
 // ── re-homing (ATTRIBUTE's stability half) ──────────────────────────────────────────────────────

@@ -98,7 +98,7 @@ const input = process.argv.slice(2).join('\\n');
 const out = (o) => process.stdout.write(JSON.stringify({ result: JSON.stringify(o), is_error: false, total_cost_usd: 0.0001, usage: { input_tokens: 1, output_tokens: 1 } }));
 if (input.includes('### PILE ')) {
   const ids = [...input.matchAll(/### PILE (\\d+)/g)].map((m) => Number(m[1]));
-  out({ groups: ids.map((id) => ({ name: 'pattern-' + id, description: 'does thing ' + id, quote: 'go', pile: id })) });
+  out({ groups: ids.map((id) => ({ name: 'pattern-' + String.fromCharCode(97 + id), description: 'does a recurring thing', quote: 'go', pile: id })) });
 } else if (input.includes('CATEGORY: ')) {
   const names = [...input.matchAll(/CATEGORY: (\\S+)/g)].map((m) => m[1]);
   const SEC = ['frame', 'judge', 'register'];
@@ -179,13 +179,13 @@ const EXPECTED =
     '',
     'Set these up or hand them over before I ask. Offering them unprompted is the point, not overstepping.',
     '',
-    '- offer the thing for pattern-0 (32×, comes in bursts)',
+    '- offer the thing for pattern-a (32×, comes in bursts)',
     '',
     '## What to catch for me',
     '',
     'What I reliably challenge or refuse. Pre-empt these, so I do not have to catch them myself.',
     '',
-    '- offer the thing for pattern-1 (128×, comes in bursts)',
+    '- offer the thing for pattern-b (128×, comes in bursts)',
   ].join('\n') + '\n';
 
 test('the profile golden: one cold build over a fixture archive writes exactly this HUMAN.md', async () => {

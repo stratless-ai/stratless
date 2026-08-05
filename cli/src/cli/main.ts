@@ -107,7 +107,10 @@ export async function main(): Promise<void> {
   if (cmd === 'status') return await status(args.slice(1));
   if (cmd === 'profile') return await profile();
   if (cmd === 'update') return await update(args.slice(1));
-  if (cmd === 'stop') return await stop();
+  if (cmd === 'stop') {
+    process.exitCode = await stop();
+    return;
+  }
 
   // A mistyped COMMAND gets the same courtesy as a mistyped flag (0.3.5): name the nearest one,
   // never just reject. The user-facing verbs, in help order.

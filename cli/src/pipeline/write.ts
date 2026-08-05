@@ -33,6 +33,7 @@ import { join, tally, LIFT_CUT, type Labelled, type CategoryStat } from './count
 import { liftPrint, type Clause, type LiftPrint } from './lift.js';
 import { readVoiced, rememberVoiced, voicingPlan, type VoicedRow } from './voiced.js';
 import { signatures, type Signature } from './shorthand.js';
+import { hasNumeral } from './numerals.js';
 
 /** The whole file targets this size; Frame + Judge always ship in full, Register fills the rest by
  *  count until the budget runs out. */
@@ -184,6 +185,10 @@ export interface Voiced {
   signal: string;
 }
 
+export type VoicePickResult =
+  | { status: 'accepted'; rows: Map<string, Voiced> }
+  | { status: 'refused-numerals' };
+
 /** The one model call. For each category it: routes to a section (frame/judge/register), re-voices it
  *  into an instruction to the assistant, picks the demonstrating quote (1..N, or 0 for none), and
  *  writes a short decode for the "In the moment" key. A category with no clear quote drops from the
@@ -191,7 +196,7 @@ export interface Voiced {
 export function pickAndVoice(
   work: { name: string; description: string; lift: number; cands: Moment[] }[],
   record: string,
-): Map<string, Voiced> {
+): VoicePickResult {
   const body = work
     .map((w) => {
       const fires = w.lift >= LIFT_CUT ? 'high' : 'ordinary';
@@ -225,18 +230,21 @@ QUOTE: the ONE quote (by number) that most clearly SHOWS this to someone who nev
 SIGNAL: a plain decode, SIX WORDS OR FEWER, of what the person is ASKING FOR when they do this: what it
 MEANS, never an instruction. E.g. "wants a plan before building", "wants it proven, not asserted".
 
+NUMERALS: use no numeric characters in LINE or SIGNAL. The renderer adds every count and quantitative
+receipt itself; model-authored precision is refused rather than loaded.
+
 Reply with JSON only:
 {"picks":[{"name":"<exact name>","section":"frame|judge|register|none","line":"<instruction>","quote":<number or 0>,"signal":"<six words or fewer>"}]}
 
 ${body}`;
   const brain = brainFor(record);
-  if (!brain) return new Map<string, Voiced>();
+  if (!brain) return { status: 'accepted', rows: new Map<string, Voiced>() };
   const answer = brain.ask(prompt, { role: 'main', feature: 'write', timeoutMs: QUOTE_TIMEOUT_MS, schema: VOICE_SCHEMA });
   const out = new Map<string, Voiced>();
-  if (!answer) return out;
+  if (!answer) return { status: 'accepted', rows: out };
   const raw = answer.text;
   const m = raw.match(/\{[\s\S]*\}/);
-  if (!m) return out;
+  if (!m) return { status: 'accepted', rows: out };
   try {
     const picks = (JSON.parse(m[0]).picks ?? []) as { name?: unknown; section?: unknown; line?: unknown; quote?: unknown; signal?: unknown }[];
     const byName = new Map(work.map((w) => [w.name, w]));
@@ -259,12 +267,15 @@ ${body}`;
       const q = Number(p.quote);
       const quote = Number.isInteger(q) && q >= 1 && q <= w.cands.length ? w.cands[q - 1].reply : '';
       const signal = typeof p.signal === 'string' ? p.signal.trim() : '';
+      // Refuse the WHOLE call, not only this row. Partial acceptance would let the same unsupported
+      // response quietly reshape the profile while claiming it was refused.
+      if (hasNumeral(line, signal)) return { status: 'refused-numerals' };
       out.set(name, { section, quote, line, signal });
     }
   } catch {
     /* unparseable — nothing voiced; every entry needs a quote, so the file comes back empty */
   }
-  return out;
+  return { status: 'accepted', rows: out };
 }
 
 /**
@@ -479,17 +490,22 @@ export function looksLikeProfile(text: string): boolean {
  * their generation, or a register row whose quote-proof aged out. In steady state that is ZERO
  * categories and the whole rebuild is free arithmetic: counts, trends, met/slip, clauses and key
  * lines re-stamp fresh while the wording never moves — which also ends the write-side wobble.
- * Null when there is nothing worth shipping. `injectProfile` (load.ts) installs the text.
+ * `empty` when there is nothing worth shipping; `refused-numerals` keeps the previous artifact.
  */
-export function buildProfile(record: string): { text: string; meta: ProfileMeta } | null {
+export type ProfileBuildResult =
+  | { status: 'built'; text: string; meta: ProfileMeta }
+  | { status: 'empty' }
+  | { status: 'refused-numerals' };
+
+export function buildProfile(record: string): ProfileBuildResult {
   // ONE PAIR'S FILE FROM ONE PAIR'S EVIDENCE. Everything below — the categories, the slice of the
   // pile, the assignments, the voice cache, the lift print — is this record's own. A count in the
   // file it produces was counted inside one relationship, which is what lets every receipt print
   // bare: the file itself is the owner label.
   const cats = loadCategories(record).filter((c) => !CIRCULAR.has(c.name));
-  if (!cats.length) return null;
+  if (!cats.length) return { status: 'empty' };
   const moments = loadMoments().filter((m) => m.record === record);
-  if (!moments.length) return null;
+  if (!moments.length) return { status: 'empty' };
   const labelled = join(moments, loadAssignments(record));
   const stats = tally(labelled, cats);
 
@@ -504,7 +520,15 @@ export function buildProfile(record: string): { text: string; meta: ProfileMeta 
     readVoiced(record),
   );
   const missingWork = work.filter((w) => plan.missing.includes(w.name));
-  const fresh = missingWork.length ? pickAndVoice(missingWork, record) : new Map<string, Voiced>();
+  const picked = missingWork.length
+    ? pickAndVoice(missingWork, record)
+    : { status: 'accepted' as const, rows: new Map<string, Voiced>() };
+  if (picked.status === 'refused-numerals') return picked;
+  const fresh = picked.rows;
+  // An old cache row containing model-authored precision is not allowed to disappear silently. It
+  // must be replaced in full; if the borrowed model did not answer, keep the old loaded profile and
+  // retry rather than writing a thinner file around the omission.
+  if (plan.replace.some((name) => !fresh.has(name))) return { status: 'refused-numerals' };
   if (fresh.size) {
     const voicedAt = new Date().toISOString();
     rememberVoiced(
@@ -519,6 +543,8 @@ export function buildProfile(record: string): { text: string; meta: ProfileMeta 
       })),
       cats.map((c) => ({ name: c.name, bornAt: c.bornAt })),
       record,
+      undefined,
+      plan.replace,
     );
   }
 
@@ -536,7 +562,7 @@ export function buildProfile(record: string): { text: string; meta: ProfileMeta 
   // get to set the boundary or be advertised in it.
   const win = evidenceWindow(moments);
   const inWindow = moments.filter((m) => m.ts && m.ts.slice(0, 10) >= win.from && m.ts.slice(0, 10) <= win.to);
-  return assemble(
+  const assembled = assemble(
     stats,
     voiced,
     {
@@ -548,4 +574,5 @@ export function buildProfile(record: string): { text: string; meta: ProfileMeta 
     { sigs, signals },
     liftPrint(record),
   );
+  return assembled ? { status: 'built', ...assembled } : { status: 'empty' };
 }

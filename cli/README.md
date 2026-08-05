@@ -15,13 +15,14 @@ nothing. When you want to keep it, `npx stratless init` archives your history an
 profile after asking once.
 
 No account. No API key. No cloud. The reading and the pattern-finding happen on your own disk; the
-only borrowed thing is your own `claude`, which names what the maths found. **Nothing leaves your
-machine.**
+only borrowed thing is your own assistant (`claude` or `codex`), which names what the maths found.
+**Nothing leaves your machine.**
 
-You need three things, and you probably have all of them: **Claude Code or Codex** installed and
-signed in (the `claude` or `codex` command), **Node 18+**, and a few sessions of history on this
-machine. That's it. Use both and each gets its own profile, built only from the history you made
-together and loaded back into that assistant.
+You need four things, and you probably have all of them: **Claude Code or Codex** installed and
+signed in (the `claude` or `codex` command), **Node 18+**, **macOS or Linux**, and a few sessions of
+history on this machine. Native Windows is not supported yet; run stratless inside WSL. Use both
+assistants and each gets its own profile, built only from the history you made together and loaded
+back into that assistant.
 
 ---
 
@@ -123,13 +124,18 @@ No model of ours. No server. No training. No separate bill.
    later run `stratless stop`, removing stratless shifts that hook; stop warns that Codex will ask
    you to approve the later hook again rather than leaving the surprise for your next session.
 
+   Before signalling a running refresh, `stop` verifies that the PID really belongs to that worker.
+   If it cannot prove that, it still removes the hooks and unloads the profiles, but it leaves the
+   process alone, names the PID, and exits non-zero rather than claiming everything is off.
+
 It spends your own plan's tokens, never a separate bill (`stratless status` shows the running
 total). It reads all of your history, deduped and cached, so the first build is the one real cost
 and every update after only pays for what is new — plus, while a profile is still young, a few
 cents-sized map rebuilds as your history grows into it: announced in `status`, covered by the one
 consent, and self-stopping as the map matures. If the assistant can't answer honestly, it writes
 nothing: a confidently-wrong profile is the one failure that would end this, so silence always beats
-a guess.
+a guess. Model-authored wording may contain no numerals at all; every quantitative receipt is added
+by code, and a response that crosses that boundary is refused without replacing the loaded profile.
 
 ## Privacy
 

@@ -39,6 +39,7 @@ import { dot } from './cluster.js';
 import { loadEngine } from './engine.js';
 import { brainFor } from '../integrations/brains/registry.js';
 import type { Category } from './categories.js';
+import { hasNumeral } from './numerals.js';
 import {
   gapCandidates,
   gapWindowRead,
@@ -368,6 +369,8 @@ export interface PatchVoiceJob {
   stumbleQuotes: string[];
   reachQuotes: string[];
   action?: string;
+  /** A cached patch being repaired keeps its birth evidence even when today's gap is quieter. */
+  stumbleSessionCount?: number;
 }
 
 /** Per-session sample quotes for a category's two valences, stumble side narrowed to named sessions. */
@@ -403,7 +406,31 @@ export function patchVoiceJobs(labelled: Labelled[], candidates: GapCandidate[])
   }));
 }
 
-export function voicePatches(jobs: PatchVoiceJob[], record: string): Map<string, { x: string; doThis: string; y: string; clause: string }> {
+type PatchWording = { x: string; doThis: string; y: string; clause: string };
+
+export type PatchVoiceResult =
+  | { status: 'accepted'; rows: Map<string, PatchWording> }
+  | { status: 'refused-numerals' };
+
+/** Reword one pre-boundary patch without changing its identity, baseline, history, or evidence. */
+function patchRepairJob(labelled: Labelled[], patch: Patch, adj: ReturnType<typeof adjacencyOf>): PatchVoiceJob {
+  const evidence = patch.evidence;
+  return {
+    candidate: {
+      name: patch.home,
+      reach: evidence.reach ?? 0,
+      slip: evidence.slip ?? 0,
+      slipSessions: evidence.stumbleSessions ?? 0,
+      stumbleSessions: [],
+      guardedSessions: 0,
+    },
+    ...samplesFor(labelled, patch.home),
+    action: patch.action ?? actionFor(labelled, patch.home, adj),
+    stumbleSessionCount: evidence.stumbleSessions ?? 0,
+  };
+}
+
+export function voicePatches(jobs: PatchVoiceJob[], record: string): PatchVoiceResult {
   const brain = brainFor(record);
   const body = jobs
     .map((j) => {
@@ -411,7 +438,7 @@ export function voicePatches(jobs: PatchVoiceJob[], record: string): Map<string,
         `PATTERN: ${j.candidate.name}`,
         `they hold this standard, in their own words (calm, working moments):`,
         ...j.reachQuotes.map((q) => `  · "${q}"`),
-        `but in ${j.candidate.stumbleSessions.length} sessions the standard arrived only as a late correction (said while stopping the assistant):`,
+        `but in ${j.stumbleSessionCount ?? j.candidate.stumbleSessions.length} sessions the standard arrived only as a late correction (said while stopping the assistant):`,
         ...j.stumbleQuotes.map((q) => `  · "${q}"`),
       ];
       if (j.action) parts.push(`the assistant move that answers this standard: the ${j.action} tool`);
@@ -438,30 +465,34 @@ export function voicePatches(jobs: PatchVoiceJob[], record: string): Map<string,
     'their own file). Never a grade or a diagnosis. No project or product nouns — write the kind of',
     'thing ("their product", "a named tool", "the current build").',
     'The move must grow their judgment (scoping, verifying, deciding), never prompting technique.',
+    'Use no numeric characters in x, do, y, or clause. The renderer owns every quantitative receipt;',
+    'model-authored precision is refused rather than loaded.',
     'Return JSON: {"rules":[{"name","x","do","y","clause"}]} — one entry per PATTERN, name copied exactly.',
     '',
     body,
   ].join('\n');
 
-  const out = new Map<string, { x: string; doThis: string; y: string; clause: string }>();
-  if (!brain) return out;
+  const out = new Map<string, PatchWording>();
+  if (!brain) return { status: 'accepted', rows: out };
   const answer = brain.ask(prompt, { role: 'main', feature: 'lift', timeoutMs: VOICE_TIMEOUT_MS, schema: PATCH_SCHEMA });
-  if (!answer) return out;
+  if (!answer) return { status: 'accepted', rows: out };
   const reply = answer.text;
   try {
     const m = reply.match(/\{[\s\S]*\}/);
-    if (!m) return out;
+    if (!m) return { status: 'accepted', rows: out };
     const parsed = JSON.parse(m[0]) as { rules?: { name?: string; x?: string; do?: string; y?: string; clause?: string }[] };
     const known = new Set(jobs.map((j) => j.candidate.name));
     for (const r of parsed.rules ?? []) {
       if (!r.name || !known.has(r.name)) continue;
       if (!r.x || !r.do || !r.y || !r.clause) continue;
-      out.set(r.name, { x: r.x.trim(), doThis: r.do.trim(), y: r.y.trim(), clause: r.clause.trim() });
+      const wording = { x: r.x.trim(), doThis: r.do.trim(), y: r.y.trim(), clause: r.clause.trim() };
+      if (hasNumeral(wording.x, wording.doThis, wording.y, wording.clause)) return { status: 'refused-numerals' };
+      out.set(r.name, wording);
     }
   } catch {
     /* a bad reply mints nothing this release; candidates retry next flush */
   }
-  return out;
+  return { status: 'accepted', rows: out };
 }
 
 /* ——— the per-release run: PROVE every open patch, RELEASE what earned an exit, mint what the
@@ -473,6 +504,8 @@ export interface LiftRunResult {
   open: number;
   /** what PRINTS moved — the profile should rebuild */
   changed: boolean;
+  /** a model-authored numeral was returned, or an old one could not yet be replaced */
+  refusedNumerals?: true;
 }
 
 export function runLift(
@@ -578,46 +611,76 @@ export function runLift(
     }
   }
 
-  // 3. ADMIT + PATCH — mode 1 only (mode 2 has no minting path by construction; see the header).
+  // 3. REPAIR + ADMIT + PATCH. A pre-boundary cached clause containing a numeral is re-voiced in
+  //    the same batch as new patches, but keeps every piece of measured identity and history.
   //    Covered-forever on (home, mode): a dead patch's axis does not silently re-mint.
   const covered = new Set(store.patches.filter((p) => owns(p) && p.mode === 1).map((p) => p.home));
   const candidates = gapCandidates(mine, categories).filter((c) => !covered.has(c.name));
+  const repairs = store.patches.filter(
+    (p) => owns(p)
+      && p.mode === 1
+      && p.state === 'open'
+      && hasNumeral(p.wording.text, p.wording.x ?? '', p.wording.doThis ?? '', p.wording.y ?? ''),
+  );
   let minted = 0;
-  if (candidates.length && engineView) {
-    const jobs = patchVoiceJobs(mine, candidates);
-    const voiced = voicePatches(jobs, opts.record);
-    for (const j of jobs) {
-      const v = voiced.get(j.candidate.name);
-      if (!v) continue;
-      const idx = engineView.labels.indexOf(j.candidate.name);
-      if (idx < 0) continue; // no geometry, no identity — cannot mint
-      const birth = gapWindowRead(mine, j.candidate.name, nowMs);
-      // An unfalsifiable patch may not exist: the failure must be alive at birth.
-      if (birth.slipRate <= 0) continue;
-      store.patches.push({
-        id: `${builtAt}·${j.candidate.name}`,
-        bornAt: builtAt,
-        mode: 1,
-        form: 'sharpen',
-        home: j.candidate.name,
-        record: opts.record,
-        pipeline: engineView.pipeline,
-        centroid: Array.from(engineView.centroids[idx] as ArrayLike<number>),
-        evidence: { reach: j.candidate.reach, slip: j.candidate.slip, stumbleSessions: j.candidate.stumbleSessions.length },
-        baseline: { fail: birth.slipRate },
-        wording: { text: v.clause, x: v.x, doThis: v.doThis, y: v.y },
-        ...(j.action ? { action: j.action } : {}),
-        history: [{ builtAt, fail: birth.slipRate, sessions: birth.stumbleSessions, sample: birth.sample, reach: birth.reach, chances: birth.chances }],
-        state: 'open',
-      });
-      minted++;
-      storeMoved = true;
-      changed = true;
+  let refusedNumerals = false;
+  const repairJobs = repairs.map((p) => patchRepairJob(mine, p, adj));
+  const mintJobs = engineView ? patchVoiceJobs(mine, candidates) : [];
+  const jobs = [...repairJobs, ...mintJobs];
+  if (jobs.length) {
+    const result = voicePatches(jobs, opts.record);
+    if (result.status === 'refused-numerals') {
+      refusedNumerals = true;
+    } else if (repairs.some((p) => !result.rows.has(p.home))) {
+      // Never delete an old clause merely because its replacement call failed. The loaded profile
+      // stays put and the repair retries on the next eligible flush.
+      refusedNumerals = true;
+    } else {
+      for (const patch of repairs) {
+        const v = result.rows.get(patch.home)!;
+        patch.wording = { text: v.clause, x: v.x, doThis: v.doThis, y: v.y };
+        storeMoved = true;
+        changed = true;
+      }
+      for (const j of mintJobs) {
+        const v = result.rows.get(j.candidate.name);
+        if (!v) continue;
+        const idx = engineView!.labels.indexOf(j.candidate.name);
+        if (idx < 0) continue; // no geometry, no identity — cannot mint
+        const birth = gapWindowRead(mine, j.candidate.name, nowMs);
+        // An unfalsifiable patch may not exist: the failure must be alive at birth.
+        if (birth.slipRate <= 0) continue;
+        store.patches.push({
+          id: `${builtAt}·${j.candidate.name}`,
+          bornAt: builtAt,
+          mode: 1,
+          form: 'sharpen',
+          home: j.candidate.name,
+          record: opts.record,
+          pipeline: engineView!.pipeline,
+          centroid: Array.from(engineView!.centroids[idx] as ArrayLike<number>),
+          evidence: { reach: j.candidate.reach, slip: j.candidate.slip, stumbleSessions: j.candidate.stumbleSessions.length },
+          baseline: { fail: birth.slipRate },
+          wording: { text: v.clause, x: v.x, doThis: v.doThis, y: v.y },
+          ...(j.action ? { action: j.action } : {}),
+          history: [{ builtAt, fail: birth.slipRate, sessions: birth.stumbleSessions, sample: birth.sample, reach: birth.reach, chances: birth.chances }],
+          state: 'open',
+        });
+        minted++;
+        storeMoved = true;
+        changed = true;
+      }
     }
   }
 
   if (storeMoved) writeLift(store, opts.record, file);
-  return { minted, retired, open: store.patches.filter((p) => p.state === 'open').length, changed };
+  return {
+    minted,
+    retired,
+    open: store.patches.filter((p) => p.state === 'open').length,
+    changed,
+    ...(refusedNumerals ? { refusedNumerals: true as const } : {}),
+  };
 }
 
 /* ——— what the profile prints ———

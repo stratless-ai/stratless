@@ -36,6 +36,7 @@ import { recordDir } from '../storage/stores.js';
 import { readFileSync } from 'node:fs';
 
 import { atomicWriteFileSync } from '../storage/atomic.js';
+import { hasNumeral } from './numerals.js';
 
 /** Per record: a voice is the wording of ONE pair's category, so the cache lives on that pair's
  *  shelf. This also ends two hazards the shared file had — two records minting the same kebab name
@@ -113,6 +114,8 @@ export interface VoicingPlan {
   reuse: Map<string, VoicedRow>;
   /** categories that must be voiced this build (no row, or the register proof was lost) */
   missing: string[];
+  /** cache rows whose model-authored wording predates the numeral boundary and must be replaced */
+  replace: string[];
 }
 
 /**
@@ -124,10 +127,16 @@ export function voicingPlan(work: VoiceWork[], store: VoicedStore): VoicingPlan 
   const byKey = new Map(store.rows.map((r) => [keyOf(r.name, r.bornAt), r]));
   const reuse = new Map<string, VoicedRow>();
   const missing: string[] = [];
+  const replace: string[] = [];
   for (const w of work) {
     const row = byKey.get(keyOf(w.name, w.bornAt));
     if (!row) {
       missing.push(w.name);
+      continue;
+    }
+    if (hasNumeral(row.line, row.signal)) {
+      missing.push(w.name);
+      replace.push(w.name);
       continue;
     }
     if (row.section === 'register' && !w.candidateReplies.includes(row.quote)) {
@@ -136,7 +145,7 @@ export function voicingPlan(work: VoiceWork[], store: VoicedStore): VoicingPlan 
     }
     reuse.set(w.name, row);
   }
-  return { reuse, missing };
+  return { reuse, missing, replace };
 }
 
 /** Persist newly voiced rows and prune to the live generation set — the cache self-cleans when a
@@ -146,10 +155,14 @@ export function rememberVoiced(
   liveKeys: { name: string; bornAt: string }[],
   record: string,
   file: string = voicedPath(record),
+  replaceNames: string[] = [],
 ): void {
   const store = readVoiced(record, file);
   const live = new Set(liveKeys.map((k) => keyOf(k.name, k.bornAt)));
-  const kept = store.rows.filter((r) => live.has(keyOf(r.name, r.bornAt)));
+  const replace = new Set(replaceNames);
+  const replacements = newRows.filter((r) => replace.has(r.name) && live.has(keyOf(r.name, r.bornAt)));
+  const replacementKeys = new Set(replacements.map((r) => keyOf(r.name, r.bornAt)));
+  const kept = store.rows.filter((r) => live.has(keyOf(r.name, r.bornAt)) && !replacementKeys.has(keyOf(r.name, r.bornAt)));
   const have = new Set(kept.map((r) => keyOf(r.name, r.bornAt)));
   const added = newRows.filter((r) => live.has(keyOf(r.name, r.bornAt)) && !have.has(keyOf(r.name, r.bornAt)));
   if (!added.length && kept.length === store.rows.length) return; // nothing moved

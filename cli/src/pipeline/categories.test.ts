@@ -1,6 +1,6 @@
 /**
  * CATEGORIES — the column store, pinned. The log is append-only and the projection folds it: born
- * adds, revised re-words but KEEPS the birth date, retired drops, a torn line is skipped.
+ * adds, retired drops, unknown future events are ignored, and a torn line is skipped.
  */
 import { strict as assert } from 'node:assert';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
@@ -31,21 +31,21 @@ test('append then load: born events become the live set, stamped with the birth 
   assert.equal(a.bornAt, at);
 });
 
-test('replay: revised re-words but keeps the birth date; retired drops', () => {
+test('replay: retired drops; unknown event kinds leave the frozen category unchanged', () => {
   const f = file();
   writeFileSync(
     f,
     [
       JSON.stringify({ event: 'born', name: 'x', description: 'v1', at: '2026-06-01T00:00:00Z' }),
       JSON.stringify({ event: 'born', name: 'y', description: 'keep', at: '2026-06-02T00:00:00Z' }),
-      JSON.stringify({ event: 'revised', name: 'x', description: 'v2', at: '2026-07-01T00:00:00Z' }),
+      JSON.stringify({ event: 'future-wording-event', name: 'x', description: 'v2', at: '2026-07-01T00:00:00Z' }),
       JSON.stringify({ event: 'retired', name: 'y', description: '', at: '2026-07-02T00:00:00Z' }),
     ].join('\n') + '\n',
   );
   const live = loadCategories('claude-code', f);
   assert.equal(live.length, 1, 'y retired, only x remains');
   assert.equal(live[0].name, 'x');
-  assert.equal(live[0].description, 'v2', 'wording moved');
+  assert.equal(live[0].description, 'v1', 'an unknown event cannot rewrite a frozen generation');
   assert.equal(live[0].bornAt, '2026-06-01T00:00:00Z', 'birth date is immutable');
 });
 

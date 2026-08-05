@@ -37,8 +37,8 @@ export const TOOLLESS_ARGS = ['--tools', ''] as const;
  * asking it directly — it answered YES and quoted context back. THREE sources feed it, and which
  * one answers depends on the working directory:
  *
- *   1. `~/.claude/CLAUDE.md` -> `@~/.stratless/HUMAN.md` — OUR OWN PROFILE. The borrowed call reads
- *      the file it is helping to write, so the profile confirms itself: a claim that gets in makes
+ *   1. `~/.claude/CLAUDE.md` -> `@~/.stratless/HUMAN.claude-code.md` — THIS PAIR'S PROFILE. The
+ *      borrowed call reads the file it is helping to write, so the profile confirms itself: a claim that gets in makes
  *      the reader likelier to see it again, which puts it back in. No stage could catch this; every
  *      stage is downstream of it. Measured direction: toward flattery. The same pile read with the profile
  *      loaded produced a category quoting HUMAN.md's own wording, and did NOT produce

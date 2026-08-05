@@ -39,15 +39,11 @@ import { refreshProfiles } from '../pipeline/refresh.js';
 export const JUDGE_WINDOW = 200;
 
 /**
- * `Rendered` and `buildRendered` lived here: they chose between the flat-pile synthesis and the
- * pattern-era one, then ran the two refusal lints. Both synthesis paths are gone with the miner.
- *
- * THE LINTS MUST COME BACK in stage 4, and they are the part worth remembering rather than the
- * plumbing. The numbers-lint refuses a rendering containing a numeral that is not in the evidence.
- * The shape lint exists because a chatter reply was once LOADED as HUMAN.md in production
- * (2026-07-18) — the artifact has to look like an artifact. `write.ts` assembles the file in code
- * rather than asking a model for it, which removes the *source* of both failures; that is a reason
- * to expect the lints to stay quiet, not a reason to ship without them.
+ * THE TWO REFUSAL BOUNDARIES. `numerals.ts` rejects numeric characters in model-authored profile
+ * wording before it reaches either voice cache; every quantitative receipt is assembled by code.
+ * `write.ts` then applies the shape lint because a chatter reply was once LOADED as HUMAN.md in
+ * production (2026-07-18) — the artifact still has to look like an artifact. Assembly removes most
+ * of both failure classes; the boundaries are what make the remaining promise enforceable.
  */
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
