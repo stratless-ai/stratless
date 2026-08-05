@@ -61,16 +61,32 @@ export interface VoicedRow {
   voicedAt: string;
 }
 
+/** One fold's paid-for wording: the folded row's line and one facet per member, cached so a
+ *  stable fold costs zero model calls on every later rebuild (the same voice-once discipline as
+ *  rows). Identity is the SORTED member set — membership change is a new group and re-voices. */
+export interface VoicedGroup {
+  /** the member categories, each by its (name, bornAt) identity */
+  members: { name: string; bornAt: string }[];
+  /** the folded row's printed instruction */
+  line: string;
+  /** one short situation clause per member, aligned to `members` order */
+  facets: string[];
+  voicedAt: string;
+}
+
 interface VoicedStore {
   rows: VoicedRow[];
+  /** the folds shelf — optional so a rows-only literal (tests, old stores) stays a valid store;
+   *  readVoiced always materializes it, and every internal reader defaults it to empty */
+  groups?: VoicedGroup[];
 }
 
 /** Defensive read — corrupt input degrades to empty, never throws (the renders.json discipline).
  *  A lost cache costs one re-voicing, never a lie. */
 export function readVoiced(record: string, file: string = voicedPath(record)): VoicedStore {
   try {
-    const raw = JSON.parse(readFileSync(file, 'utf8')) as { rows?: unknown };
-    if (!Array.isArray(raw.rows)) return { rows: [] };
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as { rows?: unknown; groups?: unknown };
+    if (!Array.isArray(raw.rows)) return { rows: [], groups: [] };
     const rows: VoicedRow[] = [];
     for (const r of raw.rows) {
       if (typeof r !== 'object' || r === null) continue;
@@ -88,9 +104,34 @@ export function readVoiced(record: string, file: string = voicedPath(record)): V
         voicedAt: typeof o.voicedAt === 'string' ? o.voicedAt : '',
       });
     }
-    return { rows };
+    // The groups shelf, validated field-by-field like rows — a malformed group degrades to a
+    // re-voicing, never a throw, and facets must align one-to-one with members.
+    const groups: VoicedGroup[] = [];
+    if (Array.isArray(raw.groups)) {
+      for (const g of raw.groups) {
+        if (typeof g !== 'object' || g === null) continue;
+        const o = g as Record<string, unknown>;
+        if (!Array.isArray(o.members) || !Array.isArray(o.facets) || typeof o.line !== 'string') continue;
+        const members: { name: string; bornAt: string }[] = [];
+        for (const m of o.members) {
+          if (typeof m !== 'object' || m === null) continue;
+          const mm = m as Record<string, unknown>;
+          if (typeof mm.name !== 'string' || typeof mm.bornAt !== 'string') continue;
+          members.push({ name: mm.name, bornAt: mm.bornAt });
+        }
+        if (members.length !== o.members.length || members.length < 2) continue;
+        if (o.facets.length !== members.length || !o.facets.every((f) => typeof f === 'string')) continue;
+        groups.push({
+          members,
+          line: o.line,
+          facets: o.facets as string[],
+          voicedAt: typeof o.voicedAt === 'string' ? o.voicedAt : '',
+        });
+      }
+    }
+    return { rows, groups };
   } catch {
-    return { rows: [] };
+    return { rows: [], groups: [] };
   }
 }
 
@@ -99,6 +140,12 @@ export function writeVoiced(store: VoicedStore, record: string, file: string = v
 }
 
 const keyOf = (name: string, bornAt: string): string => `${name}\u0000${bornAt}`;
+
+/** A group's identity: the sorted member set — order-insensitive on purpose, the same members are
+ *  the same group however the planner happened to list them. Member keys are NUL-separated
+ *  already (keyOf), so joining them cannot bleed one into another. */
+export const groupKeyOf = (members: { name: string; bornAt: string }[]): string =>
+  members.map((m) => keyOf(m.name, m.bornAt)).sort().join('|');
 
 /** What buildProfile hands in per category, and what the plan reads of it. */
 export interface VoiceWork {
@@ -165,6 +212,33 @@ export function rememberVoiced(
   const kept = store.rows.filter((r) => live.has(keyOf(r.name, r.bornAt)) && !replacementKeys.has(keyOf(r.name, r.bornAt)));
   const have = new Set(kept.map((r) => keyOf(r.name, r.bornAt)));
   const added = newRows.filter((r) => live.has(keyOf(r.name, r.bornAt)) && !have.has(keyOf(r.name, r.bornAt)));
-  if (!added.length && kept.length === store.rows.length) return; // nothing moved
-  writeVoiced({ rows: [...kept, ...added] }, record, file);
+  // The groups shelf rides through every rows write — dropping it here would erase paid-for fold
+  // wording on the next voicing (the sibling-key trap). It prunes on the same rule as rows: a
+  // group survives only while EVERY member's generation is live, and a member being replaced
+  // (numeral repair) re-words the group too — its facet quoted the old wording.
+  const storeGroups = store.groups ?? [];
+  const keptGroups = storeGroups.filter(
+    (g) => g.members.every((m) => live.has(keyOf(m.name, m.bornAt))) && !g.members.some((m) => replacementKeys.has(keyOf(m.name, m.bornAt))),
+  );
+  if (!added.length && kept.length === store.rows.length && keptGroups.length === storeGroups.length) return; // nothing moved
+  writeVoiced({ rows: [...kept, ...added], groups: keptGroups }, record, file);
+}
+
+/** Persist newly voiced folds and prune dead ones — same voice-once contract as rows: a fold with
+ *  an unchanged member set never re-bills; a changed set is a NEW group. Writes only on change. */
+export function rememberGroups(
+  newGroups: VoicedGroup[],
+  liveKeys: { name: string; bornAt: string }[],
+  record: string,
+  file: string = voicedPath(record),
+): void {
+  const store = readVoiced(record, file);
+  const live = new Set(liveKeys.map((k) => keyOf(k.name, k.bornAt)));
+  const kept = (store.groups ?? []).filter((g) => g.members.every((m) => live.has(keyOf(m.name, m.bornAt))));
+  const have = new Set(kept.map((g) => groupKeyOf(g.members)));
+  const added = newGroups.filter(
+    (g) => g.members.every((m) => live.has(keyOf(m.name, m.bornAt))) && !have.has(groupKeyOf(g.members)),
+  );
+  if (!added.length && kept.length === (store.groups ?? []).length) return; // nothing moved
+  writeVoiced({ rows: store.rows, groups: [...kept, ...added] }, record, file);
 }

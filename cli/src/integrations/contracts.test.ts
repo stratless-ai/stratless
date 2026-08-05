@@ -38,7 +38,7 @@ const ENGINE = [
   'pipeline/moments.ts', 'pipeline/exchange.ts', 'pipeline/shape.ts', 'pipeline/embedding/embed.ts',
   'pipeline/cluster.ts', 'pipeline/name.ts', 'pipeline/count.ts', 'pipeline/write.ts',
   'pipeline/lift.ts', 'pipeline/asks.ts', 'pipeline/voiced.ts', 'pipeline/engine.ts',
-  'pipeline/refresh.ts', 'mirror/mirror.ts',
+  'pipeline/refresh.ts', 'pipeline/fold.ts', 'mirror/mirror.ts',
 ];
 
 /** Source with comments removed, so a line of history never fails a check about dependencies. */
