@@ -6,6 +6,8 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+## [0.13.0] · 2026-08-05 · honest to the last digit
+
 ### Fixed
 - **`stop` no longer claims everything is off when it cannot safely identify the process holding
   the worker lock.** It still removes every refresh hook and unloads every profile, but it leaves the
