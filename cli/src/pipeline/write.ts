@@ -31,9 +31,11 @@ import { loadAssignments } from './assign.js';
 import { loadMoments, type Moment } from './moments.js';
 import { join, tally, LIFT_CUT, type Labelled, type CategoryStat } from './count.js';
 import { liftPrint, type Clause, type LiftPrint } from './lift.js';
-import { readVoiced, rememberVoiced, voicingPlan, type VoicedRow } from './voiced.js';
+import { groupKeyOf, readVoiced, rememberGroups, rememberVoiced, voicingPlan, type VoicedGroup, type VoicedRow } from './voiced.js';
 import { signatures, type Signature } from './shorthand.js';
 import { hasNumeral } from './numerals.js';
+import { planFolds, voiceGroups, type FoldMemberInfo, type FoldRow, type FoldSpec } from './fold.js';
+import { embedAll } from './embedding/embed.js';
 
 /** The whole file targets this size; Frame + Judge always ship in full, Register fills the rest by
  *  count until the budget runs out. */
@@ -126,6 +128,8 @@ export interface ProfileMeta {
   shorthand: number;
   /** when-clauses attached to their host rows (LIFT is dynamics, never surface — no section of its own) */
   rules: number;
+  /** rows folded away by the write-side fold (members minus groups); absent when nothing folded */
+  folded?: number;
 }
 
 /** Up to 5 quote candidates for a category: readable length, least-overlapping (most specific to
@@ -351,6 +355,7 @@ export function assemble(
   prov: { sessions: number; moments: number; from: string; to: string },
   decode?: { sigs: Signature[]; signals: Map<string, string> },
   lift?: LiftPrint,
+  folds?: FoldSpec[],
 ): { text: string; meta: ProfileMeta } | null {
   const entries: Entry[] = stats
     .filter((s) => s.scope !== 'project' && s.count > 0)
@@ -417,34 +422,101 @@ export function assemble(
   head.push('');
   let text = head.join('\n');
 
+  // THE FOLD (2026-08-05): rows that read alike print as ONE row — facets and per-member
+  // receipts — while the piles underneath stay exactly as measured. A fold only binds members
+  // that actually survived the entry filter and carry no when-clause (a rider's host stays solo;
+  // riders are temporary and the row returns to the pool when the gap heals); fewer than two
+  // surviving members disbands the fold and everyone prints alone. Members order by count and
+  // their facets travel with them, so facet and receipt always describe the same member.
+  type Item = { kind: 'single'; e: Entry } | { kind: 'group'; line: string; parts: { e: Entry; facet: string }[] };
+  const countOf = (it: Item): number => (it.kind === 'single' ? it.e.stat.count : it.parts[0].e.stat.count);
+  const itemize = (list: Entry[], sec: Section): Item[] => {
+    const byName = new Map(list.map((e) => [e.stat.name, e]));
+    const used = new Set<string>();
+    const items: Item[] = [];
+    for (const spec of folds ?? []) {
+      if (spec.section !== sec) continue;
+      const parts = spec.members
+        .map((m) => ({ e: byName.get(m.name), facet: m.facet }))
+        .filter((p): p is { e: Entry; facet: string } => !!p.e && !clauseFor(p.e.stat.name) && !used.has(p.e.stat.name));
+      if (parts.length < 2) continue; // disbanded — its members print solo
+      parts.sort((a, b) => b.e.stat.count - a.e.stat.count);
+      for (const p of parts) used.add(p.e.stat.name);
+      items.push({ kind: 'group', line: spec.line, parts });
+    }
+    for (const e of list) if (!used.has(e.stat.name)) items.push({ kind: 'single', e });
+    items.sort((a, b) => countOf(b) - countOf(a));
+    return items;
+  };
+  // One folded entry: the shared instruction as the MAIN POINT, one sub-point per member —
+  // Sun's structure (2026-08-06): the indentation carries "in these situations" so neither reader
+  // has to parse grammar or a positional receipt convention. Each sub-point holds its own count —
+  // NEVER summed (a sum would be a number no single pile earned) — with trend words keeping
+  // block()'s own gating per member; 'comes in bursts' stays off folded receipts.
+  const groupBlock = (it: Extract<Item, { kind: 'group' }>, sec: Section): string => {
+    const line = it.line.replace(/\s+/g, ' ').trim().replace(/\s*[.:]\s*$/, '');
+    const subs = it.parts.map((p) => {
+      const facet = p.facet.replace(/\s+/g, ' ').trim().replace(/\s*\.\s*$/, '');
+      const trend = p.e.stat.direction && (sec === 'register' || p.e.stat.verified) ? `, ${p.e.stat.direction}` : '';
+      return `  - ${facet} (${p.e.stat.count}×${trend})\n`;
+    });
+    return `- ${line}:\n${subs.join('')}`;
+  };
+
   // Frame + Judge are the bookends — always shipped in full. Register fills the remaining budget.
   // Rows are single-line bullets now, so each section closes with one blank line ('\n') to keep the
   // next heading separated — block() no longer carries trailing spacing of its own.
   let attachedPrinted = 0;
-  if (frame.length) {
+  let membersFolded = 0;
+  let groupsPrinted = 0;
+  const frameItems = itemize(frame, 'frame');
+  const judgeItems = itemize(judge, 'judge');
+  const registerItems = itemize(register, 'register');
+  if (frameItems.length) {
     text += ['## What to offer me before I ask', '', 'Set these up or hand them over before I ask. Offering them unprompted is the point, not overstepping.', '', ''].join('\n');
-    for (const e of frame) {
-      const cl = clauseFor(e.stat.name);
+    for (const it of frameItems) {
+      if (it.kind === 'group') {
+        text += groupBlock(it, 'frame');
+        membersFolded += it.parts.length;
+        groupsPrinted++;
+        continue;
+      }
+      const cl = clauseFor(it.e.stat.name);
       if (cl) attachedPrinted++;
-      text += block(e.v.line, e.stat, 'frame', cl);
+      text += block(it.e.v.line, it.e.stat, 'frame', cl);
     }
     text += '\n';
   }
-  if (judge.length) {
+  if (judgeItems.length) {
     text += ['## What to catch for me', '', 'What I reliably challenge or refuse. Pre-empt these, so I do not have to catch them myself.', '', ''].join('\n');
-    for (const e of judge) {
-      const cl = clauseFor(e.stat.name);
+    for (const it of judgeItems) {
+      if (it.kind === 'group') {
+        text += groupBlock(it, 'judge');
+        membersFolded += it.parts.length;
+        groupsPrinted++;
+        continue;
+      }
+      const cl = clauseFor(it.e.stat.name);
       if (cl) attachedPrinted++;
-      text += block(e.v.line, e.stat, 'judge', cl);
+      text += block(it.e.v.line, it.e.stat, 'judge', cl);
     }
     text += '\n';
   }
   let shippedReg = 0;
-  if (register.length) {
+  if (registerItems.length) {
     text += ['## How to talk to me', '', 'The register I work in. Match it rather than smoothing it over.', '', ''].join('\n');
-    for (const e of register) {
-      const cl = clauseFor(e.stat.name);
-      const row = block(e.v.line, e.stat, 'register', cl);
+    for (const it of registerItems) {
+      if (it.kind === 'group') {
+        const row = groupBlock(it, 'register');
+        if (text.length + row.length > CHAR_BUDGET) break;
+        text += row;
+        membersFolded += it.parts.length;
+        groupsPrinted++;
+        shippedReg++;
+        continue;
+      }
+      const cl = clauseFor(it.e.stat.name);
+      const row = block(it.e.v.line, it.e.stat, 'register', cl);
       if (text.length + row.length > CHAR_BUDGET) break;
       if (cl) attachedPrinted++;
       text += row;
@@ -452,6 +524,7 @@ export function assemble(
     }
   }
 
+  const folded = membersFolded - groupsPrinted;
   return {
     text,
     meta: {
@@ -459,11 +532,12 @@ export function assemble(
       moments: prov.moments,
       from: prov.from,
       to: prov.to,
-      frame: frame.length,
-      judge: judge.length,
+      frame: frameItems.length,
+      judge: judgeItems.length,
       register: shippedReg,
       shorthand: decodeLines.length,
       rules: attachedPrinted,
+      ...(folded > 0 ? { folded } : {}),
     },
   };
 }
@@ -497,7 +571,7 @@ export type ProfileBuildResult =
   | { status: 'empty' }
   | { status: 'refused-numerals' };
 
-export function buildProfile(record: string): ProfileBuildResult {
+export async function buildProfile(record: string): Promise<ProfileBuildResult> {
   // ONE PAIR'S FILE FROM ONE PAIR'S EVIDENCE. Everything below — the categories, the slice of the
   // pile, the assignments, the voice cache, the lift print — is this record's own. A count in the
   // file it produces was counted inside one relationship, which is what lets every receipt print
@@ -554,6 +628,12 @@ export function buildProfile(record: string): ProfileBuildResult {
   const signals = new Map<string, string>();
   for (const [name, v] of voiced) if (v.signal) signals.set(name, v.signal);
   const sigs = signatures(labelled, cats);
+  const lift = liftPrint(record);
+
+  // THE FOLD (fold.ts): plan which printable rows read alike, reuse every cached fold wording,
+  // voice only NEW folds — and degrade to flat rows on any trouble (runtime absent, brain absent,
+  // a refusal): the ungrouped rows are already honest, and the fold retries next flush.
+  const folds = await planAndVoiceFolds(record, stats, voiced, lift, bornOf);
 
   // EVERY NUMBER IN THE PROVENANCE DESCRIBES THE SAME WINDOW. Counting conversations over the whole
   // pile while stating a trimmed range would put the seam back in a different place: a reader could
@@ -572,7 +652,92 @@ export function buildProfile(record: string): ProfileBuildResult {
       to: win.to,
     },
     { sigs, signals },
-    liftPrint(record),
+    lift,
+    folds,
   );
   return assembled ? { status: 'built', ...assembled } : { status: 'empty' };
+}
+
+/**
+ * WHICH ROWS FOLD, AND IN WHOSE WORDS — the write-side half of the fold. Eligible rows are the
+ * ones that will actually PRINT (same predicate as assemble's entry filter) minus any row hosting
+ * an active when-clause. Their printed lines are embedded on the local model (free, offline) and
+ * planFolds decides the groups by arithmetic; the model only words a group the cache has never
+ * seen, one batched call, numeral-refused as a whole. Every failure path returns the folds we
+ * already own — cached wording keeps serving even when a new call cannot be made.
+ */
+async function planAndVoiceFolds(
+  record: string,
+  stats: CategoryStat[],
+  voiced: Map<string, Voiced>,
+  lift: LiftPrint,
+  bornOf: Map<string, string>,
+): Promise<FoldSpec[]> {
+  const printable = stats
+    .filter((s) => s.scope !== 'project' && s.count > 0)
+    .map((s) => ({ stat: s, v: voiced.get(s.name) }))
+    .filter(
+      (e): e is Entry =>
+        !!e.v &&
+        e.v.section !== 'none' &&
+        (e.v.section !== 'register' || (typeof e.v.quote === 'string' && e.v.quote.length > 0)),
+    )
+    .filter((e) => !lift.clauses.has(e.stat.name));
+  if (printable.length < 2) return [];
+  const rows: FoldRow[] = printable.map((e) => ({
+    name: e.stat.name,
+    section: e.v.section as FoldRow['section'],
+    line: e.v.line,
+  }));
+  let vectors: Float32Array[];
+  try {
+    vectors = await embedAll(rows.map((r) => r.line));
+  } catch {
+    return []; // runtime absent — flat rows this build, the fold retries when it returns
+  }
+  const groups = planFolds(rows, vectors);
+  if (!groups.length) return [];
+
+  const store = readVoiced(record);
+  const cached = new Map((store.groups ?? []).map((g) => [groupKeyOf(g.members), g]));
+  const liveKeys = (names: string[]): { name: string; bornAt: string }[] =>
+    names.map((n) => ({ name: n, bornAt: bornOf.get(n) ?? '' }));
+  const specs: FoldSpec[] = [];
+  const missing: typeof groups = [];
+  for (const g of groups) {
+    const hit = cached.get(groupKeyOf(liveKeys(g.members)));
+    // A cached fold serves only while its wording is clean — a numeral-bearing group (pre-boundary
+    // cache) re-voices like a numeral-bearing row does. Facets are matched to members BY NAME from
+    // the cached group's own member order, never by index across two lists that merely happen to
+    // sort alike; a member the cache cannot facet makes the whole group a miss.
+    const facetOf = hit ? new Map(hit.members.map((m, i) => [m.name, hit.facets[i]])) : undefined;
+    const members = facetOf ? g.members.map((name) => ({ name, facet: facetOf.get(name) ?? '' })) : [];
+    if (hit && facetOf && members.every((m) => m.facet) && !hasNumeral(hit.line, ...hit.facets)) {
+      specs.push({ section: g.section, line: hit.line, members });
+    } else {
+      missing.push(g);
+    }
+  }
+  if (missing.length) {
+    const members = new Map<string, FoldMemberInfo>();
+    for (const e of printable) {
+      members.set(e.stat.name, { name: e.stat.name, line: e.v.line, signal: e.v.signal, description: e.stat.description });
+    }
+    const voicedGroups = voiceGroups(missing, members, record);
+    if (voicedGroups.status === 'accepted') {
+      const voicedAt = new Date().toISOString();
+      const remember: VoicedGroup[] = [];
+      voicedGroups.specs.forEach((spec, i) => {
+        if (!spec) return; // one malformed group — its members print solo this build, retried next
+        specs.push(spec);
+        remember.push({ members: liveKeys(missing[i].members), line: spec.line, facets: spec.members.map((m) => m.facet), voicedAt });
+      });
+      if (remember.length) {
+        rememberGroups(remember, [...bornOf].map(([name, bornAt]) => ({ name, bornAt })), record);
+      }
+    }
+    // 'refused' (absent brain, numeral, no parse): the cached specs above still fold; the new
+    // groups print as their solo members this build and retry next flush.
+  }
+  return specs;
 }

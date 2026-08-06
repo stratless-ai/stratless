@@ -31,7 +31,8 @@ back into that assistant.
 Run `stratless profile` and it shows you the brief it has built, the one `stratless update` hands to
 your assistant: your shorthand decoded, what to offer you before you ask, what to catch for you, and
 how to talk to you. Every line is an instruction to the AI, observed from your own history, with the
-real count behind it:
+real count behind it — and rows that read almost alike fold into one row carrying each situation's
+own count, so the brief stays as short as your history honestly allows:
 
 ```
 Who you are working with              (stratless · read from your own history)

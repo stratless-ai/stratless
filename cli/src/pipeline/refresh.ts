@@ -236,7 +236,7 @@ export async function refreshProfiles(opts: {
 
           if (changed || lr.changed || !existsSync(profilePath(record))) {
             const writeStart = Date.now();
-            const profile = buildProfile(record);
+            const profile = await buildProfile(record);
             sw.stage('write', Date.now() - writeStart, profile.status === 'built' ? 1 : 0);
             if (profile.status === 'refused-numerals') {
               const preserved = existsSync(profilePath(record)) ? 'the previous profile is unchanged' : 'no profile was written';
@@ -266,7 +266,7 @@ export async function refreshProfiles(opts: {
                 summary.push(`${label(a.displayName)}your profile is now worded by ${wrote.displayName}, not ${was}`);
               }
               summary.push(
-                `${label(a.displayName)}profile written and loaded · ${profile.meta.frame} to offer + ${profile.meta.judge} to catch + ${profile.meta.register} register${profile.meta.rules ? ` + ${profile.meta.rules} to move` : ''}${profile.meta.shorthand ? ` + ${profile.meta.shorthand} shorthand handles` : ''}`,
+                `${label(a.displayName)}profile written and loaded · ${profile.meta.frame} to offer + ${profile.meta.judge} to catch + ${profile.meta.register} register${profile.meta.rules ? ` + ${profile.meta.rules} to move` : ''}${profile.meta.shorthand ? ` + ${profile.meta.shorthand} shorthand handles` : ''}${profile.meta.folded ? ` · ${profile.meta.folded} similar row${profile.meta.folded === 1 ? '' : 's'} folded` : ''}`,
               );
             } else {
               summary.push(`${label(a.displayName)}profile not rebuilt — not enough clear evidence yet`);

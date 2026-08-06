@@ -334,3 +334,142 @@ test('assemble: no decode → no shorthand section, meta.shorthand 0', () => {
   assert.ok(!built.text.includes('## In the moment'));
   assert.equal(built.meta.shorthand, 0);
 });
+
+// ── the fold — grouped rows in the assembler ────────────────────────────────────────────────────
+
+test('a fold prints one row: shared line, facets and per-member receipts count-descending, never summed', () => {
+  const stats: CategoryStat[] = [
+    stat({ name: 'plan', lift: 1, count: 260, scope: 'person' }),
+    stat({ name: 'probe', lift: 1, count: 180, scope: 'person' }),
+    stat({ name: 'walkthrough', lift: 1, count: 186, scope: 'person' }),
+    stat({ name: 'verify', lift: 5, count: 120, scope: 'person' }),
+  ];
+  const voiced = new Map<string, Voiced>([
+    ['plan', v('frame', '', 'offer to plan before implementing')],
+    ['probe', v('frame', '', 'offer to sketch the mechanism')],
+    ['walkthrough', v('frame', '', 'offer the exact next steps')],
+    ['verify', v('judge', '', 'catch unverified claims')],
+  ]);
+  const out = assemble(stats, voiced, prov, undefined, undefined, [
+    {
+      section: 'frame',
+      line: 'offer a plan before touching work',
+      members: [
+        { name: 'plan', facet: 'a new multi-step task' },
+        { name: 'probe', facet: 'a mechanism they doubt' },
+        { name: 'walkthrough', facet: 'right after a manual step' },
+      ],
+    },
+  ]);
+  assert.ok(out);
+  assert.ok(
+    out.text.includes(
+      '- offer a plan before touching work:\n  - a new multi-step task (260×)\n  - right after a manual step (186×)\n  - a mechanism they doubt (180×)\n',
+    ),
+    `sub-points follow their members into count order:\n${out.text}`,
+  );
+  // the members' solo lines are gone; the un-folded judge row still prints alone
+  assert.equal(out.text.includes('offer to sketch the mechanism'), false);
+  assert.ok(out.text.includes('- catch unverified claims (120×)'));
+  assert.equal(out.meta.frame, 1, 'a grouped row counts once');
+  assert.equal(out.meta.folded, 2, 'three members became one row');
+});
+
+test('a member hosting a when-clause stays out of its fold; a fold left with one member disbands', () => {
+  const stats: CategoryStat[] = [
+    stat({ name: 'plan', lift: 1, count: 260, scope: 'person' }),
+    stat({ name: 'probe', lift: 1, count: 180, scope: 'person' }),
+  ];
+  const voiced = new Map<string, Voiced>([
+    ['plan', v('frame', '', 'offer to plan before implementing')],
+    ['probe', v('frame', '', 'offer to sketch the mechanism')],
+  ]);
+  const lift = {
+    clauses: new Map([['plan', { clause: 'when a new task begins, offer the plan unprompted', slip: 12 }]]),
+    keyLines: [],
+  };
+  const out = assemble(stats, voiced, prov, undefined, lift, [
+    {
+      section: 'frame',
+      line: 'offer a plan before touching work',
+      members: [
+        { name: 'plan', facet: 'a new multi-step task' },
+        { name: 'probe', facet: 'a mechanism they doubt' },
+      ],
+    },
+  ]);
+  assert.ok(out);
+  // the rider's host keeps its own row WITH the clause; the fold, down to one member, disbands
+  assert.ok(out.text.includes('offer to plan before implementing — and when a new task begins'));
+  assert.ok(out.text.includes('- offer to sketch the mechanism (180×)'));
+  assert.equal(out.text.includes('offer a plan before touching work'), false);
+  assert.equal(out.meta.folded, undefined);
+});
+
+test('per-member trend words keep their section gating inside a grouped receipt', () => {
+  const stats: CategoryStat[] = [
+    stat({ name: 'terse', lift: 1, count: 250, scope: 'person', direction: 'rising' }),
+    stat({ name: 'git', lift: 1, count: 150, scope: 'person', direction: 'fading' }),
+    stat({ name: 'plan', lift: 1, count: 90, scope: 'person', direction: 'rising' }), // unverified frame — no word
+    stat({ name: 'probe', lift: 1, count: 80, scope: 'person', direction: 'met', verified: true }),
+  ];
+  const voiced = new Map<string, Voiced>([
+    ['terse', v('register', 'go', 'talk in short imperatives')],
+    ['git', v('register', 'push it', 'take single-word git commands as full requests')],
+    ['plan', v('frame', '', 'offer to plan before implementing')],
+    ['probe', v('frame', '', 'offer to sketch the mechanism')],
+  ]);
+  const out = assemble(stats, voiced, prov, undefined, undefined, [
+    {
+      section: 'register',
+      line: 'talk terse and take short commands whole',
+      members: [
+        { name: 'terse', facet: 'ordinary follow-ups' },
+        { name: 'git', facet: 'one-word git commands' },
+      ],
+    },
+    {
+      section: 'frame',
+      line: 'offer a plan before touching work',
+      members: [
+        { name: 'plan', facet: 'a new multi-step task' },
+        { name: 'probe', facet: 'a mechanism they doubt' },
+      ],
+    },
+  ]);
+  assert.ok(out);
+  assert.ok(
+    out.text.includes('  - ordinary follow-ups (250×, rising)\n  - one-word git commands (150×, fading)\n'),
+    `register members keep their trends:\n${out.text}`,
+  );
+  assert.ok(
+    out.text.includes('  - a new multi-step task (90×)\n  - a mechanism they doubt (80×, met)\n'),
+    `frame members print a trend only when verified:\n${out.text}`,
+  );
+});
+
+test('the register budget treats a grouped row as one block — over budget, the whole fold waits', () => {
+  const filler = 'offer the long thing, spelled out at some length to eat the character budget quickly, '.repeat(3);
+  const stats: CategoryStat[] = [
+    ...Array.from({ length: 40 }, (_, i) => stat({ name: `talk-${String.fromCharCode(97 + i)}`, lift: 1, count: 500 - i, scope: 'person' })),
+    stat({ name: 'pair-one', lift: 1, count: 2, scope: 'person' }),
+    stat({ name: 'pair-two', lift: 1, count: 1, scope: 'person' }),
+  ];
+  const voiced = new Map<string, Voiced>(
+    stats.map((s) => [s.name, v('register', 'a quote that proves it', `${filler}${s.name}`)] as const),
+  );
+  const out = assemble(stats, voiced, prov, undefined, undefined, [
+    {
+      section: 'register',
+      line: 'the folded pair at the very bottom of the count order',
+      members: [
+        { name: 'pair-one', facet: 'one situation' },
+        { name: 'pair-two', facet: 'another situation' },
+      ],
+    },
+  ]);
+  assert.ok(out);
+  assert.ok(out.text.length <= 5800 + 200, 'the budget still binds');
+  assert.equal(out.text.includes('the folded pair at the very bottom'), false, 'the grouped row was budget-dropped whole');
+  assert.equal(out.meta.folded, undefined, 'a budget-dropped fold folded nothing');
+});

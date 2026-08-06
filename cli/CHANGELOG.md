@@ -6,6 +6,20 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+### Added
+- **Rows that read alike now fold into one.** When several rows of your profile carry
+  near-identical instructions, they print as one entry: the shared instruction as the main point,
+  one sub-point per situation, and each situation's own count on its own line — never a summed
+  number. The measurement underneath
+  is untouched (every pattern keeps its own counts, trends, and gap-tracking at full resolution);
+  folding is presentation, and it reverses itself the moment the rows stop reading alike. How far
+  to fold is a named product setting — about six printed rows in ten — with a floor so nothing
+  folds where nothing reads alike: a young profile of a few distinct rows keeps every one. A
+  folded row's wording is written once by your own assistant and cached like any other row's;
+  when it cannot be worded this build (no assistant to borrow, or the wording contained a
+  numeral), the rows simply print unfolded and it retries next refresh. A row currently carrying
+  a slip-count when-clause never folds — its gap stays visible on its own row until it heals.
+
 ## [0.13.0] · 2026-08-05 · honest to the last digit
 
 ### Fixed
