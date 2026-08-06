@@ -136,15 +136,20 @@ useHead({
 
   <span class="t-d">##</span> <span class="t-b">What to offer me before I ask</span>
   - offer to enter a planning step before touching
-    any implementation. <span class="t-d">(258× · slip 28×)</span>
+    any implementation. <span class="t-d">(265× · slip 28×)</span>
 
   <span class="t-d">##</span> <span class="t-b">What to catch for me</span>
-  - catch unverified claims of done work; they want it
-    double-checked before being told it's finished. <span class="t-d">(122×)</span>
+  - catch anything left unverified, uncommitted, or
+    unconfirmed as done and check or lock it in:
+    - remote or deployed state unverified <span class="t-d">(192×)</span>
+    - uncommitted work needs a commit first <span class="t-d">(155×)</span>
+    - completion claim needs double-check <span class="t-d">(126×)</span>
 
   <span class="t-d">##</span> <span class="t-b">How to talk to me</span>
-  - talk in short imperatives back, matching their
-    terse next-action style. <span class="t-d">(304×)</span>
+  - match their terse style and reply with the next
+    concrete action:
+    - short imperative to act next <span class="t-d">(313×)</span>
+    - single-line git or PR command <span class="t-d">(154×)</span>
 
   <span class="t-d">not loaded yet · load it into your assistant: stratless update</span>
 
