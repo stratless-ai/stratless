@@ -6,6 +6,8 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+## [0.14.0] · 2026-08-06 · rows that read alike fold into one
+
 ### Added
 - **Rows that read alike now fold into one.** When several rows of your profile carry
   near-identical instructions, they print as one entry: the shared instruction as the main point,

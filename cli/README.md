@@ -48,19 +48,23 @@ Who you are working with              (stratless · read from your own history)
 - offer to enter a planning step before touching any
   implementation — and when a new or multi-step task begins,
   pause and offer a concise plan before implementing
-  anything. (258× · slip 28×)
+  anything. (265× · slip 28×)
 
 ## What to catch for me
 
-- catch unverified claims of done work; they want it
-  double-checked before being told it's finished. (122×)
+- catch anything left unverified, uncommitted, or
+  unconfirmed as done and check or lock it in before
+  continuing:
+  - remote or deployed state unverified (192×)
+  - uncommitted work needs a commit first (155×)
+  - completion claim needs double-check (126×)
 
 ## How to talk to me
 
 - treat a bare "yes, run X" as full authorization; don't ask
   for restatement — and when the coding is finished and a run
   or test is next, check the scope with me before
-  proceeding. (203×, fading · slip 16×)
+  proceeding. (205×, fading · slip 16×)
 ```
 
 Not a rules sheet you wrote. A brief on a person, derived from your real history and nothing you
