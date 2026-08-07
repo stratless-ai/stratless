@@ -230,15 +230,15 @@ useHead({
               <span class="mchat"><span class="mchat-b mchat-b1" /><span class="mchat-b mchat-b2" /></span>
               <span class="mdoc-name">your chats</span>
             </span>
-            <span class="flow-arrow">→</span>
+            <span class="flow-arrow" />
             <span class="flow-step">moments</span>
-            <span class="flow-arrow">→</span>
+            <span class="flow-arrow" />
             <span class="flow-step">cluster</span>
-            <span class="flow-arrow">→</span>
+            <span class="flow-arrow" />
             <span class="flow-step">count</span>
-            <span class="flow-arrow">→</span>
+            <span class="flow-arrow" />
             <span class="flow-step">write</span>
-            <span class="flow-arrow">→</span>
+            <span class="flow-arrow" />
           </span>
           <button type="button" class="mdoc-item mdoc-btn" aria-haspopup="dialog" aria-label="HUMAN.md: read the author's real one, unedited" @click="briefOpen = true">
             <span class="mdoc" aria-hidden="true"><span class="mdoc-fold" /><span class="mdoc-line" /><span class="mdoc-line" /><span class="mdoc-line" /></span>
@@ -250,7 +250,7 @@ useHead({
       <!-- "Minutes" stays a ballpark word, never a typed figure: the measured build time moves
            release to release and would rot here. Exact numbers live where they are computed —
            init's consent door quotes cost and time on the person's own archive before spending. -->
-      <p class="quiet reveal-cap"><strong>Derived, not pre-matched. Minutes to build. </strong><NuxtLink to="/docs/how-it-works">how it works →</NuxtLink></p>
+      <p class="quiet reveal-cap"><strong>Derived, not pre-matched. Minutes to build. </strong><NuxtLink to="/docs/how-it-works">how it works&nbsp;→</NuxtLink></p>
     </div>
   </section>
 
@@ -364,6 +364,11 @@ h1 {
   border: 1px solid #000;
   border-radius: 11px;
   overflow: hidden;
+  /* Without this, the <pre>'s longest line (~546px of unwrappable mono) is the page's minimum
+     width: it propagates up through the centered flex column and mobile browsers widen the layout
+     viewport to ~580px — the whole site renders clipped on phones. Containment stops the intrinsic
+     width at this box, so the declared width above actually rules. */
+  contain: inline-size;
 }
 /* the hero terminal is a real dark shell, floating on the paper */
 .realterm {
@@ -690,6 +695,10 @@ h1 {
   font-size: var(--fs-sm);
   color: var(--mid);
 }
+/* the glyph lives in CSS so the phone layout below can turn → into ↓ without a second markup run */
+.flow-arrow::before {
+  content: '→';
+}
 /* the chat-logs mark: two speech bubbles, one from each side of the conversation, drawn with the
    same 1.5px ink stroke as the paper sheets so the diagram's icons stay one family */
 .mchat {
@@ -897,6 +906,27 @@ h1 {
   }
   .marquee-track .brand {
     padding-right: 0;
+  }
+}
+
+/* ── phones (2026-08-07): same markup, a different cut of it. The 72-column terminal is a
+   desktop artifact — clipped, shrunken or swipe-gated it reads as breakage, so phones don't
+   get it; the hero is the words and the CTAs, one fog-banded screen. The proof stays: the
+   reveal's boundary diagram (stacked, ↓ for →) still ends at the real HUMAN.md. ── */
+@media (max-width: 640px) {
+  .term {
+    display: none;
+  }
+  /* the lede's <br> is a desktop couplet break; on a narrow rag it strands half-lines */
+  .lede br {
+    display: none;
+  }
+  .flow {
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+  .flow-arrow::before {
+    content: '↓';
   }
 }
 </style>
