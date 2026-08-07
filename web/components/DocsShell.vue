@@ -40,6 +40,15 @@ const next = computed(() => (currentIdx.value >= 0 && currentIdx.value < flat.le
 // updates on client-side nav for free (it is a computed off `current`, no watcher needed).
 const toc = computed(() => current.value?.toc ?? [])
 
+// Phones: the stacked sidebar cost a full screen of scrolling before content on every docs page,
+// so under 860px (the stacking breakpoint) it collapses behind a toggle. The closed state is CSS
+// (`display: none` in the media query), not this ref — the prerendered HTML arrives closed on
+// mobile and open on desktop with no hydration snap. A no-JS phone still has the prev/next pager.
+const navOpen = ref(false)
+watch(() => route.path, () => {
+  navOpen.value = false
+})
+
 // Each doc page needs its OWN og:url, description and canonical. They all used to inherit the
 // homepage's, so sharing /docs/why previewed as the homepage.
 const strip = (html: string) => {
@@ -62,7 +71,17 @@ useSeo({
 <template>
   <div class="docs container">
     <aside class="docs-nav">
-      <nav aria-label="Documentation">
+      <button
+        type="button"
+        class="nav-toggle"
+        :aria-expanded="navOpen"
+        aria-controls="docs-nav-menu"
+        @click="navOpen = !navOpen"
+      >
+        <span>Docs menu</span>
+        <span aria-hidden="true">{{ navOpen ? '−' : '+' }}</span>
+      </button>
+      <nav id="docs-nav-menu" aria-label="Documentation" :class="{ 'nav-open': navOpen }">
         <div v-for="g in nav" :key="g.group" class="nav-group">
           <span class="nav-group-title">{{ g.group }}</span>
           <NuxtLink
@@ -127,6 +146,10 @@ useSeo({
 .docs-nav {
   position: sticky;
   top: 80px;
+}
+/* the mobile collapse toggle — desktop never renders it */
+.nav-toggle {
+  display: none;
 }
 .nav-group {
   margin-bottom: 1.5rem;
@@ -285,6 +308,31 @@ useSeo({
     position: static;
     border-bottom: 1.5px solid var(--ink);
     padding-bottom: 1rem;
+  }
+  .nav-toggle {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink);
+    background: var(--paper-2);
+    border: 1.5px solid var(--ink);
+    border-radius: var(--radius);
+    padding: 0.6rem 0.9rem;
+    cursor: pointer;
+  }
+  /* closed is the shipped state: the static HTML lands collapsed on phones, no hydration snap */
+  .docs-nav nav {
+    display: none;
+    margin-top: 1.25rem;
+  }
+  .docs-nav nav.nav-open {
+    display: block;
   }
 }
 @media (max-width: 560px) {
