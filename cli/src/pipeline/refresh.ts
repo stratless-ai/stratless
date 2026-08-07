@@ -168,6 +168,14 @@ export async function refreshProfiles(opts: {
             summary.push(
               `${label(a.displayName)}placed ${res.scored} new moment${res.scored === 1 ? '' : 's'} against ${cats.length} patterns — free, on this machine`,
             );
+          } else if (manual) {
+            // A quiet pair on a TYPED run says so — from a terminal, silence reads as "skipped",
+            // not "current". The worker keeps its silence: nothing-new is its normal, and the
+            // notify stream must not fill with no-op lines on every scheduled wake.
+            const built = latestRender(readRenders(), record)?.builtAt;
+            summary.push(
+              `${label(a.displayName)}nothing new — profile current${built ? ` (built ${built.slice(0, 16).replace('T', ' ')} UTC)` : ''}`,
+            );
           }
           ready.push({ a, cats, changed: res.scored > 0, justBuilt: false });
         } else {
@@ -181,9 +189,9 @@ export async function refreshProfiles(opts: {
             ? `collected ${collectedOnly} new moment${collectedOnly === 1 ? '' : 's'} — nothing to flush yet`
             : 'nothing new since the last flush',
         );
-      } else if (flush && ready.length && ready.every((r) => !r.changed && !r.justBuilt) && manual) {
-        summary.push('already current — nothing new to place');
       }
+      // The all-pairs "already current" summary died here: on a manual flush every quiet pair now
+      // speaks for itself above, so one machine-level line would only repeat them.
 
       // Growth of the category set happens through rebuild triggers: the young check above, and
       // later the mature fit-drift trigger (unbuilt — its noise band is being measured first).

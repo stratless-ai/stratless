@@ -6,6 +6,16 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+## [0.14.1] · 2026-08-07 · a quiet pair says so
+
+### Fixed
+- **A typed `stratless update` now answers for every assistant, not only the ones with news.** A
+  pair with no new moments since the last flush used to print nothing at all, which from a
+  terminal reads as "skipped" — it now says `nothing new — profile current`, with its own
+  profile's build stamp. The scheduled background refresh keeps its silence (nothing-new is its
+  normal), and the old machine-level "already current" line is gone: each pair speaks for
+  itself.
+
 ## [0.14.0] · 2026-08-06 · rows that read alike fold into one
 
 ### Added
