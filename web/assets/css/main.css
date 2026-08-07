@@ -453,6 +453,10 @@ kbd {
 .prose th {
   background: var(--paper-2);
 }
+/* a command in a table cell never breaks mid-name; prose cells around it still wrap */
+.prose td code {
+  white-space: nowrap;
+}
 .prose hr {
   border: none;
   border-top: 1px solid rgba(21, 20, 15, 0.15);
