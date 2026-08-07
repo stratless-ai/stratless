@@ -30,6 +30,12 @@ jobs:
       - name: comment when cli changed but the docs did not
         env:
           GH_TOKEN: ${{ github.token }}
+          # There is deliberately no checkout here (see above), so `gh pr view` / `gh pr comment`
+          # have no local git repo to infer the target from — GH_REPO names it for every gh call.
+          # Without it they die on "not a git repository", found the first time a cli/src PR
+          # actually arrived without docs (PR #78, 2026-08-07); every earlier PR exited at the
+          # docs grep before reaching them.
+          GH_REPO: ${{ github.repository }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
         run: |
