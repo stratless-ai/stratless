@@ -5,10 +5,11 @@ const GITHUB = 'https://github.com/stratless-ai/stratless'
 // The CLI version, read from cli/package.json at build (see nuxt.config.ts) so it never goes stale by hand.
 const version = useRuntimeConfig().public.version
 
-// THE ONE SAMPLE SOURCE: a real build, checked in verbatim (see AGENTS.md, "One sample profile").
-// Imported raw at build time and shown in full — behind the HUMAN.md sheet that ends the boundary
-// diagram in the reveal section, as a modal.
-import sampleRaw from '~/content/samples/HUMAN.md?raw'
+// THE ONE SAMPLE SOURCE (Solo V2): one real derived skill, compiled by the machine and checked
+// in verbatim (see AGENTS.md, "One sample skill"). Shown in full behind the SKILL.md sheet that
+// ends the boundary diagram — the artifact the whole page sells, openable. The full HUMAN.md
+// sample returns as a second sheet in the phase-2 pass.
+import sampleRaw from '~/content/samples/skill.md?raw'
 const sample = sampleRaw.trim()
 // Split for the modal's per-line render: the brief shows as a file in a dark editor (VS Code
 // Dark+), and the only tokenizing is the one rule Dark+ applies that matters for markdown —
@@ -85,8 +86,8 @@ useHead({
            outcome. "Get your AI to understand you" retired with the profile-as-product era. -->
       <h1>Turn Your Logs Into Skills.</h1>
       <p class="lede">
-        Not someone else's skill pack. <br />Derived from how you actually work, with the receipts
-        to prove it, so your AI stops failing you the same way twice.
+        Not someone else's skill pack. <br />Derived from how you actually work, receipts on every
+        line.
       </p>
 
       <!-- Not role="img": that collapsed the whole real profile below to one aria-label sentence,
@@ -180,9 +181,9 @@ useHead({
   <!-- THE BRIEF MODAL — the one sample source (content/samples/HUMAN.md), summoned. -->
   <Teleport to="body">
     <div v-if="briefOpen" class="brief-overlay" @click.self="briefOpen = false">
-      <div class="brief-dialog" role="dialog" aria-modal="true" aria-label="the author's full HUMAN.md, a real example" @keydown.esc="briefOpen = false">
+      <div class="brief-dialog" role="dialog" aria-modal="true" aria-label="one of the author's real derived skills, unedited" @keydown.esc="briefOpen = false">
         <div class="filebar">
-          <span class="fname">~/.stratless/HUMAN.md</span>
+          <span class="fname">~/.claude/skills/request-a-plan-before-implementing/SKILL.md</span>
           <button ref="briefClose" type="button" class="brief-x" aria-label="close" @click="briefOpen = false">×</button>
         </div>
         <div class="filebody"><div v-for="(l, i) in sampleLines" :key="i" class="fline" :class="{ 'md-h': l.startsWith('#') }"><template v-if="l.startsWith('- ')"><span class="md-li">-</span>{{ l.slice(1) }}</template><template v-else>{{ l }}</template></div></div>
@@ -198,7 +199,8 @@ useHead({
       <p>
         No cloud. No training. No separate bill. Claude Code already keeps your chats in
         <code>~/.claude/projects</code>, and <strong>probably nobody reads them.</strong><br>
-        Stratless reads what you did and the things you'd do again and again.
+        Stratless reads what you did, counts what recurs, and compiles the skills your history
+        already earned.
       </p>
 
       <!-- THE BOUNDARY DIAGRAM — the privacy claim, drawn instead of stated. Everything happens
@@ -210,7 +212,7 @@ useHead({
            subtree. The decorative flow hides as one piece; the sr-only line narrates instead. -->
       <div class="machine">
         <span class="machine-tag" aria-hidden="true">your machine</span>
-        <p class="sr-only">On your machine, your chats become moments, then clusters, then counts, and finally HUMAN.md. One runtime comes in at init. Nothing goes out.</p>
+        <p class="sr-only">On your machine, your chats become moments, then clusters, then counts, then the base map, and finally skills. One runtime comes in at init. Nothing goes out.</p>
         <div class="flow">
           <span class="flow-deco" aria-hidden="true">
             <span class="mdoc-item">
@@ -224,12 +226,12 @@ useHead({
             <span class="flow-arrow" />
             <span class="flow-step">count</span>
             <span class="flow-arrow" />
-            <span class="flow-step">write</span>
+            <span class="flow-step">base map</span>
             <span class="flow-arrow" />
           </span>
-          <button type="button" class="mdoc-item mdoc-btn" aria-haspopup="dialog" aria-label="HUMAN.md: read the author's real one, unedited" @click="briefOpen = true">
+          <button type="button" class="mdoc-item mdoc-btn" aria-haspopup="dialog" aria-label="SKILL.md: read one of the author's real derived skills, unedited" @click="briefOpen = true">
             <span class="mdoc" aria-hidden="true"><span class="mdoc-fold" /><span class="mdoc-line" /><span class="mdoc-line" /><span class="mdoc-line" /></span>
-            <span class="mdoc-name">HUMAN.md</span>
+            <span class="mdoc-name">SKILL.md</span>
           </button>
         </div>
         <span class="machine-io" aria-hidden="true">one runtime in at init · nothing goes out</span>
