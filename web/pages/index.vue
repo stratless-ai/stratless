@@ -28,23 +28,13 @@ watch(briefOpen, async (open) => {
   }
 })
 
-// Where HUMAN.md is headed. Claude Code and Codex are READ today; the rest either receive the profile
-// over MCP already or are readers still to come, and the note under the marquee says which is which.
-// `logo` is a local monochrome mark in /public/logos (from simple-icons, recolored via CSS mask);
-// null = no clean official mark, so it shows as a text wordmark (Aider — only a filtered wordmark).
-//
-// GEMINI CLI IS DELIBERATELY ABSENT. Google stopped serving it in June 2026 and replaced it with a
-// closed-source successor whose history cannot be read; the open codebase survives as Qwen Code.
-// Listing it promised support for a product that no longer exists. See /docs/assistants.
+// Two, deliberately (Sun, 2026-08-10): only the assistants stratless actually reads and
+// measures are named anywhere on this site. The eight-logo roadmap marquee argued with the
+// copy's own claim; a tool joins this row when its leg ships, not before. `logo` is a local
+// monochrome mark in /public/logos (simple-icons, recolored via CSS mask).
 const brands = [
   { name: 'Claude Code', logo: 'claudecode' },
   { name: 'Codex', logo: 'openai' },
-  { name: 'Cline', logo: 'cline' },
-  { name: 'GitHub Copilot', logo: 'githubcopilot' },
-  { name: 'Cursor', logo: 'cursor' },
-  { name: 'Aider', logo: null },
-  { name: 'Zed', logo: 'zedindustries' },
-  { name: 'Windsurf', logo: 'windsurf' },
 ]
 
 // The JSON-LD lived in nuxt.config's global head, so it asserted `url: stratless.com` on /privacy,
@@ -61,7 +51,7 @@ useHead({
         applicationCategory: 'DeveloperApplication',
         operatingSystem: 'macOS, Linux, Windows',
         description:
-          'Reads your own AI logs and writes a HUMAN.md your assistant loads every session, so it stops talking over your head or under it. Runs locally, nothing leaves your machine.',
+          'Reads your own AI logs and derives skills your assistant loads: real habits earned from your history, receipts on every line. Runs locally, nothing leaves your machine.',
         url: 'https://stratless.com',
         sameAs: [GITHUB],
         license: 'https://opensource.org/licenses/MIT',
@@ -90,12 +80,13 @@ useHead({
       <p class="eyebrow">Nothing declared. Everything counted.</p>
       <!-- Three slots, three jobs: the eyebrow is why believe it (the method, and the one line that
            survives any future product), the h1 is what you get, the lede is how plus the pain it
-           kills. The eyebrow carries the proof so the lede never has to, which is what keeps it
-           short. The signature couplet moved to the closer, over the assistant marquee. -->
-      <h1>Get your AI to understand you.</h1>
+           kills. Solo V2 (2026-08-10): the h1 sells the artifact (skills, the category people
+           already install), the lede carries the differentiator (derived, receipts) and the felt
+           outcome. "Get your AI to understand you" retired with the profile-as-product era. -->
+      <h1>Turn Your Logs Into Skills.</h1>
       <p class="lede">
-        Stratless reads your own AI logs and writes down who you are, <br />so your assistant stops
-        talking over your head or under it.
+        Not someone else's skill pack. <br />Derived from how you actually work, with the receipts
+        to prove it, so your AI stops failing you the same way twice.
       </p>
 
       <!-- Not role="img": that collapsed the whole real profile below to one aria-label sentence,
@@ -107,7 +98,7 @@ useHead({
           <div class="term-dots"><span class="d-r" /><span class="d-y" /><span class="d-g" /></div>
           <div class="term-title">~ — -zsh — 72×24</div>
         </div>
-        <pre class="term-body" tabindex="0" role="region" aria-label="stratless free read and profile, printed to the terminal"><code><span class="t-arrow" aria-hidden="true">➜</span>  <span class="t-path">~</span> <span class="t-c">npx stratless</span>
+        <pre class="term-body" tabindex="0" role="region" aria-label="stratless free read and tune prescription, printed to the terminal"><code><span class="t-arrow" aria-hidden="true">➜</span>  <span class="t-path">~</span> <span class="t-c">npx stratless</span>
 
   <span class="t-b">You and your AI, measured</span>
 
@@ -130,43 +121,39 @@ useHead({
 
   <span class="t-d">Nothing was changed on your machine.</span>
 
-<span class="t-arrow" aria-hidden="true">➜</span>  <span class="t-path">~</span> <span class="t-c">stratless profile</span>
+<span class="t-arrow" aria-hidden="true">➜</span>  <span class="t-path">~</span> <span class="t-c">stratless tune</span>
 
-  <span class="t-b">WHO YOU'RE WORKING WITH</span>
+  <span class="t-b">Your tune — claude-code pair</span>
 
-  <span class="t-d">##</span> <span class="t-b">What to offer me before I ask</span>
-  - offer to enter a planning step before touching
-    any implementation. <span class="t-d">(265× · slip 28×)</span>
+  <span class="t-b">Stage 3 · 6 skills + 3 styles</span>
 
-  <span class="t-d">##</span> <span class="t-b">What to catch for me</span>
-  - catch anything left unverified, uncommitted, or
-    unconfirmed as done and check or lock it in:
-    - remote or deployed state unverified <span class="t-d">(192×)</span>
-    - uncommitted work needs a commit first <span class="t-d">(155×)</span>
-    - completion claim needs double-check <span class="t-d">(126×)</span>
+  <span class="t-d">SKILLS — habits at their moments</span>
+    ⚙ <span class="t-b">ask-assistant-to-verify-remote-state</span>  <span class="t-d">(198×)</span>  <span class="t-ok">new</span>
+    ⚙ <span class="t-b">give-minimal-continuation-signal</span>  <span class="t-d">(207× · slip 16×)</span>  <span class="t-ok">new</span>
+    ⚙ <span class="t-b">request-a-plan-before-implementing</span>  <span class="t-d">(270× · slip 28×)</span>  <span class="t-ok">new</span>
+    ⚙ <span class="t-b">ask-how-to-set-up-integration</span>  <span class="t-d">(288×)</span>  <span class="t-ok">new</span>
 
-  <span class="t-d">##</span> <span class="t-b">How to talk to me</span>
-  - match their terse style and reply with the next
-    concrete action:
-    - short imperative to act next <span class="t-d">(313×)</span>
-    - single-line git or PR command <span class="t-d">(154×)</span>
+  <span class="t-d">STYLE — always on</span>
+    ≈ <span class="t-b">check-in-on-session-progress</span>  <span class="t-d">(230×)</span>  <span class="t-ok">new</span>
+    ≈ <span class="t-b">give-terse-followup-directive</span>  <span class="t-d">(329×)</span>  <span class="t-ok">new</span>
 
-  <span class="t-d">not loaded yet · load it into your assistant: stratless update</span>
+  <span class="t-d">5 rows stay rows — the map carries them, the tune does not.</span>
 
-<span class="t-arrow" aria-hidden="true">➜</span>  <span class="t-path">~</span> <span class="t-c">stratless update</span>
-<span class="t-ok">↳ loaded</span>  <span class="t-d">your assistant now talks to a person, not a blank.</span>
+  <span class="t-d">every receipt is your own count · remove any time: stratless stop</span>
 
-<span class="t-arrow" aria-hidden="true">➜</span>  <span class="t-path">~</span> <span class="term-cursor" aria-hidden="true" /></code></pre>
+  Install? <span class="t-d">[y/N]</span> <span class="term-cursor" aria-hidden="true" /></code></pre>
       </div>
 
       <!-- THE TWO-BEAT SCENE — the landing page in miniature, performed. Beat 1 (above the shell's
            fold): `npx stratless`, the command the pill below sells, printing the AUTHOR'S REAL
            mirror run verbatim (minus the spinner and the `profile captures` row, which belongs to
-           the after-state). Beat 2 (the scroll reward): `stratless profile` → three rows pulled
-           verbatim from the one blessed sample (content/samples/HUMAN.md) in the real print format
-           (the header's meta paren omitted: that build's moments count rotated out of the status
-           history), then `update` loads it. Re-pull BOTH beats when the sample or the mirror
-           format changes: the terminal must never say what a real run would not. -->
+           the after-state). Beat 2 (the scroll reward, Solo V2): `stratless tune` — the DOOR,
+           printed from the author's real run (the spinner dropped, two skills and one style
+           trimmed as whole lines; every remaining line verbatim, order preserved), ending at the
+           real prompt: Install? [y/N] with the cursor blinking on the unanswered question. The
+           skill names here must agree with the blessed sample (content/samples/skill.md) — the
+           one-sample law covers this beat. Re-pull BOTH beats when the mirror or door format
+           changes: the terminal must never say what a real run would not. -->
 
       <div class="cta-row">
         <Btn href="#install" primary>Install</Btn>
@@ -260,16 +247,14 @@ useHead({
       <p class="eyebrow center">Reads Claude Code and Codex</p>
       <h2 class="rm-h">Made for your AI. Meant for you.</h2>
     </div>
-    <div class="marquee" aria-hidden="true">
-      <div class="marquee-track">
-        <span v-for="(b, i) in [...brands, ...brands]" :key="i" class="brand">
-          <span v-if="b.logo" class="brand-logo" :style="{ '--m': `url(/logos/${b.logo}.svg)` }" />
-          <span class="brand-name">{{ b.name }}</span>
-        </span>
-      </div>
+    <div class="duo" aria-hidden="true">
+      <span v-for="b in brands" :key="b.name" class="brand">
+        <span v-if="b.logo" class="brand-logo" :style="{ '--m': `url(/logos/${b.logo}.svg)` }" />
+        <span class="brand-name">{{ b.name }}</span>
+      </span>
     </div>
     <div class="container narrow">
-      <p class="quiet center rm-note">Claude Code and Codex today. Anything that speaks MCP can already receive your profile, and more readers arrive one tool at a time.</p>
+      <p class="quiet center rm-note">The two assistants stratless reads today, and the only two it names. Skills install to Claude Code now; Codex follows once it is measured against the real tool.</p>
     </div>
   </section>
 
@@ -838,37 +823,18 @@ h1 {
   line-height: 1.25;
   margin: 0.4rem 0 0;
 }
-.marquee {
-  margin: 2.4rem 0 1.6rem;
-  overflow: hidden;
-  /* fade both edges so logos slide in and out instead of clipping hard */
-  -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
-  mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
-}
-.marquee-track {
+.duo {
+  /* two named assistants, centered and still — the marquee retired with the eight-logo roadmap
+     (2026-08-10): a page that shows eight tools while the copy claims two argues with itself */
   display: flex;
-  width: max-content;
-  /* the brand list is rendered twice; each .brand carries its own right margin (NOT a flex gap), so
-     the two halves are identical and translateX(-50%) lands exactly on a repeat. A flex `gap` leaves
-     a half-gap at the midpoint, which makes the loop visibly jump. */
-  animation: marquee 42s linear infinite;
-}
-.marquee:hover .marquee-track {
-  animation-play-state: paused;
-}
-@keyframes marquee {
-  to {
-    transform: translateX(-50%);
-  }
+  justify-content: center;
+  gap: 3rem;
+  margin: 2.4rem 0 1.6rem;
 }
 .brand {
   display: inline-flex;
   align-items: center;
   gap: 0.6rem;
-  /* padding (not margin) for inter-brand spacing: padding always counts in the track's max-content
-     width, so both halves measure identical and the -50% loop is exact. A trailing flex margin can be
-     dropped from the measured width, which drifts the loop. */
-  padding-right: 3rem;
   color: var(--ink-2);
   opacity: 0.68;
   white-space: nowrap;
@@ -892,23 +858,6 @@ h1 {
   font-family: var(--font-mono);
   font-size: var(--fs-code);
 }
-@media (prefers-reduced-motion: reduce) {
-  .marquee {
-    -webkit-mask-image: none;
-    mask-image: none;
-  }
-  .marquee-track {
-    animation: none;
-    width: auto;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 0.9rem 1.8rem;
-  }
-  .marquee-track .brand {
-    padding-right: 0;
-  }
-}
-
 /* ── phones (2026-08-07): same markup, a different cut of it. The 72-column terminal is a
    desktop artifact — clipped, shrunken or swipe-gated it reads as breakage, so phones don't
    get it; the hero is the words and the CTAs, one fog-banded screen. The proof stays: the
