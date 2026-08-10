@@ -37,9 +37,10 @@ Building the full profile is a separate yes: `init` shows you a free read and an
 | --- | --- |
 | `stratless mirror` | a free read of you and your AI, changes nothing |
 | `stratless init` | keep your history, and build your profile |
+| `stratless tune` | derive skills from your base map, install them through one door |
 | `stratless profile` | see the model of you, free and instant |
 | `stratless update` | read what is new, rebuild and load it |
-| `stratless stop` | turn it off, and unload the profile |
+| `stratless stop` | turn it off, and unload the profile and the tune |
 | `stratless status` | its own state, and what it has cost |
 | `stratless mcp` | serve the profile to any MCP client |
 

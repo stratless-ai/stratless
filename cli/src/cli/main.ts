@@ -3,6 +3,7 @@
  *
  *   stratless mirror    a free read of you and your AI, from live logs — changes nothing, no setup
  *   stratless init      keep your history, see a free read, build your profile
+ *   stratless tune      derive skills from your base map, install them through one door
  *   stratless profile   see the model of you — LOOKS, never spends; update LOADS
  *   stratless update    read what's new; rebuild + load the profile
  *   stratless stop      turn it off — stop refreshing and unload the profile
@@ -20,6 +21,7 @@ import { init } from './commands/init.js';
 import { profile } from './commands/profile.js';
 import { update } from './commands/update.js';
 import { stop } from './commands/stop.js';
+import { tune } from './commands/tune.js';
 import { status } from './commands/status.js';
 import { serve } from '../integrations/mcp.js';
 
@@ -51,6 +53,10 @@ export async function main(): Promise<void> {
   }
 
   if (cmd === 'init') return await init();
+  if (cmd === 'tune') {
+    process.exitCode = await tune();
+    return;
+  }
 
   // Muscle memory outlives a command. `report` folded into `profile`; `patterns` and `receipt` are
   // not part of the current surface (the discovery pipeline carries the evidence in the profile
@@ -77,6 +83,7 @@ export async function main(): Promise<void> {
 
     ${C.b('stratless mirror')}     ${C.dim('a free read of you and your AI, changes nothing, no setup (--share: a card)')}
     ${C.b('stratless init')}       ${C.dim('keep your history, see a free read, build your profile')}
+    ${C.b('stratless tune')}       ${C.dim('derive skills from your base map — the tune, installed through one door')}
     ${C.b('stratless profile')}    ${C.dim('see the model of you — free, instant, never spends')}
     ${C.b('stratless update')}     ${C.dim('read what is new; rebuild + load the profile')}
     ${C.b('stratless stop')}       ${C.dim('turn it off — stop refreshing and unload the profile')}

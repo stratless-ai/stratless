@@ -86,9 +86,10 @@ prefixing every command below with `npx `. Both work.
 ```
 stratless mirror     a free read of you and your AI, changes nothing (--share for a card)
 stratless init       keep your history, and build your profile
+stratless tune       derive skills from your base map, and install them through one door
 stratless profile    see the model of you, free and instant
 stratless update     read what is new, rebuild and load the profile
-stratless stop       turn it off, and unload the profile
+stratless stop       turn it off, and unload the profile and the tune
 stratless status     its own state, and what it has cost (--check: newer version?)
 stratless mcp        serve the profile to any MCP client (for their config, not for typing)
 ```
