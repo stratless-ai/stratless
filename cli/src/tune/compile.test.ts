@@ -113,6 +113,17 @@ test('a rendered proposal carries code-stamped receipts and digits nowhere else'
   assert.ok(style.content.startsWith('---\nname: terse-register'));
 });
 
+test('the seven levers stand in the guide prompt — a future edit cannot silently drop one', () => {
+  const p = guidePrompt(ev(), []);
+  assert.ok(p.includes('Prefer skills that DO something'), 'the acting bias');
+  assert.ok(p.includes('one thing it must NOT be used for'), 'the anti-trigger');
+  assert.ok(p.includes('the LAST move is the self-test'), 'the self-test ending');
+  assert.ok(p.includes('do the thing, then stop'), 'the terminal state');
+  assert.ok(p.includes('evidence marked [patch]'), 'the slip-class instruction');
+  assert.ok(p.includes('never all-caps'), 'the register guard');
+  assert.ok(p.includes('at most five skills'), 'the cap holds at five (Sun, 2026-08-11)');
+});
+
 test('the guide prompt carries every evidence id and the installed list', () => {
   const p = guidePrompt(ev(), [{ name: 'plan-first', description: 'shapes work before it starts' }]);
   for (const e of ev()) assert.ok(p.includes(e.id));

@@ -7,18 +7,39 @@
  * map is a new world, not a regression. Re-freeze from a fresh calibrated run when the map moves.
  */
 
-/** The reference archive's row set at freeze time (2026-08-10). */
+/** The reference archive's row set at freeze time — re-frozen 2026-08-11 after the
+ *  first `update --rebuild` re-derived the map from scratch. */
 export const FIXTURE_ROWS = [
-  'ask-assistant-to-verify-remote-state', 'ask-for-clarification-or-recap', 'ask-for-guided-walkthrough',
-  'ask-how-to-set-up-integration', 'ask-to-double-check-work', 'ask-what-is-this',
-  'ask-where-to-start-on-new-feature', 'check-in-on-session-progress', 'direct-commit-before-continuing',
-  'elaborate-on-strategic-rationale', 'give-minimal-continuation-signal', 'give-terse-followup-directive',
-  'insist-on-quality-standard', 'issue-single-word-git-command', 'open-strategic-discussion-topic',
-  'probe-mechanism-with-uncertainty', 'propose-then-ask-for-plan', 'question-a-design-choice',
-  'question-current-setup-confusion', 'question-scope-of-agentic-approach', 'reflect-on-scope-drift',
-  'report-observed-symptom', 'request-a-plan-before-implementing', 'request-walkthrough-with-explanation',
-  'riff-on-product-direction', 'sequence-work-into-sessions', 'share-external-reference-for-reaction',
-  'state-progress-and-request-guidance', 'think-out-loud-then-approve', 'vent-about-motivation-while-reasoning',
+  'ask-assistant-to-verify-state',
+  'ask-for-plain-explanation',
+  'ask-for-step-by-step-clicks',
+  'confirm-transition-to-next-phase',
+  'defer-commit-to-later-session',
+  'flag-a-signal-then-greenlight',
+  'gate-implementation-behind-understanding',
+  'issue-bare-git-action',
+  'issue-cleanup-batch-directive',
+  'issue-go-ahead-shorthand',
+  'issue-run-and-scope-command',
+  'issue-terse-one-word-directive',
+  'model-cost-and-design-tradeoffs',
+  'narrate-progress-while-deciding',
+  'paste-link-or-error-for-triage',
+  'paste-terminal-output-for-diagnosis',
+  'propose-numbered-plan-items',
+  'pushback-question-with-detail',
+  'question-a-past-decision',
+  'question-whether-to-pause-a-track',
+  'reason-through-positioning-out-loud',
+  'report-setup-done-ask-next-step',
+  'request-a-plan-before-acting',
+  'request-guided-walkthrough',
+  'request-plan-then-fix',
+  'request-walkthrough-with-check-in',
+  'resume-and-ask-orientation',
+  'sequence-the-work',
+  'share-screenshot-for-reaction',
+  'vent-then-shrug-off',
 ].sort();
 
 /** MEASURE's ground truths — episodes verified by hand against the reference archive
