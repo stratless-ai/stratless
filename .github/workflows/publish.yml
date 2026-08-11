@@ -109,7 +109,7 @@ jobs:
           done
           cd "$(mktemp -d)"
           npm install -g "stratless@${GITHUB_REF_NAME#cli-v}"
-          stratless --help | grep -q "stratless profile"
+          stratless --help | grep -q "stratless tune"
           npm audit signatures --prefix "$(npm root -g)/.." || true
           echo "✓ installed from npm and ran"
 
