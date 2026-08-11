@@ -8,7 +8,7 @@ import { test } from 'node:test';
 
 import type { CompiledArtifact } from './compile.js';
 import { planInstall, tuneSection, upsertTuneSection, TUNE_START } from './door.js';
-import type { InspectionVerdict } from './inspect.js';
+import type { CoverVerdict } from './inspect.js';
 
 const art = (name: string, kind: CompiledArtifact['kind'], content = `content of ${name}`): CompiledArtifact => ({
   kind,
@@ -17,7 +17,7 @@ const art = (name: string, kind: CompiledArtifact['kind'], content = `content of
   content,
 });
 
-const mint = (name: string, kind: InspectionVerdict['kind']): InspectionVerdict => ({ name, kind, verdict: 'mint' });
+const mint = (name: string): CoverVerdict => ({ name, verdict: 'mint' });
 
 const TARGET = { skillsDir: '/skills', blocksDir: '/blocks' };
 
@@ -25,10 +25,10 @@ test('statuses: new on first run, unchanged/updated on re-run, covered never wri
   const a = art('plan-a', 'active');
   const t = art('walk-t', 'triggered');
   const b = art('tone-b', 'ambient');
-  const verdicts: InspectionVerdict[] = [
-    mint('plan-a', 'active'),
-    { name: 'walk-t', kind: 'triggered', verdict: 'already-fitted', coveredBy: 'their-guide' },
-    mint('tone-b', 'ambient'),
+  const verdicts: CoverVerdict[] = [
+    mint('plan-a'),
+    { name: 'walk-t', verdict: 'already-fitted', coveredBy: 'their-guide' },
+    mint('tone-b'),
   ];
   const existing = new Map([[`/blocks/tone-b.md`, 'stale bytes']]);
 
@@ -51,7 +51,7 @@ test('statuses: new on first run, unchanged/updated on re-run, covered never wri
 test('an unchanged artifact plans no write', () => {
   const a = art('plan-a', 'active');
   const existing = new Map([['/skills/plan-a/SKILL.md', a.content]]);
-  const plan = planInstall([a], [mint('plan-a', 'active')], TARGET, existing);
+  const plan = planInstall([a], [mint('plan-a')], TARGET, existing);
   assert.equal(plan.entries[0]!.status, 'unchanged');
   assert.equal(plan.writes.length, 0);
 });

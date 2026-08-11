@@ -11,11 +11,9 @@ import { strict as assert } from 'node:assert';
 import { existsSync } from 'node:fs';
 import { test } from 'node:test';
 
-import { runtimePresent, modelPresent, embedAll } from '../pipeline/embedding/embed.js';
+import { runtimePresent, modelPresent } from '../pipeline/embedding/embed.js';
 import { voicedPath, readVoiced } from '../pipeline/voiced.js';
-import { deriveTune, stageOf } from './derive.js';
-import { EXPECTED_DERIVED_TUNE, EXPECTED_STAGE, FIXTURE_ROWS } from './fixture.js';
-import { assembleTuneInput } from './rows.js';
+import { FIXTURE_ROWS } from './fixture.js';
 
 const RECORD = 'claude-code';
 
@@ -26,23 +24,32 @@ function referenceArchivePresent(): boolean {
   return names.length === FIXTURE_ROWS.length && names.every((n, i) => n === FIXTURE_ROWS[i]);
 }
 
-test('the derived tune matches the frozen reference derivation', { skip: !referenceArchivePresent() }, async () => {
-  const tune = await deriveTune(assembleTuneInput(RECORD), embedAll);
+test('measure finds every hand-verified ground truth in the reference archive', { skip: !referenceArchivePresent() }, async () => {
+  const { measure } = await import('./derive.js');
+  const { MEASURE_GROUND_TRUTHS: G } = await import('./fixture.js');
+  const findings = await measure(RECORD);
 
-  assert.equal(tune.units.length, EXPECTED_DERIVED_TUNE.units.length);
-  for (const exp of EXPECTED_DERIVED_TUNE.units) {
-    const got = tune.units.find((u) => u.anchor === exp.anchor);
-    assert.ok(got, `missing unit anchored at ${exp.anchor}`);
-    assert.equal(got.kind, exp.kind, `${exp.anchor} classified as ${got.kind}, expected ${exp.kind}`);
-    assert.deepEqual(
-      got.members.map((m) => m.name).sort(),
-      exp.members,
-      `${exp.anchor} membership drifted`,
-    );
-  }
-  assert.deepEqual(
-    tune.leftovers.map((m) => m.name).sort(),
-    EXPECTED_DERIVED_TUNE.leftovers,
+  const rituals = findings.filter((f) => f.kind === 'ritual');
+  assert.ok(
+    rituals.some((f) => G.ritualTokens.every((t) => (f.detail!.tokens as string[]).includes(t))),
+    'the commit ritual surfaces',
   );
-  assert.equal(stageOf(tune), EXPECTED_STAGE);
+  assert.ok(
+    findings.some((f) => f.kind === 'lesson' && f.exemplars.some((e) => e.quote?.includes(G.lessonQuote))),
+    'the jina episode surfaces',
+  );
+  assert.ok(
+    findings.some((f) => f.kind === 'rule' && f.detail?.phrase === G.rulePhrase),
+    'the merged-watch-ci rule surfaces',
+  );
+  assert.ok(
+    findings.some((f) => f.kind === 'win' && (f.receipts.approvals ?? 0) >= G.winsAtLeast),
+    'approvals exist in quantity',
+  );
+  assert.ok(
+    findings.some((f) => f.kind === 'arrival' && f.detail?.term === G.arrivalTerm),
+    'the July arrival surfaces',
+  );
+  // the numerals boundary holds for every claim of every finding
+  for (const f of findings) assert.equal(/[0-9]/.test(f.claim), false, `${f.id}: claim carries no digits`);
 });

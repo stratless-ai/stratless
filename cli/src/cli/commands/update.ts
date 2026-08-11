@@ -1,10 +1,17 @@
+import { unlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
 import type { Adapter, ArmState } from '../../integrations/contracts.js';
 import { brains, pickBrain } from '../../integrations/brains/registry.js';
 import { detect as detectAdapters } from '../../integrations/assistants/registry.js';
 import { loadRecentExchanges } from '../../pipeline/exchange.js';
-import { loadCategories } from '../../pipeline/categories.js';
+import { assignmentsPath } from '../../pipeline/assign.js';
+import { categoriesPath, loadCategories } from '../../pipeline/categories.js';
+import { enginePath } from '../../pipeline/engine.js';
+import { estimateBuild, estimateLine } from '../../pipeline/estimate.js';
+import { liftPath } from '../../pipeline/lift.js';
+import { loadMoments } from '../../pipeline/moments.js';
+import { voicedPath } from '../../pipeline/voiced.js';
 import { JUDGE_WINDOW } from '../../runner/loop.js';
 import { coldBuildRequested, readState, recordGrowthConsent, requestColdBuild, setFlushCadence, type FlushCadence } from '../../runner/state.js';
 import { readLock, lockIsStale, spawnDetached, resolveBinPath } from '../../runner/worker.js';
@@ -13,13 +20,12 @@ import { isYes } from '../args.js';
 import { C, CE, hint, SPINNER_FRAMES } from '../ui.js';
 
 /**
- * UPDATE — the after-session refresh: read what's new, and rebuild + LOAD the profile when it's DUE.
+ * UPDATE — the after-session refresh: read what's new, and rebuild the evidence when it's DUE.
  *
  * This is what the silent Stop hook runs, so it must be cheap by default. Collecting new moments is
  * free and happens every run; the flush (tag + count + rebuild) waits out the cadence cooldown
- * (flushDue), and a hand-typed `update` beats the cooldown. A gated skip still guarantees an
- * existing profile is loaded (covers `update` after `stop`) — the skip is invisible, only the cost
- * is missing.
+ * (flushDue), and a hand-typed `update` beats the cooldown. The evidence is internal — the sitting
+ * reads it, nothing loads it — and each refresh also clears any older install's loaded pointer.
  */
 const TERMINAL_PHASES = new Set(['done', 'failed', 'stopped']);
 
@@ -158,6 +164,22 @@ function spawnWorker(flush: boolean): number | undefined {
   return spawnDetached(process.execPath, [fileURLToPath(new URL('../../index.js', import.meta.url)), '__worker'], env);
 }
 
+/**
+ * THE COLD-REBUILD CLEAR — one pair's derived state, and nothing else. The archive and the moment
+ * pile stay (they are the input a rebuild reads), and `fit.jsonl` stays: the wobble ledger's
+ * history is the mature trigger's future margin, and a rebuild legitimately re-freezes its
+ * baseline without erasing what was measured before it. An absent file is already cleared.
+ */
+export function clearDerivedFor(record: string): void {
+  for (const p of [categoriesPath(record), assignmentsPath(record), voicedPath(record), liftPath(record), enginePath(record)]) {
+    try {
+      unlinkSync(p);
+    } catch {
+      /* absent is cleared */
+    }
+  }
+}
+
 /** Is a real worker (not a foreground command) holding the lock right now? */
 function workerAlive(): boolean {
   const h = readLock();
@@ -198,6 +220,47 @@ export async function update(_rest: string[], opts: { consented?: boolean } = {}
     const who = here.length ? here.map((a) => a.displayName).join(' or ') : 'your AI coding assistant';
     console.log(`\n  No conversations found yet.\n  ${C.dim(`Talk to ${who} a few times, run \`${hint('stratless init')}\`, then try this.`)}\n`);
     return;
+  }
+
+  // `update --rebuild` — the full cold rebuild, first-class. It quotes each built pair's own
+  // estimate and takes a typed yes BEFORE anything is cleared: a declined quote changes nothing.
+  // On yes it removes the derived state, which manufactures exactly the condition the existing
+  // cold-build path was built for — one build path, no second one to maintain.
+  if (_rest.includes('--rebuild')) {
+    if (!process.stdin.isTTY || !process.stderr.isTTY) {
+      console.log(`\n  ${C.dim('run --rebuild in a terminal — it clears your built map on a typed yes, never an implied one.')}\n`);
+      return;
+    }
+    // Never clear under a live process: a worker mid-flush holds this map in memory and would
+    // write half of the old world back over the cleared shelf.
+    const running = readLock();
+    if (running && !lockIsStale(running)) {
+      console.log(`\n  ${C.it('a stratless process is running')} ${C.dim(`(pid ${running.pid}) — nothing cleared; let it finish or \`${hint('stratless stop')}\` it, then rebuild.`)}\n`);
+      return;
+    }
+    const pile = loadMoments();
+    const targets = detectAdapters()
+      .map((a) => ({ a, own: pile.filter((m) => m.record === a.record.id).length }))
+      .filter((t) => t.own > 0 && loadCategories(t.a.record.id).length > 0);
+    if (!targets.length) {
+      console.log(`\n  ${C.dim(`no built map to rebuild — a plain \`${hint('stratless update')}\` builds fresh on its own.`)}\n`);
+      return;
+    }
+    console.log(`\n  ${C.b('Full rebuild')} — re-cluster, re-name, and re-voice each pair from its whole archive.`);
+    for (const t of targets) console.log(`    ${t.a.displayName}: ${C.b(estimateLine(estimateBuild(t.own)))}`);
+    console.log(`  ${C.dim('your archive, your moments, and the fit ledger stay · the evidence rewrites from scratch')}`);
+    let raze: boolean;
+    try {
+      raze = await confirmBuild(`\n  Rebuild now? ${C.dim('[y/N]')} `);
+    } catch {
+      raze = false;
+    }
+    if (!raze) {
+      console.log(`\n  ${C.dim('nothing cleared, nothing spent.')}\n`);
+      return;
+    }
+    for (const t of targets) clearDerivedFor(t.a.record.id);
+    console.log(`  ${C.dim('derived state cleared — building cold…')}`);
   }
 
   // A hand-run update (a real terminal) forces a flush; the background hook (no TTY) respects the

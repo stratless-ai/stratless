@@ -23,11 +23,10 @@
  *
  * THE RETURN LEG IS HERE NOW (2026-07-31), and it took a second assistant to see its real shape.
  * The question that held it open was whether a local MCP server replaced the context-file write.
- * It does not, because they are different guarantees: MCP is PULL, arriving when the assistant
- * thinks to ask, and the file is PUSH, already in context before it says a word. A person whose
- * profile only arrives on request is back to re-explaining themselves on every turn the model does
- * not ask — which is the exact work this product exists to remove. So the leg is the PUSH channel,
- * MCP runs beside it, and `mcp.ts` belongs to neither adapter.
+ * The load leg survives the profile going internal (2026-08-10) for its OFF half: unload() takes
+ * our pointer out of older installs, and the off switch has to stay as complete as the on switch
+ * ever was. load() is machinery without a caller now, kept because the interface is per-tool and
+ * a future surface may push through it again.
  *
  * The two implementations differ more than "write a file" suggests, which is why this is an
  * interface and not a shared function: Claude Code expands an `@import`, so its file is a POINTER
@@ -375,4 +374,9 @@ export interface Adapter {
   readonly record: RecordAdapter;
   readonly rhythm: RhythmAdapter;
   readonly load: LoadAdapter;
+  /** THE PACK LEG — where this tool's own skill machinery discovers skill files. The sitting
+   *  installs a pair's tune here and nowhere else (pack-only, 2026-08-11); per-tool because each
+   *  assistant owns its own door (measured: ~/.claude/skills and ~/.codex/skills both discover
+   *  an externally written <name>/SKILL.md with no approval step, codex-cli 0.147.0 probe). */
+  skillsDir(): string;
 }

@@ -11,8 +11,7 @@
  * pick instead.
  */
 import type { CompiledArtifact } from './compile.js';
-import type { Stage } from './derive.js';
-import type { InspectionVerdict } from './inspect.js';
+import type { CoverVerdict } from './inspect.js';
 
 export interface InstallTarget {
   /** where skill directories land (Claude Code: ~/.claude/skills) */
@@ -47,7 +46,7 @@ const KIND_ORDER: Record<CompiledArtifact['kind'], number> = { active: 0, trigge
 
 export function planInstall(
   artifacts: CompiledArtifact[],
-  verdicts: InspectionVerdict[],
+  verdicts: CoverVerdict[],
   target: InstallTarget,
   /** current on-disk content per planned path — the shell reads, the plan only compares */
   existing: Map<string, string>,

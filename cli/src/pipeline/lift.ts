@@ -63,7 +63,7 @@ import {
 
 /** Per record by doctrine: LIFT grades ONE AI, so its ledger lives on that AI's shelf. The
  *  PRINT_CAP budget, the meta evidence and the delegated trigger all stop being shared. */
-const liftPath = (record: string): string => join(recordDir(record), 'lift.json');
+export const liftPath = (record: string): string => join(recordDir(record), 'lift.json');
 
 /* ——— pre-registered constants — mode 1 (2026-07-28, from the gap-leg probes) ——— */
 /** a window needs this many assigned moments before its rates may heal a mode-1 patch */

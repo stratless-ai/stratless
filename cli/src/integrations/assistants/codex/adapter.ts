@@ -7,7 +7,9 @@
  * never across assistants.
  */
 import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Adapter } from '../../contracts.js';
+import { codexHome } from './paths.js';
 import { driftCheck, readSessions, roots, turnsOfFile } from './record.js';
 import { arm, disarm, groupsAfterOurs, protect, state } from './rhythm.js';
 import { loadInto, loaded, unload } from './load.js';
@@ -46,4 +48,8 @@ export const codex: Adapter = {
   // A copy, because Codex expands no import syntax. Every successful build rewrites it so the
   // profile cannot silently age behind the artifact.
   load: { load: loadInto, loaded, unload },
+  // The pack leg: measured against codex-cli 0.147.0 (2026-08-11) — an externally written
+  // <name>/SKILL.md under this dir is discovered by the next session with no approval step,
+  // unlike hooks. Same artifact format as Claude Code's, byte for byte.
+  skillsDir: () => join(codexHome(), 'skills'),
 };

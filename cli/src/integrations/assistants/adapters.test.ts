@@ -12,7 +12,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { allSessions, allTurns, anyArmed, deliverMissing, detect, disarmEverywhere, firstDrift, loadEverywhere, loadedInto, records, registry, unloadEverywhere } from './registry.js';
+import { allSessions, allTurns, anyArmed, detect, disarmEverywhere, firstDrift, records, registry, unloadEverywhere } from './registry.js';
 import { profilePath, writeProfile } from '../../storage/profile.js';
 import { isTypedMessage } from '../contracts.js';
 
@@ -170,10 +170,11 @@ test('a healthy archive raises no drift; the canary speaks only when a format mo
   });
 });
 
-test('the profile reaches every assistant on the machine, in the shape each one reads', () => {
-  // The Return leg through the registry. The two deliveries are deliberately different — Claude
-  // Code expands an import so it gets a POINTER, Codex expands nothing so it gets the text itself —
-  // and the caller is not supposed to know which is which.
+test('an older install\'s loaded pointers are cleared from every tool, completely', () => {
+  // THE OFF-RAMP. The profile went internal (2026-08-10): the legs' load() half seeds the state an
+  // older install is actually in — a pointer in Claude Code, a copy in Codex — and unloadEverywhere
+  // must take BOTH back out, or the sunset leaves a person's profile serving in a tool nobody
+  // thought to check. Idempotence matters too: every refresh runs this.
   withHome((home) => {
     seed(home, [user('hello', 'u1')]);
     mkdirSync(join(home, '.codex', 'sessions'), { recursive: true });
@@ -184,107 +185,21 @@ test('the profile reaches every assistant on the machine, in the shape each one 
       process.env.STRATLESS_CLAUDE_MD = join(home, '.claude', 'CLAUDE.md');
       process.env.STRATLESS_PROFILE_DIR = join(home, '.stratless');
       process.env.CODEX_HOME = join(home, '.codex');
-      // ONE FILE PER PAIR (the per-record doctrine): each leg delivers only what its own
-      // relationship earned. Two different profiles, two different destinations, one call.
       writeProfile('they ask for a plan before the work starts', profilePath('claude-code'));
       writeProfile('they run it and read the output first', profilePath('codex'));
+      for (const a of detect()) a.load.load();
+      assert.ok(/@.*HUMAN\.claude-code\.md/.test(readFileSync(join(home, '.claude', 'CLAUDE.md'), 'utf8')), 'the older-install state this starts from');
+      assert.ok(readFileSync(join(home, '.codex', 'AGENTS.md'), 'utf8').includes('they run it'), 'and the copy shape too');
 
-      const written = loadEverywhere();
-      assert.equal(written.length, 2, 'both detected assistants are handed their own pair profile');
-      assert.deepEqual(loadedInto().map((a) => a.id), ['claude-code', 'codex']);
-
-      const claudeMd = readFileSync(join(home, '.claude', 'CLAUDE.md'), 'utf8');
-      const agentsMd = readFileSync(join(home, '.codex', 'AGENTS.md'), 'utf8');
-      assert.ok(/@.*HUMAN\.claude-code\.md/.test(claudeMd), 'Claude Code gets a pointer AT ITS OWN pair file');
-      assert.equal(/@.*HUMAN\./.test(agentsMd), false);
-      assert.ok(agentsMd.includes('they run it and read the output first'), "Codex gets its own pair's words — never the other tool's");
-      assert.equal(agentsMd.includes('they ask for a plan'), false, "the Claude pair's profile never crosses into Codex");
-
-      // The off switch has to be as complete as the on switch, or `stop` leaves a copy of a
-      // person's profile sitting in a tool nobody thought to check.
       assert.deepEqual(unloadEverywhere().map((a) => a.id), ['claude-code', 'codex']);
-      assert.deepEqual(loadedInto(), []);
-      assert.equal(readFileSync(join(home, '.codex', 'AGENTS.md'), 'utf8').includes('they run it'), false);
+      assert.equal(/@.*HUMAN\./.test(readFileSync(join(home, '.claude', 'CLAUDE.md'), 'utf8')), false, 'the pointer is gone');
+      assert.equal(readFileSync(join(home, '.codex', 'AGENTS.md'), 'utf8').includes('they run it'), false, 'the copy is gone');
+      assert.deepEqual(unloadEverywhere(), [], 'a second pass finds nothing to remove and claims nothing');
     } finally {
       for (const [k, v] of [['STRATLESS_CLAUDE_MD', savedMd], ['STRATLESS_PROFILE_DIR', savedProfiles], ['CODEX_HOME', savedCodex]] as const) {
         if (v === undefined) delete process.env[k];
         else process.env[k] = v;
       }
-    }
-  });
-});
-
-test('an assistant added to a working install is delivered to without waiting for a rebuild', () => {
-  // THE BUG THIS PINS: delivery used to happen only as a side effect of writing the profile, so it
-  // was reachable only by a rebuild. A person whose profile is already current never runs one —
-  // which is precisely the state of someone who just added a second assistant. The profile stayed
-  // in the tool that had it and never arrived in the one that did not, while `status`, asking only
-  // whether ANY assistant carried it, answered "yes".
-  withHome((home) => {
-    seed(home, [user('hello', 'u1')]);
-    mkdirSync(join(home, '.codex', 'sessions'), { recursive: true });
-    const saved = { md: process.env.STRATLESS_CLAUDE_MD, profiles: process.env.STRATLESS_PROFILE_DIR, codex: process.env.CODEX_HOME };
-    try {
-      process.env.STRATLESS_CLAUDE_MD = join(home, '.claude', 'CLAUDE.MD'.replace('.MD', '.md'));
-      process.env.STRATLESS_PROFILE_DIR = join(home, '.stratless');
-      process.env.CODEX_HOME = join(home, '.codex');
-      writeProfile('they ask for a plan before the work starts', profilePath('claude-code'));
-      writeProfile('they run it and read the output first', profilePath('codex'));
-
-      // The starting state is the real one: Claude Code was set up long ago and carries the profile;
-      // Codex is present on the machine and has never been written to.
-      loadEverywhere();
-      registry.find((a) => a.id === 'codex')!.load.unload();
-      assert.deepEqual(loadedInto().map((a) => a.id), ['claude-code'], 'the gap this starts from');
-
-      const arrived = deliverMissing();
-      assert.deepEqual(arrived.map((a) => a.id), ['codex'], 'only the assistant that was missing it is reported');
-      assert.deepEqual(loadedInto().map((a) => a.id), ['claude-code', 'codex']);
-      assert.ok(
-        readFileSync(join(home, '.codex', 'AGENTS.md'), 'utf8').includes('they run it and read the output first'),
-        'and it is ITS OWN pair\'s profile, copied in whole — never the other tool\'s',
-      );
-
-      // Nothing left to do is the common case, and it must claim nothing.
-      assert.deepEqual(deliverMissing(), [], 'a second run reports no arrivals');
-
-      // `stop` unloads every tool and then tells the person to run `update` — so the same path has
-      // to bring the profile back to BOTH, with no rebuild in between.
-      unloadEverywhere();
-      assert.deepEqual(deliverMissing().map((a) => a.id), ['claude-code', 'codex']);
-    } finally {
-      if (saved.md === undefined) delete process.env.STRATLESS_CLAUDE_MD; else process.env.STRATLESS_CLAUDE_MD = saved.md;
-      if (saved.profiles === undefined) delete process.env.STRATLESS_PROFILE_DIR; else process.env.STRATLESS_PROFILE_DIR = saved.profiles;
-      if (saved.codex === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = saved.codex;
-    }
-  });
-});
-
-test('with no profile on disk, a COPY is never claimed and never written', () => {
-  // Refuse-don't-lie at the smallest scale, and the pointer/copy asymmetry is the whole content of
-  // it. Claude Code's leg is an `@import` LINE, which is legitimately aimable before the file it
-  // points at exists — `init` does exactly that, so the first build is picked up with no second
-  // step. Codex's leg is the profile TEXT, so with nothing to copy there is nothing to write; what
-  // must never happen is reporting it as delivered anyway.
-  withHome((home) => {
-    seed(home, [user('hello', 'u1')]);
-    mkdirSync(join(home, '.codex', 'sessions'), { recursive: true });
-    const saved = { md: process.env.STRATLESS_CLAUDE_MD, human: process.env.STRATLESS_HUMAN_MD, codex: process.env.CODEX_HOME };
-    try {
-      process.env.STRATLESS_CLAUDE_MD = join(home, '.claude', 'CLAUDE.md');
-      process.env.STRATLESS_HUMAN_MD = join(home, '.stratless', 'HUMAN.md'); // never written
-      process.env.CODEX_HOME = join(home, '.codex');
-
-      assert.equal(
-        deliverMissing().some((a) => a.id === 'codex'),
-        false,
-        'a copy with nothing to copy is never reported as delivered',
-      );
-      assert.equal(existsSync(join(home, '.codex', 'AGENTS.md')), false, 'and the file is not created either');
-    } finally {
-      if (saved.md === undefined) delete process.env.STRATLESS_CLAUDE_MD; else process.env.STRATLESS_CLAUDE_MD = saved.md;
-      if (saved.human === undefined) delete process.env.STRATLESS_HUMAN_MD; else process.env.STRATLESS_HUMAN_MD = saved.human;
-      if (saved.codex === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = saved.codex;
     }
   });
 });
@@ -300,7 +215,8 @@ test('an assistant that is not on this machine is never written to', () => {
       process.env.STRATLESS_HUMAN_MD = join(home, '.stratless', 'HUMAN.md');
       process.env.CODEX_HOME = join(home, '.codex'); // no sessions dir → Codex is not here
       writeProfile('a profile');
-      assert.deepEqual(loadEverywhere(), [join(home, '.claude', 'CLAUDE.md')]);
+      for (const a of detect()) a.load.load();
+      assert.ok(existsSync(join(home, '.claude', 'CLAUDE.md')), 'the detected tool is written');
       assert.equal(existsSync(join(home, '.codex', 'AGENTS.md')), false, 'nothing is created for an absent tool');
     } finally {
       if (saved.md === undefined) delete process.env.STRATLESS_CLAUDE_MD; else process.env.STRATLESS_CLAUDE_MD = saved.md;
@@ -394,5 +310,20 @@ test('our own vault existing is not evidence that Claude Code is installed', () 
     // even once the tool itself has been uninstalled.
     writeFileSync(join(home, '.stratless', 'archive', 'proj__s1.jsonl'), JSON.stringify(user('archived', 'u1')) + '\n');
     assert.deepEqual(detect().map((a) => a.id), ['claude-code', 'codex']);
+  });
+});
+
+test('the pack leg: each adapter names its own skill door, per HOME and CODEX_HOME', () => {
+  withHome((home) => {
+    const savedCodex = process.env.CODEX_HOME;
+    try {
+      process.env.CODEX_HOME = join(home, '.codex');
+      const dirs = Object.fromEntries(registry.map((a) => [a.id, a.skillsDir()]));
+      assert.equal(dirs['claude-code'], join(home, '.claude', 'skills'));
+      assert.equal(dirs['codex'], join(home, '.codex', 'skills'));
+    } finally {
+      if (savedCodex === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = savedCodex;
+    }
   });
 });

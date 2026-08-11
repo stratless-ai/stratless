@@ -43,10 +43,6 @@ export function humanMdPath(): string {
   return process.env.STRATLESS_HUMAN_MD || join(homedir(), '.stratless', 'HUMAN.md');
 }
 
-/** Where the profile lived before pair-specific artifacts replaced the merged one. */
-function legacyHumanMdPath(): string {
-  return join(homedir(), '.claude', 'HUMAN.md');
-}
 
 /** The installed version, read from the package.json that ships next to dist/ — stamped into the
  *  managed header so the file itself says which stratless wrote it. Never hand-typed. */
@@ -90,35 +86,3 @@ export function readProfile(target: string = humanMdPath()): string | undefined 
   }
 }
 
-/**
- * Move a pre-0.7.2 profile out of Claude Code's directory into stratless's own, ONCE. Silent and
- * idempotent: every later run finds the new file already there and does nothing.
- *
- * Two refusals, each protecting something the person owns: a REDIRECTED profile
- * (`STRATLESS_HUMAN_MD`) is a deliberate choice and is never moved out from under it; and a file
- * whose first line is not the header WE stamp is not ours to move, however much it looks like a
- * profile. We only ever delete a file we can prove we wrote.
- *
- * Re-aiming whatever pointed at the old location is the LOAD leg's job, not this one — see
- * the Claude Code load adapter, which is called right after.
- */
-export function migrateLegacyProfile(target: string = humanMdPath(), legacy: string = legacyHumanMdPath()): boolean {
-  if (process.env.STRATLESS_HUMAN_MD) return false;
-  if (existsSync(target) || !existsSync(legacy)) return false;
-
-  let body: string;
-  try {
-    body = readFileSync(legacy, 'utf8');
-  } catch {
-    return false; // unreadable is not ours to move
-  }
-  if (!body.startsWith('# Who you are working with')) return false;
-
-  atomicWriteFileSync(target, body);
-  try {
-    unlinkSync(legacy);
-  } catch {
-    /* the copy is what matters; a leftover costs nothing but tidiness */
-  }
-  return true;
-}

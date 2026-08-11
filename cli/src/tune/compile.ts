@@ -1,27 +1,16 @@
 /**
- * THE COMPILER — derived units become installable artifacts (Solo V2, step 4).
+ * THE COMPILER — the sitting's brain and its gate, in one file.
  *
- * Model-free by construction. Every sentence in a compiled artifact is voiced-once content the
- * record already paid for — fold lines, row lines, patch wording, decode signals and quotes —
- * assembled by template; every numeral is code-stamped into the Receipts section and nowhere
- * else (the numerals boundary, extended to the tune's output). Same derivation in, same bytes
- * out: the wobble class cannot exist here because nothing here rolls.
+ * The guide (the pair's own model) reads the measured evidence and proposes skills; code disposes
+ * of every claim it makes. Prose comes from the guide, receipts are code-stamped from the cited
+ * findings, and every numeral lives in the Receipts section and nowhere else (the numerals
+ * boundary, extended to the tune's output).
  *
- * This stage compiles to STRINGS. Writing files to disk is the door's job (step 6) — the
- * compiler must stay pure so the prescription can be shown, diffed, and refused without a
- * byte landing anywhere.
- *
- * Artifact shapes (the hand-mint's blessed form, builds/paper-mint/):
- *   SKILL — frontmatter (name + trigger-vocabulary description) · the standard · the moves ·
- *           the patched standard where one seats it · receipts · sunset.
- *   BLOCK — no frontmatter (not a skill; always-loaded via the load path): a header comment
- *           says what it is, then the same body shape.
+ * This stage compiles to STRINGS. Writing files to disk is the door's job — the compiler stays
+ * pure so the report can be shown, diffed, and refused without a byte landing anywhere.
  */
-import type { DerivedTune, DerivedUnit } from './derive.js';
-import type { RowRecord } from './rows.js';
-
 export interface CompiledArtifact {
-  /** the unit's tier — actives and triggered styles deliver as skills, ambients as blocks */
+  /** the artifact's tier — actives deliver as skills, ambients as always-loaded blocks */
   kind: 'active' | 'triggered' | 'ambient';
   name: string;
   /** where the artifact lands relative to its destination root (skills dir / tune dir) */
@@ -29,121 +18,243 @@ export interface CompiledArtifact {
   content: string;
 }
 
-/** The honest label every artifact prints about itself — the practicality claim, stated. */
-const TIER_LINE: Record<CompiledArtifact['kind'], string> = {
-  active: 'Active skill — performs work at its moment.',
-  triggered: 'Triggered style — shapes the reply when its moment occurs.',
-  ambient: 'Ambient style — always on; shapes every reply.',
-};
+/* THE GUIDE — bundle the findings, ask the pair's own model ONCE, dispose by code. The model
+   writes; it never decides: a proposal citing no evidence dies, a quote that isn't verbatim
+   dies, a digit in prose dies. Refuse-don't-lie: no brain, bad JSON, all proposals rejected →
+   an empty sitting and an honest report, never an invented skill. */
 
-const MAX_DESCRIPTION = 1024;
+import { brainFor } from '../integrations/brains/registry.js';
+import type { Finding } from './derive.js';
+import { assembleTuneInput } from './rows.js';
 
-/** The seat's standard: the fold's printed line, or the patch's own when-clause turned whole. */
-const standardOf = (u: DerivedUnit): string => {
-  if (u.seat.group) return u.seat.group.line;
-  const p = u.members.find((m) => m.name === u.seat.patchHome)?.patch;
-  return p ? `${p.when}.` : u.members[0]!.line;
-};
+/** Base-map rows and open patches enter the sitting as evidence beside the findings. */
+export interface EvidenceItem {
+  id: string;
+  kind: Finding['kind'] | 'row' | 'patch';
+  claim: string;
+  receipts: Record<string, number>;
+  quotes: string[];
+}
 
-/** Trigger vocabulary, straight from the decode key: wants and proof phrases, deduped. */
-const vocabulary = (members: RowRecord[]): { wants: string[]; quotes: string[] } => {
-  const wants = [...new Set(members.map((m) => m.signal).filter(Boolean))];
-  const quotes = [...new Set(members.map((m) => m.quote).filter(Boolean))];
-  return { wants, quotes };
-};
+export function evidenceOf(findings: Finding[], record: string): EvidenceItem[] {
+  const items: EvidenceItem[] = findings.map((f) => ({
+    id: f.id,
+    kind: f.kind,
+    claim: f.claim,
+    receipts: f.receipts,
+    quotes: [
+      ...f.exemplars.map((e) => e.quote ?? '').filter(Boolean),
+      ...Object.values(f.detail ?? {}).flatMap((v) => (Array.isArray(v) ? v : [v])),
+    ],
+  }));
+  const input = assembleTuneInput(record);
+  for (const r of input.rows) {
+    if (!r.line) continue;
+    items.push({ id: `row:${record}:${r.name}`, kind: 'row', claim: r.line, receipts: { count: r.count }, quotes: [r.quote].filter(Boolean) });
+    if (r.patch && r.patch.state === 'open')
+      items.push({
+        id: `patch:${record}:${r.name}`,
+        kind: 'patch',
+        claim: r.patch.when,
+        receipts: { reach: r.patch.reach, slip: r.patch.slip },
+        quotes: [r.patch.ownVoice, r.patch.doThis].filter(Boolean),
+      });
+  }
+  return items;
+}
 
-/** The description is the discovery mechanism (the 2026 docs' one law): what + when, third
- *  person, the person's own phrases as the keywords, capped hard at the format's limit.
- *  Exported because inspection compares on exactly this surface — the text skills compete on. */
-export const describe = (u: DerivedUnit): string => {
-  const { wants, quotes } = vocabulary(u.members);
-  const parts = [standardOf(u)];
-  if (wants.length) parts.push(`Use when the user ${wants.join('; or ')}.`);
-  if (quotes.length) parts.push(`Their own phrases: ${quotes.map((q) => `"${q}"`).join(' · ')}.`);
-  parts.push('Minted by stratless from this pair’s own record — receipts inside.');
-  let out = parts.join(' ');
-  if (out.length > MAX_DESCRIPTION) out = `${out.slice(0, MAX_DESCRIPTION - 1).replace(/\s+\S*$/, '')}…`;
-  return out;
-};
+export interface Proposal {
+  name: string;
+  kind: 'skill' | 'style';
+  description: string;
+  standard: string;
+  moves: string[];
+  citations: string[];
+  quote?: string;
+}
 
-const receiptLine = (m: RowRecord, facet?: string): string => {
-  const bits = [`${m.count}×`];
-  if (facet) bits.push(facet);
-  if (m.patch) bits.push(`slip ${m.patch.slip}× (reach ${m.patch.reach}×)`);
-  return `- ${m.name}: ${bits.join(' · ')}`;
-};
+export type Disposed =
+  | { proposal: Proposal; ok: true }
+  | { proposal: Proposal; ok: false; reasons: string[] };
 
-const receipts = (u: DerivedUnit): string => {
-  const facets = new Map<string, string>();
-  if (u.seat.group) u.seat.group.members.forEach((m, i) => facets.set(m.name, u.seat.group!.facets[i] ?? ''));
-  return u.members.map((m) => receiptLine(m, facets.get(m.name))).join('\n');
-};
-
-const moves = (u: DerivedUnit): string =>
-  u.members
-    .filter((m) => m.line)
-    .map((m) => `- ${m.line}`)
-    .join('\n');
-
-const patched = (u: DerivedUnit): string => {
-  const holder = u.members.find((m) => m.patch && m.patch.state === 'open');
-  if (!holder?.patch) return '';
-  const p = holder.patch;
-  const lines = [`## The patched standard`, '', `When: ${p.when}.`];
-  if (p.doThis) lines.push(`The move: ${p.doThis}.`);
-  if (p.ownVoice) lines.push(`In their own words: "${p.ownVoice}"`);
-  if (p.action) lines.push(`Drive the native machinery — ${p.action} — never rebuild it.`);
-  return `${lines.join('\n')}\n\n`;
-};
-
-const sunset = (u: DerivedUnit): string =>
-  u.seat.patchHome
-    ? 'This skill retires when its patch heals — the standard absorbed, the row alone sufficing.'
-    : `This ${u.kind === 'ambient' ? 'style' : u.kind === 'triggered' ? 'style' : 'skill'} retires when its rows stop accruing across builds — the standard arriving unprompted.`;
-
-const body = (u: DerivedUnit): string =>
-  [
-    TIER_LINE[u.kind],
-    '',
-    standardOf(u),
-    '',
-    '## The moves (voiced from this pair’s record)',
-    '',
-    moves(u),
-    '',
-    patched(u) + '## Receipts (code-stamped, never authored)',
-    '',
-    receipts(u),
-    '',
-    '## Sunset',
-    '',
-    `${sunset(u)} Check after each \`stratless update\`. Remove: delete this ${u.kind === 'ambient' ? 'file from the load path' : 'directory'}.`,
-    '',
-  ].join('\n');
-
-const compileSkillFile = (u: DerivedUnit): CompiledArtifact => ({
-  kind: u.kind,
-  name: u.anchor,
-  filename: `${u.anchor}/SKILL.md`,
-  content: `---\nname: ${u.anchor}\ndescription: ${describe(u)}\n---\n\n# ${u.anchor}\n\n${body(u)}`,
+const PROPOSAL_SCHEMA = JSON.stringify({
+  type: 'object',
+  required: ['proposals'],
+  properties: {
+    proposals: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['name', 'kind', 'description', 'standard', 'moves', 'citations'],
+        properties: {
+          name: { type: 'string' },
+          kind: { enum: ['skill', 'style'] },
+          description: { type: 'string' },
+          standard: { type: 'string' },
+          moves: { type: 'array', items: { type: 'string' } },
+          citations: { type: 'array', items: { type: 'string' } },
+          quote: { type: 'string' },
+        },
+      },
+    },
+  },
 });
 
-const compileBlockFile = (u: DerivedUnit): CompiledArtifact => {
-  // An ambient block has no frontmatter (nothing triggers it), so the person's proof phrases
-  // surface in the body instead — register texture is where their own words teach the most.
-  const { quotes } = vocabulary(u.members);
-  const phrases = quotes.length ? `Their own phrases: ${quotes.map((q) => `"${q}"`).join(' · ')}.\n\n` : '';
-  return {
-    kind: u.kind,
-    name: u.anchor,
-    filename: `${u.anchor}.md`,
-    content: `<!-- ALWAYS-LOADED BLOCK — not a skill. Continuous properties of every reply,\n     delivered through the load path. Minted by stratless; receipts inside. -->\n\n# ${u.anchor}\n\n${phrases}${body(u)}`,
-  };
-};
+export const GUIDE_CAP = 5;
 
-/** Compile every derived unit to its artifact. Pure; deterministic; no disk, no model.
- *  Actives and triggered styles deliver as SKILL.md (the trigger is the token economy either
- *  way); ambient styles deliver as always-loaded block files. */
-export function compileTune(tune: DerivedTune): CompiledArtifact[] {
-  return tune.units.map((u) => (u.kind === 'ambient' ? compileBlockFile(u) : compileSkillFile(u)));
+/** What the person already runs — name plus, where known, the description it competes on.
+ *  The guide gets both, because a duplicate hides behind a fresh name. `minted` marks a previous
+ *  tune of OURS: never a collision (a tune replacing itself is an update), so it is exempt from
+ *  the duplicate gate and presented to the guide as refreshable instead. */
+export interface InstalledNote {
+  name: string;
+  description?: string;
+  minted?: boolean;
+}
+
+/** The guide's brief. Everything it may cite is in front of it; everything else is forbidden. */
+export function guidePrompt(evidence: EvidenceItem[], installed: InstalledNote[]): string {
+  const lines = evidence.map(
+    (e) => `${e.id} [${e.kind}] ${e.claim}${e.quotes.length ? ` — their words: ${e.quotes.slice(0, 3).map((q) => `"${q}"`).join(' · ')}` : ''}`,
+  );
+  const theirs = installed.filter((s) => !s.minted);
+  const ours = installed.filter((s) => s.minted);
+  const installedLines = theirs.map((s) => `- ${s.name}${s.description ? ` — ${s.description}` : ''}`);
+  const mintedLines = ours.map((s) => `- ${s.name}${s.description ? ` — ${s.description}` : ''}`);
+  return [
+    'You are the guide. You have watched one person work with their AI assistant, and the evidence below is everything you have seen — measured from their own history, each line with an ID.',
+    '',
+    'EVIDENCE (cite by ID; you may cite nothing else):',
+    ...lines,
+    '',
+    ...(installedLines.length
+      ? ['ALREADY INSTALLED (never duplicate — not by name, not by substance under a new name):', ...installedLines, '']
+      : []),
+    ...(mintedLines.length
+      ? [
+          'MINTED BY A PREVIOUS SITTING (ours — re-propose one ONLY if the evidence still supports it; it refreshes in place rather than duplicating):',
+          ...mintedLines,
+          '',
+        ]
+      : []),
+    'Propose at most five skills that convert what this person demonstrably values into something they no longer carry. Rules, absolute:',
+    '- every proposal cites at least one evidence ID; a proposal without evidence will be discarded by a machine, not a taste',
+    '- kind "skill" fires at a moment and does or shapes something; kind "style" is always-on register',
+    '- description: third person, what + when, the person\'s own phrases as trigger words',
+    '- standard: one sentence; moves: two to five imperative lines the assistant executes',
+    '- a quote, if you use one, must be VERBATIM from the evidence\'s "their words" — never composed',
+    '- no numerals anywhere in your prose; the receipts are stamped by code, not by you',
+    'Return JSON per the schema.',
+  ].join('\n');
+}
+
+const normText = (s: string): string => s.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+
+/** Code disposes. Every check is arithmetic over the sitting's own inputs. */
+export function dispose(proposals: Proposal[], evidence: EvidenceItem[], installedNotes: InstalledNote[]): Disposed[] {
+  const byId = new Map(evidence.map((e) => [e.id, e]));
+  const fanout = new Map<string, number>();
+  // Only THEIR names collide — a previous tune of ours re-proposed is an update, not a duplicate.
+  const installed = new Set(installedNotes.filter((s) => !s.minted).map((s) => s.name.toLowerCase()));
+  const out: Disposed[] = [];
+  for (const p of proposals) {
+    const reasons: string[] = [];
+    if (!/^[a-z][a-z0-9-]{1,63}$/.test(p.name)) reasons.push('name is not kebab-case');
+    if (installed.has(p.name.toLowerCase())) reasons.push('duplicates an installed skill');
+    if (!p.citations?.length) reasons.push('cites no evidence');
+    for (const c of p.citations ?? []) if (!byId.has(c)) reasons.push(`unknown evidence: ${c}`);
+    const prose = [p.description, p.standard, ...(p.moves ?? []), p.quote ?? ''].join(' ');
+    if (/[0-9]/.test(prose)) reasons.push('numerals in prose — receipts are code-stamped');
+    if (!p.moves?.length || p.moves.length > 5) reasons.push('moves must be one to five lines');
+    if (p.quote) {
+      // Verbatim is one-directional: the quote appears INSIDE the person's recorded words.
+      // The reverse containment would let a real fragment be wrapped in composed words.
+      const q = normText(p.quote);
+      const cited = (p.citations ?? []).map((c) => byId.get(c)).filter(Boolean) as EvidenceItem[];
+      if (!q || !cited.some((e) => e.quotes.some((w) => normText(w).includes(q))))
+        reasons.push('quote is not verbatim from cited evidence');
+    }
+    if (out.filter((d) => d.ok).length >= GUIDE_CAP) reasons.push('over the cap');
+    if (reasons.length === 0) {
+      // Fan-out commits only on acceptance — a rejected proposal must not consume a
+      // finding's budget for the proposals that follow it.
+      const over = (p.citations ?? []).filter((c) => (fanout.get(c) ?? 0) >= 2);
+      if (over.length) reasons.push(...over.map((c) => `evidence ${c} already backs two accepted proposals`));
+      else for (const c of p.citations) fanout.set(c, (fanout.get(c) ?? 0) + 1);
+    }
+    out.push(reasons.length ? { proposal: p, ok: false, reasons } : { proposal: p, ok: true });
+  }
+  return out;
+}
+
+/** An accepted proposal becomes a real artifact: prose from the guide, receipts from code. */
+export function renderProposal(p: Proposal, evidence: EvidenceItem[], record: string): CompiledArtifact {
+  const byId = new Map(evidence.map((e) => [e.id, e]));
+  const cited = p.citations.map((c) => byId.get(c)!).filter(Boolean);
+  const receiptLines = cited.map((e) => {
+    const nums = Object.entries(e.receipts)
+      .map(([k, v]) => `${k} ${v}`)
+      .join(' · ');
+    return `- ${e.id}: ${nums}`;
+  });
+  const body = [
+    p.kind === 'skill' ? 'Fires at its moment.' : 'Always on.',
+    '',
+    p.standard,
+    '',
+    '## The moves',
+    '',
+    ...p.moves.map((m) => `- ${m}`),
+    ...(p.quote ? ['', `In their own words: "${p.quote}"`] : []),
+    '',
+    '## Receipts (code-stamped, never authored)',
+    '',
+    ...receiptLines,
+    '',
+    'Remove any time: delete this file, or `stratless stop` removes the whole tune.',
+    '',
+  ].join('\n');
+  // ONE OUTPUT: the skillpack. A style is an always-on skill, not a memory write — nothing the
+  // sitting produces ever lands outside the skills directory (Sun, 2026-08-11).
+  return {
+    kind: 'active',
+    name: p.name,
+    filename: `${p.name}/SKILL.md`,
+    content: `---\nname: ${p.name}\ndescription: ${p.description} Minted by stratless from this pair's own record — receipts inside.\n---\n\n# ${p.name}\n\n${body}`,
+  };
+}
+
+export interface Sitting {
+  evidence: EvidenceItem[];
+  disposed: Disposed[];
+  artifacts: CompiledArtifact[];
+}
+
+export type AskFn = (prompt: string, schema: string) => string | undefined;
+
+/** The sitting: one call, everything else code. `ask` injectable for tests; production rides
+ *  the pair's own brain, metered under feature 'consult'. */
+export function consult(
+  record: string,
+  findings: Finding[],
+  installed: InstalledNote[],
+  ask?: AskFn,
+): Sitting {
+  const evidence = evidenceOf(findings, record);
+  const doAsk: AskFn =
+    ask ??
+    ((prompt, schema) => brainFor(record)?.ask(prompt, { role: 'main', feature: 'consult', timeoutMs: 300_000, schema })?.text);
+  const raw = doAsk(guidePrompt(evidence, installed), PROPOSAL_SCHEMA);
+  let proposals: Proposal[] = [];
+  if (raw) {
+    try {
+      const m = raw.match(/\{[\s\S]*\}/);
+      if (m) proposals = (JSON.parse(m[0]) as { proposals?: Proposal[] }).proposals ?? [];
+    } catch {
+      /* refuse-don't-lie: unparseable → empty sitting */
+    }
+  }
+  const disposed = dispose(proposals, evidence, installed);
+  const artifacts = disposed.filter((d) => d.ok).map((d) => renderProposal(d.proposal, evidence, record));
+  return { evidence, disposed, artifacts };
 }

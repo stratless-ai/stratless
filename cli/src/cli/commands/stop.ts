@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { disarmEverywhere, unloadEverywhere } from '../../integrations/assistants/registry.js';
+import { disarmEverywhere, registry, unloadEverywhere } from '../../integrations/assistants/registry.js';
 import { atomicWriteFileSync } from '../../storage/atomic.js';
 import { upsertTuneSection, TUNE_START } from '../../tune/door.js';
 import { MINT_MARK } from '../../tune/inspect.js';
@@ -9,11 +9,11 @@ import { humanMdPath } from '../../storage/profile.js';
 import { modelDir, runtimeDir } from '../../pipeline/embedding/config.js';
 import { runtimeInstalled } from '../../pipeline/embedding/fetch.js';
 import { lockFilePath, stopWorker } from '../../runner/worker.js';
-import { pairFiles } from './profile.js';
+import { pairFiles } from './status.js';
 import { C, hint } from '../ui.js';
 
 /**
- * STOP — the off switch. Removes every after-session refresh hook and unloads the profile from every
+ * STOP — the off switch. Removes every after-session refresh hook, clears any older install's loaded profile from every
  * assistant carrying it; the HUMAN.*.md files stay in place (the person's data). A running worker is
  * signalled only when its identity is proved. Otherwise the future refresh is off but the command
  * refuses to call the surviving process stopped — an honest partial stop is part of earning trust.
@@ -24,8 +24,11 @@ import { C, hint } from '../ui.js';
 function removeTune(): { skills: number; blocks: boolean; section: boolean } {
   const home = homedir();
   let skills = 0;
-  const skillsDir = join(home, '.claude', 'skills');
-  if (existsSync(skillsDir)) {
+  // Every tool's pack door, from the full registry rather than detect(): the off switch has to
+  // be as complete as the on switch, and a pack can outlive the history that earned it.
+  for (const a of registry) {
+    const skillsDir = a.skillsDir();
+    if (!existsSync(skillsDir)) continue;
     try {
       for (const entry of readdirSync(skillsDir)) {
         const file = join(skillsDir, entry, 'SKILL.md');
@@ -80,7 +83,7 @@ export async function stop(): Promise<number> {
   const hadTune = tuneRemoved.skills > 0 || tuneRemoved.blocks || tuneRemoved.section;
   const blocked = worker.status === 'foreground' || worker.status === 'unverified';
   if (worker.status === 'not-running' && !hookRemoved && !unloaded && !hadTune) {
-    console.log(`\n  ${C.dim('nothing to stop — no running refresh, no refresh hook, no loaded profile, no tune.')}\n`);
+    console.log(`\n  ${C.dim('nothing to stop — no running refresh, no refresh hook, nothing loaded, no tune.')}\n`);
     return 0;
   }
   console.log(
@@ -123,7 +126,7 @@ export async function stop(): Promise<number> {
   console.log(
     blocked
       ? `  ${C.dim(`Wait for pid ${worker.pid} to finish (or resolve it yourself), then run \`${hint('stratless stop')}\` again to confirm everything is off.`)}\n`
-      : `  ${C.dim(`Run \`${hint('stratless update')}\` to load it again, \`${hint('stratless init')}\` to turn the refresh back on.`)}\n`,
+      : `  ${C.dim(`Run \`${hint('stratless init')}\` to turn the refresh back on, \`${hint('stratless tune')}\` for a new sitting.`)}\n`,
   );
   return blocked ? 1 : 0;
 }

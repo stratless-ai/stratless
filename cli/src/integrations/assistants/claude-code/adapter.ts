@@ -66,4 +66,6 @@ export const claudeCode: Adapter = {
     loaded,
     unload: removeProfile,
   },
+  // The pack leg: Claude Code discovers <name>/SKILL.md dirs here, live, no approval step.
+  skillsDir: () => join(homedir(), '.claude', 'skills'),
 };

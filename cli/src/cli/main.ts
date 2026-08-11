@@ -2,40 +2,28 @@
  * stratless — build your AI a model of who you are, so it stops making you feel stupid.
  *
  *   stratless mirror    a free read of you and your AI, from live logs — changes nothing, no setup
- *   stratless init      keep your history, see a free read, build your profile
- *   stratless tune      derive skills from your base map, install them through one door
- *   stratless profile   see the model of you — LOOKS, never spends; update LOADS
- *   stratless update    read what's new; rebuild + load the profile
- *   stratless stop      turn it off — stop refreshing and unload the profile
+ *   stratless init      keep your history, see a free read, build your record's evidence
+ *   stratless tune      the sitting: measure your record, hear the proposal, one yes installs
+ *   stratless update    read what's new; keep the evidence current
+ *   stratless stop      turn it off — stop refreshing and remove everything installed
  *   stratless status    stratless's own state: on or off, and what it has cost
  *
  * Runs on your machine. Reads your own history. Nothing leaves.
  */
 import { installedVersion } from '../storage/profile.js';
-import { migrateLegacyInstall } from '../integrations/migrations.js';
 import { runWorker } from '../runner/loop.js';
 import { C, hint } from './ui.js';
 import { argProblem, editDistance, validatesArgs } from './args.js';
 import { mirror } from './commands/mirror.js';
 import { init } from './commands/init.js';
-import { profile } from './commands/profile.js';
 import { update } from './commands/update.js';
 import { stop } from './commands/stop.js';
 import { tune } from './commands/tune.js';
 import { status } from './commands/status.js';
-import { serve } from '../integrations/mcp.js';
 
 export async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const cmd = args[0];
-
-  // The profile moved out of Claude Code's directory into ours; carry an older install across before
-  // anything reads a path. Here rather than deeper because EVERY entry point reads it — the worker,
-  // `profile`, `status`, and the MCP server all resolve it through `humanMdPath()`. Costs one
-  // existsSync when there is nothing to do.
-  // Move the artifact, then re-aim whatever pointed at it: an import addressed to a file that
-  // no longer exists is a profile that silently stops loading.
-  migrateLegacyInstall();
 
   if (cmd === '--version' || cmd === '-v' || cmd === 'version') {
     console.log(`stratless ${installedVersion()}`);
@@ -58,12 +46,12 @@ export async function main(): Promise<void> {
     return;
   }
 
-  // Muscle memory outlives a command. `report` folded into `profile`; `patterns` and `receipt` are
-  // not part of the current surface (the discovery pipeline carries the evidence in the profile
-  // itself). Redirect rather than error at someone who typed what used to work.
-  if (cmd === 'report' || cmd === 'patterns' || cmd === 'receipt') {
-    console.log(`\n  ${C.it(`${cmd} isn't part of stratless right now.`)}`);
-    console.log(`  ${C.dim(`see the model of you with ${C.b(hint('stratless profile'))}`)}\n`);
+  // Muscle memory outlives a command. `profile` and `mcp` retired when the profile became
+  // internal evidence — the sitting reads it, nobody imports it. `report`/`patterns`/`receipt`
+  // are older still. Redirect rather than error at someone who typed what used to work.
+  if (cmd === 'profile' || cmd === 'mcp' || cmd === 'report' || cmd === 'patterns' || cmd === 'receipt') {
+    console.log(`\n  ${C.it(`${cmd} isn't part of stratless anymore.`)}`);
+    console.log(`  ${C.dim(`your record is internal evidence now — the sitting reads it: ${C.b(hint('stratless tune'))}`)}\n`);
     return;
   }
 
@@ -82,13 +70,11 @@ export async function main(): Promise<void> {
     ${C.dim('get started:')}  ${C.b('npx stratless')} ${C.dim('(a free read)')}  ·  ${C.b('npx stratless init')} ${C.dim('(keep + build)')}
 
     ${C.b('stratless mirror')}     ${C.dim('a free read of you and your AI, changes nothing, no setup (--share: a card)')}
-    ${C.b('stratless init')}       ${C.dim('keep your history, see a free read, build your profile')}
-    ${C.b('stratless tune')}       ${C.dim('derive skills from your base map — the tune, installed through one door')}
-    ${C.b('stratless profile')}    ${C.dim('see the model of you — free, instant, never spends')}
-    ${C.b('stratless update')}     ${C.dim('read what is new; rebuild + load the profile')}
-    ${C.b('stratless stop')}       ${C.dim('turn it off — stop refreshing and unload the profile')}
+    ${C.b('stratless init')}       ${C.dim("keep your history, see a free read, build your record's evidence")}
+    ${C.b('stratless tune')}       ${C.dim('the sitting: measure, hear the proposal with receipts, one yes installs')}
+    ${C.b('stratless update')}     ${C.dim('read what is new; keep the evidence current')}
+    ${C.b('stratless stop')}       ${C.dim('turn it off — stop refreshing and remove everything installed')}
     ${C.b('stratless status')}     ${C.dim("stratless's own state and what it has cost (--check: newer version?)")}
-    ${C.b('stratless mcp')}        ${C.dim('serve the profile to any MCP client — for their config, not for typing')}
 
   ${C.dim('Runs on your machine. Reads your own history. Nothing leaves.')}
   ${C.dim('docs: https://stratless.com/docs')}
@@ -105,14 +91,8 @@ export async function main(): Promise<void> {
     process.exitCode = await runWorker();
     return;
   }
-  if (cmd === 'mcp') {
-    // stdio IS the protocol here: no banner, no spinner, nothing on stdout but JSON-RPC frames.
-    process.exitCode = await serve();
-    return;
-  }
   if (cmd === 'mirror') return await mirror(args.slice(1));
   if (cmd === 'status') return await status(args.slice(1));
-  if (cmd === 'profile') return await profile();
   if (cmd === 'update') return await update(args.slice(1));
   if (cmd === 'stop') {
     process.exitCode = await stop();
@@ -121,7 +101,7 @@ export async function main(): Promise<void> {
 
   // A mistyped COMMAND gets the same courtesy as a mistyped flag (0.3.5): name the nearest one,
   // never just reject. The user-facing verbs, in help order.
-  const KNOWN = ['init', 'mirror', 'profile', 'update', 'stop', 'status', 'mcp', 'help'];
+  const KNOWN = ['init', 'mirror', 'tune', 'update', 'stop', 'status', 'help'];
   const guess = cmd ? KNOWN.map((k) => [k, editDistance(cmd, k)] as const).filter(([, d]) => d <= 3).sort((a, b) => a[1] - b[1])[0]?.[0] : undefined;
   console.error(`\n  ${C.bad(`unknown command: ${cmd}`)}${guess ? C.dim(`  (did you mean ${guess}?)`) : ''}`);
   console.error(`  ${C.dim(`see \`${hint('stratless help')}\` for the full list`)}\n`);

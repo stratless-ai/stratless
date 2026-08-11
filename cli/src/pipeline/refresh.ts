@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { Brain } from '../integrations/contracts.js';
 import { brainFor, brains } from '../integrations/brains/registry.js';
 import { buildMoments, loadMoments } from './moments.js';
-import { deliverMissing, detect, firstDrift, loadEverywhere, registry } from '../integrations/assistants/registry.js';
+import { detect, firstDrift, registry, unloadEverywhere } from '../integrations/assistants/registry.js';
 import { loadCategories, type Category } from './categories.js';
 import { loadAssignments, pendingMoments } from './assign.js';
 import { join as joinLabelled, scoreboard } from './count.js';
@@ -274,7 +274,7 @@ export async function refreshProfiles(opts: {
                 summary.push(`${label(a.displayName)}your profile is now worded by ${wrote.displayName}, not ${was}`);
               }
               summary.push(
-                `${label(a.displayName)}profile written and loaded · ${profile.meta.frame} to offer + ${profile.meta.judge} to catch + ${profile.meta.register} register${profile.meta.rules ? ` + ${profile.meta.rules} to move` : ''}${profile.meta.shorthand ? ` + ${profile.meta.shorthand} shorthand handles` : ''}${profile.meta.folded ? ` · ${profile.meta.folded} similar row${profile.meta.folded === 1 ? '' : 's'} folded` : ''}`,
+                `${label(a.displayName)}evidence written · ${profile.meta.frame} to offer + ${profile.meta.judge} to catch + ${profile.meta.register} register${profile.meta.rules ? ` + ${profile.meta.rules} to move` : ''}${profile.meta.shorthand ? ` + ${profile.meta.shorthand} shorthand handles` : ''}${profile.meta.folded ? ` · ${profile.meta.folded} similar row${profile.meta.folded === 1 ? '' : 's'} folded` : ''}`,
               );
             } else {
               summary.push(`${label(a.displayName)}profile not rebuilt — not enough clear evidence yet`);
@@ -286,33 +286,18 @@ export async function refreshProfiles(opts: {
         } else {
           writeState({ ...readState(), scoreboards });
         }
-        // Get each assistant to read its own pair's file — on every build, because one of the
-        // delivery shapes is a copy and a copy written once is a profile that quietly ages.
-        loadEverywhere();
       }
     }
 
-    // DELIVERY IS NOT A SIDE EFFECT OF REBUILDING.
-    //
-    // The write path above hands the profile to every assistant on every build, which is what keeps
-    // a COPY from silently ageing. It cannot help an assistant that has no copy AT ALL, because
-    // reaching that branch requires a rebuild, and a machine whose profile is already current never
-    // runs one. Two ordinary situations land exactly there: a person adds a second assistant to a
-    // working install (the profile is current, so nothing rebuilds, so the new tool stays empty),
-    // and `stop` — which unloads from every tool and then points at `update`, whose own contract has
-    // always promised that a gated skip still loads.
-    //
-    // So ask the only question delivery actually turns on: does each assistant on this machine HAVE
-    // the profile? Outside every gate above, because none of them are about that — not whether a
-    // flush is due, not whether the pile moved. Cheap when there is nothing to do: one file read per
-    // detected tool, and no write unless somebody is missing it.
-    if (detect().some((a) => existsSync(profilePath(a.record.id))) || existsSync(humanMdPath())) {
-      // Name who it reached, and only who it actually reached — a delivery nobody is told about is
-      // the same invisibility that let this sit unnoticed behind a status line reading "yes".
-      const arrived = deliverMissing();
-      if (arrived.length) {
-        summary.push(`profile loaded into ${arrived.map((a) => a.displayName).join(' and ')} — it was not there yet`);
-      }
+    // THE PROFILE IS INTERNAL EVIDENCE, NEVER LOADED. It keeps building — the sitting reads it —
+    // but no assistant imports it anymore. Installs from before this carry a live pointer, so
+    // every refresh removes any that remain: the off-ramp runs until every machine has crossed,
+    // and it is announced the one time it actually does something.
+    const unloaded = unloadEverywhere();
+    if (unloaded.length) {
+      summary.push(
+        `the profile is internal evidence now — removed its loaded pointer from ${unloaded.map((a) => a.displayName).join(' and ')}; your tune reads it instead`,
+      );
     }
 
     sw.record();
