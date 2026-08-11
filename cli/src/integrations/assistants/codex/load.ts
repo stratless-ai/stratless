@@ -5,12 +5,9 @@
  * it has NO import syntax — there is no `@file` line it will expand — so the profile cannot be
  * pointed at. It has to be COPIED IN, between our markers, and rewritten whenever it changes.
  *
- * WHY BOTHER, WHEN `stratless mcp` ALREADY SERVES IT. Because they are different guarantees, and
- * only one of them matches what a Claude Code user gets. MCP is PULL: the profile arrives when the
- * assistant decides to ask for it. This is PUSH: it is already in context before the assistant says
- * a word. On the turns where a model does not think to fetch, a pull-only person is back to
- * re-explaining themselves — which is the exact work this product exists to remove. Both together
- * is the right answer, and this is the half that makes the promise unconditional.
+ * SUNSET (2026-08-10): the profile is internal evidence now — the sitting reads it, nobody
+ * imports it. This leg's load() is no longer called; unload() is the half that still runs, taking
+ * our markers OUT of older installs, and it stays until every machine has crossed.
  *
  * THE SHADOW RULE, and it is the one thing that silently breaks this. Codex checks
  * `AGENTS.override.md` FIRST and, if it finds one, reads that INSTEAD — not as well. So writing a

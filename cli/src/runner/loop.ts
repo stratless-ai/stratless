@@ -9,7 +9,7 @@
  *   place   fingerprint the new moments and attach them to the frozen pile centres — free, on this
  *           machine. On a FIRST run this is instead the cold build: cluster, then ONE call to name.
  *   count   add up the columns — lift, the scoreboard — free, arithmetic
- *   write   assemble the profile and load it
+ *   write   assemble the evidence — internal; the sitting reads it
  *   release, exit   nothing runs when there is nothing new
  *
  * A machine with no consent yet builds the pile, says so, and spends nothing.

@@ -47,7 +47,7 @@ jobs:
           npm install --no-package-lock
           npx tsc --noEmit
           npx tsc
-          node dist/index.js --help | grep -q "stratless profile"
+          node dist/index.js --help | grep -q "stratless tune"
           echo "✓ a clean clone builds and runs"
 
   # THE RELEASE PATH, CHECKED ON A PULL REQUEST — where a red run is free.

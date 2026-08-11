@@ -10,8 +10,11 @@
  *
  * CLAUDE.md becomes a pointer, not a copy — and every other route to the same file is a variation on
  * that one theme: a tool that takes a path reads it directly (aider's `read:`), a tool with no import
- * syntax gets the text copied into the block instead of a line pointing at it (codex's AGENTS.md),
- * and `stratless mcp` serves every labelled pair to anything that asks.
+ * syntax gets the text copied into the block instead of a line pointing at it (codex's AGENTS.md).
+ *
+ * SUNSET (2026-08-10): the profile is internal evidence now — the sitting reads it, nobody imports
+ * it. This leg's load() is no longer called; unload() is the half that still runs, taking the
+ * pointer OUT of older installs, and it stays until every machine has crossed.
  *
  * WHY IT LIVES IN ~/.stratless AND NOT ~/.claude (moved 2026-07-31). The profile is the PERSON'S, not
  * a tool's: keeping it inside Claude Code's directory meant uninstalling that tool took the profile
@@ -19,7 +22,7 @@
  * folder. The sharper reason is privacy — people keep ~/.claude in dotfiles repos (atomic.ts follows
  * symlinks precisely because one such link got severed), and a behavioural profile is the last file
  * that should ride along in a `git add -A`. ~/.stratless is ours, holds every other output already,
- * and nobody syncs it. `migrateLegacyProfile` moves an older install across, once.
+ * and nobody syncs it. (The one-time legacy move that used to live beside this was cut 2026-08-11.)
  *
  * We only ever touch what's between our markers in CLAUDE.md; anything the person wrote themselves is
  * left exactly as it was. HUMAN.md is written FIRST, so the import never points at a missing file. The
@@ -102,20 +105,6 @@ function upsertBlock(humanTarget: string, claudeTarget: string): void {
  */
 export function ensureLoaded(humanTarget: string = profilePath(RECORD_ID), claudeTarget: string = claudeMdPath()): boolean {
   if (!existsSync(humanTarget)) return false;
-  upsertBlock(humanTarget, claudeTarget);
-  return true;
-}
-
-/**
- * RE-AIM AN EXISTING POINTER, and only an existing one.
- *
- * For when the artifact moves under a person who already had it loaded. The distinction from
- * `ensureLoaded` is the whole point: this NEVER adds a block that is not there, because someone who
- * ran `stratless stop` turned the profile off deliberately, and a housekeeping move must not undo
- * a decision they made.
- */
-export function reaimIfLoaded(humanTarget: string = profilePath(RECORD_ID), claudeTarget: string = claudeMdPath()): boolean {
-  if (!existsSync(claudeTarget) || !readFileSync(claudeTarget, 'utf8').includes(START)) return false;
   upsertBlock(humanTarget, claudeTarget);
   return true;
 }

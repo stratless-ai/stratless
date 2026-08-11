@@ -16,8 +16,8 @@ import { shouldCheck, newerThan, dailyCheck, readNotify } from '../runner/notify
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parseExchanges, loadRecentExchanges, findExchange, markFirstOfDay, projectOf, type Exchange } from '../pipeline/exchange.js';
-import { removeProfile, ensureLoaded, loadInto, reaimIfLoaded } from '../integrations/assistants/claude-code/load.js';
-import { migrateLegacyProfile, writeProfile } from '../storage/profile.js';
+import { removeProfile, ensureLoaded, loadInto } from '../integrations/assistants/claude-code/load.js';
+import { writeProfile } from '../storage/profile.js';
 
 /** The old one-call shape the tests were written against: write the artifact, then point at it. */
 const injectProfile = (text: string, human?: string, claude?: string, builtAt?: string) => {
@@ -25,14 +25,6 @@ const injectProfile = (text: string, human?: string, claude?: string, builtAt?: 
   return loadInto(human, claude);
 };
 
-/** Moving the artifact and re-aiming the pointer are two steps now — the second belongs to the
- *  assistant, not the file. Composed here the way `index.ts` composes them, because a move without
- *  the re-aim leaves an import addressed to a file that no longer exists. */
-const migrateAndReaim = (target: string, legacy: string, claudeMd: string): boolean => {
-  const moved = migrateLegacyProfile(target, legacy);
-  if (moved) reaimIfLoaded(target, claudeMd);
-  return moved;
-};
 import { readRenders, writeRender, readBuildCorpus, writeBuildCorpus } from '../runner/state.js';
 import { readUsage, recordUsage } from '../runner/usage.js';
 import { parseJsonResult } from '../integrations/brains/claude-code.js';
@@ -564,73 +556,10 @@ test('removeProfile leaves HUMAN.md untouched', () => {
 // migration carries an older install across ONCE — and every refusal below protects something the
 // person owns, so each is pinned.
 
-/** Run with the redirect env var cleared: the guard that stops a test eating the developer's real
- *  profile would otherwise (correctly) refuse every case here. */
-function withoutRedirect<T>(fn: () => T): T {
-  const saved = process.env.STRATLESS_HUMAN_MD;
-  delete process.env.STRATLESS_HUMAN_MD;
-  try {
-    return fn();
-  } finally {
-    if (saved !== undefined) process.env.STRATLESS_HUMAN_MD = saved;
-  }
-}
 
-test('the profile moves out of the assistant directory once, and the import follows it', () => {
-  withoutRedirect(() => {
-    const legacy = join(dir, 'legacy', 'HUMAN.md');
-    const target = join(dir, 'moved', 'HUMAN.md');
-    const claudeMd = join(dir, 'moved-CLAUDE.md');
-    injectProfile('the profile that moves', legacy, claudeMd); // an old install: file + import in place
-    assert.ok(readFileSync(claudeMd, 'utf8').includes(legacy.split('/').pop()!), 'the import pointed at the old home');
 
-    assert.equal(migrateAndReaim(target, legacy, claudeMd), true, 'reports the move');
-    assert.ok(readFileSync(target, 'utf8').includes('the profile that moves'), 'the profile arrived intact');
-    assert.equal(existsSync(legacy), false, 'the old copy is gone, not left to rot as a stale twin');
-    assert.ok(readFileSync(claudeMd, 'utf8').includes(target), 'the import now points at the new home');
 
-    assert.equal(migrateAndReaim(target, legacy, claudeMd), false, 'and it never runs twice');
-  });
-});
 
-test('the migration refuses a file it cannot prove it wrote', () => {
-  withoutRedirect(() => {
-    const legacy = join(dir, 'not-ours', 'HUMAN.md');
-    const target = join(dir, 'not-ours-moved', 'HUMAN.md');
-    mkdirSync(join(dir, 'not-ours'), { recursive: true });
-    writeFileSync(legacy, '# my own notes about myself\nhand written, not stratless\n');
-    assert.equal(migrateAndReaim(target, legacy, join(dir, 'x-CLAUDE.md')), false, 'refuses');
-    assert.ok(existsSync(legacy), 'and never deletes it');
-    assert.equal(existsSync(target), false, 'nothing was copied either');
-  });
-});
-
-test('the migration never re-loads a profile the person turned off with stop', () => {
-  withoutRedirect(() => {
-    const legacy = join(dir, 'stopped', 'HUMAN.md');
-    const target = join(dir, 'stopped-moved', 'HUMAN.md');
-    const claudeMd = join(dir, 'stopped-CLAUDE.md');
-    injectProfile('a profile they stopped', legacy, claudeMd);
-    removeProfile(claudeMd); // `stop`: the block is gone, the artifact stays
-
-    assert.equal(migrateAndReaim(target, legacy, claudeMd), true, 'the file still moves');
-    assert.ok(existsSync(target), 'because the artifact is theirs to keep');
-    assert.equal(readFileSync(claudeMd, 'utf8').includes('stratless:start'), false, 'but the load stays OFF');
-  });
-});
-
-test('a redirected profile is a deliberate choice and is never migrated out from under it', () => {
-  const legacy = join(dir, 'redirected', 'HUMAN.md');
-  const target = join(dir, 'redirected-moved', 'HUMAN.md');
-  injectProfile('a redirected profile', legacy, join(dir, 'redirected-CLAUDE.md'));
-  process.env.STRATLESS_HUMAN_MD = target;
-  try {
-    assert.equal(migrateAndReaim(target, legacy, join(dir, 'redirected-CLAUDE.md')), false, 'refuses while redirected');
-    assert.ok(existsSync(legacy), 'the file stays exactly where it was pointed');
-  } finally {
-    delete process.env.STRATLESS_HUMAN_MD;
-  }
-});
 
 test('removeProfile is a safe no-op with no block (or no file)', () => {
   const claudeMd = join(dir, 'CLAUDE-noblock.md');

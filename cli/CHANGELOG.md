@@ -6,6 +6,50 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+## [0.15.0] · 2026-08-11 · the sitting — your logs become skills
+
+The product reshaped: MEASURE · REPORT · INSTALL. stratless no longer loads anything into your
+assistant's memory — its one output is the skillpack, installed through each tool's own skill
+door, every skill citing the measured evidence that earned it.
+
+### Added
+- **`stratless tune` is the sitting, one per pair.** It measures your record five ways —
+  rituals (your recurring command chains, read from the raw transcripts), lessons (what went
+  wrong and cost you), rules (what you keep having to ask for), wins (fast approvals),
+  arrivals (new vocabulary with spread) — then asks that pair's own assistant to propose
+  skills from the evidence, quoted before it spends. Code disposes of every claim: a proposal
+  citing no evidence dies, a quote that is not verbatim from your own words dies, a numeral in
+  model prose dies. Rejections are printed with reasons, and one typed yes installs.
+- **Both pairs, both doors.** Claude Code installs to `~/.claude/skills`, Codex to
+  `~/.codex/skills` — the same `SKILL.md` format, measured against codex-cli 0.147.0: an
+  externally written skill is discovered immediately, with no approval step. Each pair's
+  sitting runs on its own record, its own assistant, its own plan; declining one never
+  touches another.
+- **`stratless update --rebuild`** — the full cold rebuild, first-class: quoted per pair,
+  one typed yes, clears exactly the derived state (your archive, moments, and fit ledger
+  stay), then the ordinary build path rebuilds from the whole record. Refuses under a live
+  worker and off a terminal.
+- **`status` reports the new truth**: per-pair `evidence` rows stamped by each file's own
+  `# built` header, and a `tune installed` row counting — and naming — the minted skills on
+  disk.
+
+### Changed
+- **HUMAN.md went internal.** It keeps building — the sitting reads it as evidence — but no
+  assistant imports it anymore. Every refresh removes the loaded pointer an older install
+  left in `CLAUDE.md` or `AGENTS.md`, announced the one time it does something.
+- **The pack is the only output.** Styles ship as always-on skills inside the pack; stratless
+  writes no instructions file, no memory, no config. Older installs' style blocks and markers
+  are removed, never recreated.
+- Every installed skill ends with one removal line — delete the file, or `stratless stop`
+  removes the whole tune, from every door.
+
+### Removed
+- **`stratless profile` and `stratless mcp`.** The profile is internal evidence now — typing
+  either points you at the sitting. The MCP server is gone with the surface it served.
+- The legacy skill deriver, the profile-loading machinery, and the one-time legacy-install
+  migration — dead weight from the loaded era, deleted rather than disabled.
+
+
 ## [0.14.1] · 2026-08-07 · a quiet pair says so
 
 ### Fixed

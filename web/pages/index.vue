@@ -5,10 +5,11 @@ const GITHUB = 'https://github.com/stratless-ai/stratless'
 // The CLI version, read from cli/package.json at build (see nuxt.config.ts) so it never goes stale by hand.
 const version = useRuntimeConfig().public.version
 
-// THE ONE SAMPLE SOURCE: a real build, checked in verbatim (see AGENTS.md, "One sample profile").
-// Imported raw at build time and shown in full — behind the HUMAN.md sheet that ends the boundary
-// diagram in the reveal section, as a modal.
-import sampleRaw from '~/content/samples/HUMAN.md?raw'
+// THE ONE SAMPLE SOURCE (Solo V2): one real derived skill, compiled by the machine and checked
+// in verbatim (see AGENTS.md, "One sample skill"). Shown in full behind the SKILL.md sheet that
+// ends the boundary diagram — the artifact the whole page sells, openable. The full HUMAN.md
+// sample returns as a second sheet in the phase-2 pass.
+import sampleRaw from '~/content/samples/skill.md?raw'
 const sample = sampleRaw.trim()
 // Split for the modal's per-line render: the brief shows as a file in a dark editor (VS Code
 // Dark+), and the only tokenizing is the one rule Dark+ applies that matters for markdown —
@@ -28,23 +29,13 @@ watch(briefOpen, async (open) => {
   }
 })
 
-// Where HUMAN.md is headed. Claude Code and Codex are READ today; the rest either receive the profile
-// over MCP already or are readers still to come, and the note under the marquee says which is which.
-// `logo` is a local monochrome mark in /public/logos (from simple-icons, recolored via CSS mask);
-// null = no clean official mark, so it shows as a text wordmark (Aider — only a filtered wordmark).
-//
-// GEMINI CLI IS DELIBERATELY ABSENT. Google stopped serving it in June 2026 and replaced it with a
-// closed-source successor whose history cannot be read; the open codebase survives as Qwen Code.
-// Listing it promised support for a product that no longer exists. See /docs/assistants.
+// Two, deliberately (Sun, 2026-08-10): only the assistants stratless actually reads and
+// measures are named anywhere on this site. The eight-logo roadmap marquee argued with the
+// copy's own claim; a tool joins this row when its leg ships, not before. `logo` is a local
+// monochrome mark in /public/logos (simple-icons, recolored via CSS mask).
 const brands = [
   { name: 'Claude Code', logo: 'claudecode' },
   { name: 'Codex', logo: 'openai' },
-  { name: 'Cline', logo: 'cline' },
-  { name: 'GitHub Copilot', logo: 'githubcopilot' },
-  { name: 'Cursor', logo: 'cursor' },
-  { name: 'Aider', logo: null },
-  { name: 'Zed', logo: 'zedindustries' },
-  { name: 'Windsurf', logo: 'windsurf' },
 ]
 
 // The JSON-LD lived in nuxt.config's global head, so it asserted `url: stratless.com` on /privacy,
@@ -61,7 +52,7 @@ useHead({
         applicationCategory: 'DeveloperApplication',
         operatingSystem: 'macOS, Linux, Windows',
         description:
-          'Reads your own AI logs and writes a HUMAN.md your assistant loads every session, so it stops talking over your head or under it. Runs locally, nothing leaves your machine.',
+          'Reads your own AI logs and derives skills your assistant loads: real habits earned from your history, receipts on every line. Runs locally, nothing leaves your machine.',
         url: 'https://stratless.com',
         sameAs: [GITHUB],
         license: 'https://opensource.org/licenses/MIT',
@@ -90,12 +81,13 @@ useHead({
       <p class="eyebrow">Nothing declared. Everything counted.</p>
       <!-- Three slots, three jobs: the eyebrow is why believe it (the method, and the one line that
            survives any future product), the h1 is what you get, the lede is how plus the pain it
-           kills. The eyebrow carries the proof so the lede never has to, which is what keeps it
-           short. The signature couplet moved to the closer, over the assistant marquee. -->
-      <h1>Get your AI to understand you.</h1>
+           kills. Solo V2 (2026-08-10): the h1 sells the artifact (skills, the category people
+           already install), the lede carries the differentiator (derived, receipts) and the felt
+           outcome. "Get your AI to understand you" retired with the profile-as-product era. -->
+      <h1>Turn Your Logs Into Skills.</h1>
       <p class="lede">
-        Stratless reads your own AI logs and writes down who you are, <br />so your assistant stops
-        talking over your head or under it.
+        Not someone else's skill pack. <br />Derived from how you actually work, receipts on every
+        line.
       </p>
 
       <!-- Not role="img": that collapsed the whole real profile below to one aria-label sentence,
@@ -107,66 +99,40 @@ useHead({
           <div class="term-dots"><span class="d-r" /><span class="d-y" /><span class="d-g" /></div>
           <div class="term-title">~ — -zsh — 72×24</div>
         </div>
-        <pre class="term-body" tabindex="0" role="region" aria-label="stratless free read and profile, printed to the terminal"><code><span class="t-arrow" aria-hidden="true">➜</span>  <span class="t-path">~</span> <span class="t-c">npx stratless</span>
+        <pre class="term-body" tabindex="0" role="region" aria-label="a stratless sitting: measured evidence, proposed skills with receipts, one install question"><code><span class="t-arrow" aria-hidden="true">➜</span>  <span class="t-path">~</span> <span class="t-c">stratless tune</span>
 
-  <span class="t-b">You and your AI, measured</span>
+  <span class="t-b">Your tune — Claude Code pair</span>
 
-    <span class="t-d">you and your assistant</span>    6,177 messages · 52 active days
-    <span class="t-d">a median day</span>              122 messages
-    <span class="t-d">span</span>                      2026-06-09 → 2026-07-30
-                              · longest streak 52 days
-    <span class="t-d">how you write</span>             median 17 words · 8% four words
-                              or fewer · 42% questions
-    <span class="t-d">what you keep typing</span>      "go" 23× · "continue" 19× · "sure" 11×
-    <span class="t-d">screenshots sent</span>          210
-    <span class="t-d">course corrections</span>        2.44 / 100 messages
-    <span class="t-d">tool declines</span>             57
-    <span class="t-d">friction days</span>             47 of 52 active days
-    <span class="t-d">not counted against you</span>   69 permission stops · 34 system blocks
-    <span class="t-d">busiest repo</span>              stratless · across 6 repos · 52 branches
-    <span class="t-d">tools it ran for you</span>      29,101 calls · Bash 38% · Edit 27%
-    <span class="t-d">work it handed off</span>        636 agent runs · Explore 46%
-    <span class="t-d">skills it loaded</span>          54 times · research 17%
+  <span class="t-b">Measured from this record:</span> 8 rituals · 8 lessons · 9 rules
+                             · 1 win · 8 arrivals
 
-  <span class="t-d">Nothing was changed on your machine.</span>
+  The sitting asks your own Claude Code once — about $0.08
+  of your plan. Proceed? <span class="t-d">[y/N]</span> y
 
-<span class="t-arrow" aria-hidden="true">➜</span>  <span class="t-path">~</span> <span class="t-c">stratless profile</span>
+  <span class="t-b">2 skills proposed from the evidence</span>
 
-  <span class="t-b">WHO YOU'RE WORKING WITH</span>
+  <span class="t-d">THE PACK — every entry is a skill file</span>
+    ⚙ <span class="t-b">watch-ci-after-merge</span>  <span class="t-d">(occurrences 283 · sessions 88)</span>  <span class="t-ok">new</span>
+      <span class="t-d">A completed merge is followed by an actual CI status
+      check before the turn is called finished.</span>
+    ⚙ <span class="t-b">name-the-mechanism-plainly</span>  <span class="t-d">(count 4 · sessions 4)</span>  <span class="t-ok">new</span>
+      <span class="t-d">Every direct meaning-question gets a concrete,
+      jargon-free answer naming the actual mechanism.</span>
 
-  <span class="t-d">##</span> <span class="t-b">What to offer me before I ask</span>
-  - offer to enter a planning step before touching
-    any implementation. <span class="t-d">(265× · slip 28×)</span>
+  <span class="t-d">writes to ~/.claude/skills · nothing else touched</span>
+  <span class="t-d">every receipt is your own count · remove any time: stratless stop</span>
 
-  <span class="t-d">##</span> <span class="t-b">What to catch for me</span>
-  - catch anything left unverified, uncommitted, or
-    unconfirmed as done and check or lock it in:
-    - remote or deployed state unverified <span class="t-d">(192×)</span>
-    - uncommitted work needs a commit first <span class="t-d">(155×)</span>
-    - completion claim needs double-check <span class="t-d">(126×)</span>
-
-  <span class="t-d">##</span> <span class="t-b">How to talk to me</span>
-  - match their terse style and reply with the next
-    concrete action:
-    - short imperative to act next <span class="t-d">(313×)</span>
-    - single-line git or PR command <span class="t-d">(154×)</span>
-
-  <span class="t-d">not loaded yet · load it into your assistant: stratless update</span>
-
-<span class="t-arrow" aria-hidden="true">➜</span>  <span class="t-path">~</span> <span class="t-c">stratless update</span>
-<span class="t-ok">↳ loaded</span>  <span class="t-d">your assistant now talks to a person, not a blank.</span>
-
-<span class="t-arrow" aria-hidden="true">➜</span>  <span class="t-path">~</span> <span class="term-cursor" aria-hidden="true" /></code></pre>
+  Install? <span class="t-d">[y/N]</span> <span class="term-cursor" aria-hidden="true" /></code></pre>
       </div>
 
-      <!-- THE TWO-BEAT SCENE — the landing page in miniature, performed. Beat 1 (above the shell's
-           fold): `npx stratless`, the command the pill below sells, printing the AUTHOR'S REAL
-           mirror run verbatim (minus the spinner and the `profile captures` row, which belongs to
-           the after-state). Beat 2 (the scroll reward): `stratless profile` → three rows pulled
-           verbatim from the one blessed sample (content/samples/HUMAN.md) in the real print format
-           (the header's meta paren omitted: that build's moments count rotated out of the status
-           history), then `update` loads it. Re-pull BOTH beats when the sample or the mirror
-           format changes: the terminal must never say what a real run would not. -->
+      <!-- THE ONE-BEAT SCENE — the sitting, performed (2026-08-11: the mirror beat was cut; the
+           product is the pack, and `npx stratless` stays the pill's job below). Every line is
+           from the author's REAL per-pair run and his two REAL installed skills: the measured
+           line, the quote, both skills with the receipts their own files carry, ending at the
+           real prompt — Install? [y/N] with the cursor blinking on the unanswered question. The
+           skill names here must agree with the blessed sample (content/samples/skill.md) — the
+           one-sample law covers this beat. Re-pull the beat when the door format changes: the
+           terminal must never say what a real run would not. -->
 
       <div class="cta-row">
         <Btn href="#install" primary>Install</Btn>
@@ -177,7 +143,7 @@ useHead({
   </section>
 
   <!-- INSTALL — one command, nothing else. The TRY is the whole ask; init/stop and the rest of the
-       reference live at /docs/commands, and the sample HUMAN.md lives at the end of the boundary
+       reference live at /docs/commands, and the sample SKILL.md lives at the end of the boundary
        diagram below, where the pipeline that writes it finishes. -->
   <section id="install" class="section install">
     <div class="container">
@@ -190,12 +156,12 @@ useHead({
     </div>
   </section>
 
-  <!-- THE BRIEF MODAL — the one sample source (content/samples/HUMAN.md), summoned. -->
+  <!-- THE SKILL MODAL — the one sample source (content/samples/skill.md), summoned. -->
   <Teleport to="body">
     <div v-if="briefOpen" class="brief-overlay" @click.self="briefOpen = false">
-      <div class="brief-dialog" role="dialog" aria-modal="true" aria-label="the author's full HUMAN.md, a real example" @keydown.esc="briefOpen = false">
+      <div class="brief-dialog" role="dialog" aria-modal="true" aria-label="one of the author's real derived skills, unedited" @keydown.esc="briefOpen = false">
         <div class="filebar">
-          <span class="fname">~/.stratless/HUMAN.md</span>
+          <span class="fname">~/.claude/skills/watch-ci-after-merge/SKILL.md</span>
           <button ref="briefClose" type="button" class="brief-x" aria-label="close" @click="briefOpen = false">×</button>
         </div>
         <div class="filebody"><div v-for="(l, i) in sampleLines" :key="i" class="fline" :class="{ 'md-h': l.startsWith('#') }"><template v-if="l.startsWith('- ')"><span class="md-li">-</span>{{ l.slice(1) }}</template><template v-else>{{ l }}</template></div></div>
@@ -209,9 +175,11 @@ useHead({
       <p class="eyebrow">There's no trick</p>
       <h2>The conversation was always there.</h2>
       <p>
-        No cloud. No training. No separate bill. Claude Code already keeps your chats in
-        <code>~/.claude/projects</code>, and <strong>probably nobody reads them.</strong><br>
-        Stratless reads what you did and the things you'd do again and again.
+        No cloud. No training. No separate bill. Your assistant already keeps every chat on your
+        disk, Claude Code in <code>~/.claude/projects</code> and Codex in <code>~/.codex/sessions</code>,
+        and <strong>probably nobody reads them.</strong><br>
+        Stratless reads what you did, counts what recurs, and compiles the skills your history
+        already earned.
       </p>
 
       <!-- THE BOUNDARY DIAGRAM — the privacy claim, drawn instead of stated. Everything happens
@@ -223,7 +191,7 @@ useHead({
            subtree. The decorative flow hides as one piece; the sr-only line narrates instead. -->
       <div class="machine">
         <span class="machine-tag" aria-hidden="true">your machine</span>
-        <p class="sr-only">On your machine, your chats become moments, then clusters, then counts, and finally HUMAN.md. One runtime comes in at init. Nothing goes out.</p>
+        <p class="sr-only">On your machine, your chats are measured into evidence, and the sitting turns the evidence into skills. One runtime comes in at init. Nothing goes out.</p>
         <div class="flow">
           <span class="flow-deco" aria-hidden="true">
             <span class="mdoc-item">
@@ -231,18 +199,14 @@ useHead({
               <span class="mdoc-name">your chats</span>
             </span>
             <span class="flow-arrow" />
-            <span class="flow-step">moments</span>
+            <span class="flow-step">measured</span>
             <span class="flow-arrow" />
-            <span class="flow-step">cluster</span>
-            <span class="flow-arrow" />
-            <span class="flow-step">count</span>
-            <span class="flow-arrow" />
-            <span class="flow-step">write</span>
+            <span class="flow-step">the sitting</span>
             <span class="flow-arrow" />
           </span>
-          <button type="button" class="mdoc-item mdoc-btn" aria-haspopup="dialog" aria-label="HUMAN.md: read the author's real one, unedited" @click="briefOpen = true">
+          <button type="button" class="mdoc-item mdoc-btn" aria-haspopup="dialog" aria-label="SKILL.md: read one of the author's real derived skills, unedited" @click="briefOpen = true">
             <span class="mdoc" aria-hidden="true"><span class="mdoc-fold" /><span class="mdoc-line" /><span class="mdoc-line" /><span class="mdoc-line" /></span>
-            <span class="mdoc-name">HUMAN.md</span>
+            <span class="mdoc-name">SKILL.md</span>
           </button>
         </div>
         <span class="machine-io" aria-hidden="true">one runtime in at init · nothing goes out</span>
@@ -254,22 +218,20 @@ useHead({
     </div>
   </section>
 
-  <!-- THE ROADMAP — a monochrome marquee of where HUMAN.md is headed. Two read, many reached. -->
+  <!-- THE ROADMAP — a monochrome marquee: the two assistants, named. Two read, two installed. -->
   <section class="section roadmap">
     <div class="container narrow">
       <p class="eyebrow center">Reads Claude Code and Codex</p>
       <h2 class="rm-h">Made for your AI. Meant for you.</h2>
     </div>
-    <div class="marquee" aria-hidden="true">
-      <div class="marquee-track">
-        <span v-for="(b, i) in [...brands, ...brands]" :key="i" class="brand">
-          <span v-if="b.logo" class="brand-logo" :style="{ '--m': `url(/logos/${b.logo}.svg)` }" />
-          <span class="brand-name">{{ b.name }}</span>
-        </span>
-      </div>
+    <div class="duo" aria-hidden="true">
+      <span v-for="b in brands" :key="b.name" class="brand">
+        <span v-if="b.logo" class="brand-logo" :style="{ '--m': `url(/logos/${b.logo}.svg)` }" />
+        <span class="brand-name">{{ b.name }}</span>
+      </span>
     </div>
     <div class="container narrow">
-      <p class="quiet center rm-note">Claude Code and Codex today. Anything that speaks MCP can already receive your profile, and more readers arrive one tool at a time.</p>
+      <p class="quiet center rm-note">The two assistants stratless reads today, and the only two it names. Skills install to both, each through its own native skill door, measured against the real thing.</p>
     </div>
   </section>
 
@@ -414,7 +376,7 @@ h1 {
   padding: 1.15rem 1.25rem 1.4rem;
   /* A fixed-height shell you scroll inside — the scene is longer than the window, like real output.
      Sized so the fold lands inside beat 1's mirror rows (the "what you keep typing" row safely
-     visible) and beat 2 (`stratless profile` → the rows → `update` → loaded) stays below the fold
+     visible) and beat 2 (`stratless tune` → the sitting) stays below the fold
      as the reward for scrolling. */
   max-height: 20.5rem;
   overflow: auto;
@@ -838,37 +800,18 @@ h1 {
   line-height: 1.25;
   margin: 0.4rem 0 0;
 }
-.marquee {
-  margin: 2.4rem 0 1.6rem;
-  overflow: hidden;
-  /* fade both edges so logos slide in and out instead of clipping hard */
-  -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
-  mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
-}
-.marquee-track {
+.duo {
+  /* two named assistants, centered and still — the marquee retired with the eight-logo roadmap
+     (2026-08-10): a page that shows eight tools while the copy claims two argues with itself */
   display: flex;
-  width: max-content;
-  /* the brand list is rendered twice; each .brand carries its own right margin (NOT a flex gap), so
-     the two halves are identical and translateX(-50%) lands exactly on a repeat. A flex `gap` leaves
-     a half-gap at the midpoint, which makes the loop visibly jump. */
-  animation: marquee 42s linear infinite;
-}
-.marquee:hover .marquee-track {
-  animation-play-state: paused;
-}
-@keyframes marquee {
-  to {
-    transform: translateX(-50%);
-  }
+  justify-content: center;
+  gap: 3rem;
+  margin: 2.4rem 0 1.6rem;
 }
 .brand {
   display: inline-flex;
   align-items: center;
   gap: 0.6rem;
-  /* padding (not margin) for inter-brand spacing: padding always counts in the track's max-content
-     width, so both halves measure identical and the -50% loop is exact. A trailing flex margin can be
-     dropped from the measured width, which drifts the loop. */
-  padding-right: 3rem;
   color: var(--ink-2);
   opacity: 0.68;
   white-space: nowrap;
@@ -892,23 +835,6 @@ h1 {
   font-family: var(--font-mono);
   font-size: var(--fs-code);
 }
-@media (prefers-reduced-motion: reduce) {
-  .marquee {
-    -webkit-mask-image: none;
-    mask-image: none;
-  }
-  .marquee-track {
-    animation: none;
-    width: auto;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 0.9rem 1.8rem;
-  }
-  .marquee-track .brand {
-    padding-right: 0;
-  }
-}
-
 /* ── phones (2026-08-07): same markup, a different cut of it. The 72-column terminal is a
    desktop artifact — clipped, shrunken or swipe-gated it reads as breakage, so phones don't
    get it; the hero is the words and the CTAs, one fog-banded screen. The proof stays: the

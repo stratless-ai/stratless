@@ -1,11 +1,10 @@
 const COMMAND_ARGS: Record<string, { flags: string[]; positionals: number }> = {
   init: { flags: [], positionals: 0 },
-  profile: { flags: [], positionals: 0 },
-  update: { flags: ['--daily', '--weekly'], positionals: 0 },
+  update: { flags: ['--daily', '--weekly', '--rebuild'], positionals: 0 },
   status: { flags: ['--check'], positionals: 0 },
   mirror: { flags: ['--share'], positionals: 0 },
   stop: { flags: [], positionals: 0 },
-  mcp: { flags: [], positionals: 0 },
+  tune: { flags: [], positionals: 0 },
   __worker: { flags: [], positionals: 0 },
 };
 

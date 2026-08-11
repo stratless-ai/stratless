@@ -26,28 +26,29 @@
   <circle cx="82" cy="34" r="6" fill="#28c840"/>
   <text x="300" y="38" text-anchor="middle" fill="#b9b3a3" font-size="11">~, -zsh, 92x24</text>
 
-  <text x="36" y="74"><tspan class="g">➜</tspan>  <tspan class="pa">~</tspan> <tspan class="w">stratless profile</tspan></text>
+  <text x="36" y="74"><tspan class="g">➜</tspan>  <tspan class="pa">~</tspan> <tspan class="w">stratless tune</tspan></text>
 
-  <text x="36" y="106" class="w">WHO YOU'RE WORKING WITH</text>
+  <text x="36" y="106" class="w">Your tune — Claude Code pair</text>
 
-  <text x="36" y="142"><tspan class="d">##</tspan> <tspan class="w">What to offer me before I ask</tspan></text>
-  <text x="36" y="163">- offer to enter a planning step before touching</text>
-  <text x="52" y="184">any implementation. <tspan class="d">(265× · slip 28×)</tspan></text>
+  <text x="36" y="138"><tspan class="w">Measured from this record:</tspan> 8 rituals · 8 lessons</text>
+  <text x="52" y="159">· 9 rules · 1 win · 8 arrivals</text>
 
-  <text x="36" y="224"><tspan class="d">##</tspan> <tspan class="w">What to catch for me</tspan></text>
-  <text x="36" y="245">- catch language or framing that undersells quality;</text>
-  <text x="52" y="266">they will reject a term or shortcut they find weak. <tspan class="d">(169×)</tspan></text>
+  <text x="36" y="191">The sitting asks your own Claude Code once — about</text>
+  <text x="36" y="212">$0.08 of your plan. Proceed? <tspan class="d">[y/N]</tspan> y</text>
 
-  <text x="36" y="306"><tspan class="d">##</tspan> <tspan class="w">How to talk to me</tspan></text>
-  <text x="36" y="327">- let them lay out multi-part strategic reasoning and</text>
-  <text x="52" y="348">respond with a clear stance, not just agreement. <tspan class="d">(236×, rising)</tspan></text>
+  <text x="36" y="248" class="w">2 skills proposed from the evidence</text>
 
-  <text x="36" y="390" class="d">not loaded yet · load it into your assistant: stratless update</text>
+  <text x="36" y="280">⚙ <tspan class="w">watch-ci-after-merge</tspan>  <tspan class="d">(occurrences 283 · sessions 88)</tspan></text>
+  <text x="52" y="301" class="d">A completed merge is followed by an actual CI status</text>
+  <text x="52" y="322" class="d">check before the turn is called finished.</text>
 
-  <text x="36" y="426"><tspan class="g">➜</tspan>  <tspan class="pa">~</tspan> <tspan class="w">stratless update</tspan></text>
+  <text x="36" y="354">⚙ <tspan class="w">name-the-mechanism-plainly</tspan>  <tspan class="d">(count 4 · sessions 4)</tspan></text>
+  <text x="52" y="375" class="d">Every direct meaning-question gets a concrete,</text>
+  <text x="52" y="396" class="d">jargon-free answer naming the actual mechanism.</text>
 
-  <text x="36" y="458"><tspan class="g">↳ loaded</tspan>  <tspan class="d">your assistant now talks to a person, not a blank.</tspan></text>
+  <text x="36" y="432" class="d">writes to ~/.claude/skills · nothing else touched</text>
+  <text x="36" y="453" class="d">every receipt is your own count · remove any time: stratless stop</text>
 
-  <text x="36" y="490"><tspan class="g">➜</tspan>  <tspan class="pa">~</tspan></text>
-  <rect x="75" y="478" width="8" height="15" fill="#e6e2d6"/>
+  <text x="36" y="490">Install? <tspan class="d">[y/N]</tspan></text>
+  <rect x="120" y="478" width="8" height="15" fill="#e6e2d6"/>
 </svg>

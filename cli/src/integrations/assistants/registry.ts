@@ -118,50 +118,9 @@ export function recordFor(path: string): RecordAdapter {
   return best?.record ?? registry[0].record;
 }
 
-/**
- * DELIVER THE PROFILE TO EVERY ASSISTANT ON THIS MACHINE.
- *
- * Called after every build, not only at install: one of the two delivery shapes is a COPY, and a
- * copy that is written once is a profile that silently ages. Returns the files written, which the
- * caller may name to the person — the count is how many assistants the profile actually reaches.
- */
-export function loadEverywhere(): string[] {
-  const written: string[] = [];
-  for (const a of detect()) {
-    const file = a.load.load();
-    if (file) written.push(file);
-  }
-  return written;
-}
-
-/** Take the profile back out of every assistant. The off switch has to be as complete as the on
- *  switch, or `stop` leaves a copy behind in a tool nobody thought to check. */
+/** Take the profile back out of every assistant. The profile went internal (2026-08-10): nothing
+ *  loads it anymore, and this is the off-ramp that clears the pointer from older installs — run by
+ *  every refresh and by `stop`, until every machine has crossed. */
 export function unloadEverywhere(): Adapter[] {
   return registry.filter((a) => a.load.unload());
-}
-
-/** Which assistants are currently being handed this person's profile. */
-export function loadedInto(): Adapter[] {
-  return registry.filter((a) => a.load.loaded());
-}
-
-/**
- * DELIVER TO ANY ASSISTANT THAT DOES NOT HAVE THE PROFILE YET — arrival, as opposed to freshness.
- *
- * `loadEverywhere` runs after a build and keeps a COPY from ageing. That is a different failure from
- * the one here: an assistant with no copy AT ALL cannot be reached by a rebuild it never triggers.
- * A person who adds a second assistant to a working install is exactly there — the profile is
- * current, so nothing rebuilds, so the new tool stays empty — and so is anyone returning from
- * `stop`, which unloads every tool and then points at `update`.
- *
- * Returns the assistants that NEWLY received it, so a caller can name them. Empty when everyone
- * already had it, which is the common case and costs one file read per detected tool.
- */
-export function deliverMissing(): Adapter[] {
-  const missing = detect().filter((a) => !a.load.loaded());
-  if (!missing.length) return [];
-  loadEverywhere();
-  // Re-ask rather than assume: with no profile on disk a load leg writes nothing and reports
-  // nothing, and claiming a delivery that did not happen is the one thing this must not do.
-  return missing.filter((a) => a.load.loaded());
 }

@@ -1,8 +1,11 @@
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import type { Adapter } from '../../integrations/contracts.js';
 import { brains, pickBrain } from '../../integrations/brains/registry.js';
 import { anyArmed, detect as detectAdapters } from '../../integrations/assistants/registry.js';
 import { fetchLatest, newerThan } from '../../runner/notify.js';
-import { humanMdPath, installedVersion } from '../../storage/profile.js';
+import { humanMdPath, installedVersion, profilePath } from '../../storage/profile.js';
 import { loadRecentExchanges } from '../../pipeline/exchange.js';
 import { JUDGE_WINDOW } from '../../runner/loop.js';
 import { loadMoments } from '../../pipeline/moments.js';
@@ -12,14 +15,39 @@ import { latestRender, readRenders, readState, type RenderMeta } from '../../run
 import { readUsage } from '../../runner/usage.js';
 import { readLock, lockIsStale } from '../../runner/worker.js';
 import { readProgress } from '../../runner/progress.js';
-import { builtStamp, loadedBuiltStamp, pairFiles, profileLoaded } from './profile.js';
+import { readInstalledBlocks, readInstalledSkills } from '../../tune/inspect.js';
 import { C, hint, startSpinner } from '../ui.js';
 
 /**
- * STATUS — stratless's own state, and what it has cost. Distinct from `stats` (which counts your
- * ASSISTANT's activity in a project): this answers "is stratless on, is my profile loaded, and how
- * much of my own plan has it spent?" Every line is read locally and for free — it spends nothing.
+ * STATUS — stratless's own state, and what it has cost. This answers "is stratless on, is the
+ * evidence current, what is installed, and how much of my own plan has it spent?" Every line is
+ * read locally and for free — it spends nothing.
  */
+
+/** A build's ISO timestamp as a readable, globalized version stamp: `2026-07-23 12:28 UTC`. UTC so it
+ *  reads the same anywhere; minute precision because a person checks "am I on the latest?", not ms. */
+export function builtStamp(iso: string): string {
+  return `${iso.slice(0, 16).replace('T', ' ')} UTC`;
+}
+
+/** The `# built` stamp inside one evidence file — WHICH build it carries, not just whether one
+ *  exists. undefined when the file is absent or predates the stamp (pre-0.4.0). */
+function fileBuiltStamp(file: string): string | undefined {
+  try {
+    return readFileSync(file, 'utf8').slice(0, 400).match(/^# built (.+)$/m)?.[1]?.trim();
+  } catch {
+    return undefined;
+  }
+}
+
+/** Each detected pair's evidence file — one per pair (the per-record doctrine), internal, the
+ *  sitting's input. Exported for `stop`, which names what it keeps. */
+export function pairFiles(): { a: Adapter; path: string; exists: boolean }[] {
+  return detectAdapters().map((a) => {
+    const path = profilePath(a.record.id);
+    return { a, path, exists: existsSync(path) };
+  });
+}
 export async function status(rest: string[] = []): Promise<void> {
   // `--check` is the everyone-door for version news: user-initiated, on-screen, announced.
   // Plain `status` stays fully offline — the trust posture is not tunable.
@@ -38,10 +66,9 @@ export async function status(rest: string[] = []): Promise<void> {
   // 1. Is the after-session refresh installed? (the Stop hook we write into settings.json)
   const refresh = anyArmed();
 
-  // 2. Is the profile actually loaded? One definition, shared with `profile`'s footer.
+  // 2. The evidence files — internal, per pair; the sitting reads them, nobody imports them.
   const human = humanMdPath();
   const humanExists = existsSync(human);
-  const loaded = profileLoaded();
 
   // 3. The recent-builds trajectory — newest first, from the sidecar's history. Each stamp is the
   //    SAME one HUMAN.md carries in its `# built` header, so status and the file can never disagree.
@@ -111,33 +138,41 @@ export async function status(rest: string[] = []): Promise<void> {
       }
     }
   }
-  // WHICH build each assistant is reading, not just whether one is. Every pair has ITS OWN file,
-  // its own `# built` stamp, and its own latest build in the sidecar — so each row compares its own
-  // pair, and a stale copy in one tool can never hide behind a fresh pointer in another. The legacy
-  // merged file (an upgrade not yet rebuilt) shows as itself, labelled by its own stamp.
+  // THE EVIDENCE — which build each pair's internal file carries. Per pair, each with its own
+  // `# built` stamp; never loaded anywhere, so the only claims here are "exists" and "how fresh".
   {
     const pairs = pairFiles();
-    const renders = readRenders();
     if (!pairs.length) {
-      console.log(`    profile loaded          ${loaded ? C.ok('yes') : C.dim('no')}${humanExists ? `  ${C.dim(human)}` : ''}`);
+      console.log(`    evidence                ${humanExists ? C.ok('built') : C.dim('none yet')}${humanExists ? `  ${C.dim(human)}` : ''}`);
     } else {
       const w = Math.max(...pairs.map((p) => p.a.displayName.length));
       pairs.forEach((p, i) => {
-        const rowLabel = (i === 0 ? 'profile loaded' : '').padEnd(24);
-        // The interim: no pair file yet, but the merged-era artifact is still serving this leg.
-        const servingLegacy = !p.exists && p.loaded && humanExists;
-        const stamp = p.exists ? loadedBuiltStamp(p.path) : servingLegacy ? loadedBuiltStamp(human) : undefined;
-        const latest = latestRender(renders, p.a.record.id);
-        const latestStamp = latest ? builtStamp(latest.builtAt) : undefined;
-        const note = !p.loaded
-          ? C.dim(p.exists ? `— load it: ${hint('stratless update')}` : '— not enough history yet')
-          : stamp && latestStamp && stamp !== latestStamp && !servingLegacy
-            ? `${C.warn(`an OLDER build (${stamp})`)} ${C.dim(`— latest is ${latestStamp} · refresh: ${hint('stratless update')}`)}`
-            : stamp
-              ? C.dim(`${servingLegacy ? `the merged-era build (${stamp}) — rebuild per assistant: ${hint('stratless update')}` : `this build (${stamp}) · ${p.path}`}`)
-              : '';
-        console.log(`    ${rowLabel}${p.a.displayName.padEnd(w + 2)}${p.loaded ? C.ok('yes') : C.dim('no ')}  ${note}`);
+        const rowLabel = (i === 0 ? 'evidence' : '').padEnd(24);
+        const stamp = p.exists ? fileBuiltStamp(p.path) : undefined;
+        const note = p.exists ? C.dim(stamp ? `built ${stamp} · ${p.path}` : p.path) : C.dim('— not enough history yet');
+        console.log(`    ${rowLabel}${p.a.displayName.padEnd(w + 2)}${p.exists ? C.ok('yes') : C.dim('no ')}  ${note}`);
       });
+    }
+  }
+  // THE TUNE — what a sitting actually installed, counted from the mint mark on disk, across
+  // every detected pair's own skill door (plus the legacy block dirs of older installs).
+  {
+    const home = homedir();
+    const mintedSkills = readInstalledSkills(detectAdapters().map((a) => a.skillsDir())).filter((s) => s.minted);
+    const mintedBlocks = readInstalledBlocks([join(home, '.stratless', 'tune'), join(home, '.stratless', 'tune', 'claude-code')]).filter(
+      (b) => b.minted,
+    );
+    const n = mintedSkills.length + mintedBlocks.length;
+    console.log(
+      n
+        ? `    tune installed          ${C.ok('yes')}  ${C.dim(`${mintedSkills.length} skill${mintedSkills.length === 1 ? '' : 's'}${mintedBlocks.length ? ` + ${mintedBlocks.length} style block${mintedBlocks.length === 1 ? '' : 's'}` : ''} · refresh: ${hint('stratless tune')}`)}`
+        : `    tune installed          ${C.dim('no')}   ${C.dim(`the sitting proposes one: ${hint('stratless tune')}`)}`,
+    );
+    // OUR names, named — what stratless put on a machine should be visible without opening
+    // folders. Only ours: classifying the person's own skills would be a claim about files we
+    // do not own.
+    if (mintedSkills.length) {
+      console.log(`                            ${C.dim(mintedSkills.map((s) => s.name).join(' · '))}`);
     }
   }
 
