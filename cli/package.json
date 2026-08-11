@@ -1,6 +1,6 @@
 {
   "name": "stratless",
-  "version": "0.14.1",
+  "version": "0.15.0",
   "description": "Give your AI coding assistant a brief on who you are, read from your own history, so it stops making you feel stupid. Local, private, no account.",
   "type": "module",
   "bin": {
@@ -8,7 +8,7 @@
   },
   "//": "The npm page is where a stranger lands, and this package asks to read their entire",
   "//1": "conversation history. Without these three links it would ask for that trust while",
-  "//2": "showing no source at all. The line count IS the argument — so point at the lines.",
+  "//2": "showing no source at all. The line count IS the argument \u2014 so point at the lines.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/stratless-ai/stratless.git",
@@ -42,10 +42,10 @@
   ],
   "license": "MIT",
   "//dep": "ZERO RUNTIME DEPENDENCIES, again (0.6.0). The local embedding engine is NOT a dependency:",
-  "//dep1": "it arrives once, at `init`, after the person's yes — @stratless/engine (~3MB, pre-bundled",
+  "//dep1": "it arrives once, at `init`, after the person's yes \u2014 @stratless/engine (~3MB, pre-bundled",
   "//dep2": "WASM) plus the model weights (~34MB), into ~/.stratless, pinned by exact version and",
   "//dep3": "integrity hashes in src/pipeline/embedding/config.ts. `npx stratless` costs a stranger this package alone, and",
-  "//dep4": "the mirror it runs needs no model. WASM on purpose — standard over speed: identical bits",
+  "//dep4": "the mirror it runs needs no model. WASM on purpose \u2014 standard over speed: identical bits",
   "//dep5": "on every machine, so a runtime change is a versioned, announced rebuild, never silent drift.",
   "devDependencies": {
     "@types/node": "^22.10.0",

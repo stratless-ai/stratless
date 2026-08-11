@@ -1,33 +1,26 @@
 ---
-name: request-a-plan-before-implementing
-description: when a new or multi-step task begins, pause and offer a concise plan before implementing anything. Use when the user wants a plan before code; or wants work sequenced across sessions; or wants a concrete starting point. Minted by stratless from this pair’s own record — receipts inside.
+name: watch-ci-after-merge
+description: Check CI status after a merge lands, without being asked twice. Use when a merge just completed, or the user says "merged. watch the ci", "merged. watch it", or otherwise signals a merge just happened. Do not use for pre-merge checks or unrelated status questions. Minted by stratless from this pair's own record — receipts inside.
 ---
 
-# request-a-plan-before-implementing
+# watch-ci-after-merge
 
-Active skill — performs work at its moment.
+Fires at its moment.
 
-when a new or multi-step task begins, pause and offer a concise plan before implementing anything.
+A completed merge is followed by an actual CI status check before the turn is called finished.
 
-## The moves (voiced from this pair’s record)
+## The moves
 
-- offer to enter a planning step before touching any implementation.
-- offer an ordered plan splitting quick items now from deep work for a dedicated session.
-- offer a concrete starting point when they flag an unfamiliar feature area, including whether research is needed first.
-
-## The patched standard
-
-When: when a new or multi-step task begins, pause and offer a concise plan before implementing anything.
-The move: propose a concise plan and pause for approval before writing any code.
-In their own words: "do we need a plan for this? plan it out before we start work"
-Drive the native machinery — EnterPlanMode — never rebuild it.
+- Identify the merge commit or PR just merged
+- Check the CI/workflow run status for that commit
+- Report pass, fail, or still-running plainly, with a link or run identifier if available
+- If failing, name the failing check and stop there — do not guess a fix unasked
 
 ## Receipts (code-stamped, never authored)
 
-- request-a-plan-before-implementing: 270× · slip 28× (reach 228×)
-- sequence-work-into-sessions: 289×
-- ask-where-to-start-on-new-feature: 156×
+- rule:claude-code:fbdfce0f91d18a54: count 7 · sessions 5
+- rule:claude-code:fedbd70ba85c8ca0: count 3 · sessions 3
+- ritual:claude-code:c304412592305864: occurrences 283 · sessions 88
+- rule:claude-code:bc3f7f7fd709c907: count 7 · sessions 6
 
-## Sunset
-
-This skill retires when its patch heals — the standard absorbed, the row alone sufficing. Check after each `stratless update`. Remove: delete this directory.
+Remove any time: delete this file, or `stratless stop` removes the whole tune.

@@ -1,18 +1,19 @@
 # stratless
 
-**stratless writes your AI a brief on who you are, so it stops making you feel stupid.**
+**stratless turns your logs into skills your AI actually gains.**
 
-Your coding assistant has no idea who it's talking to. So it only has two registers: silence, or a
-wall of jargon. stratless gives it the missing third thing, a picture of *you*, read from the
-conversations you've already had, and hands it over before you say a word.
+Your coding assistant has no idea who it's talking to. stratless reads the conversations you've
+already had, measures what you do repeatedly, what went wrong, and what you keep having to ask
+for — then proposes skills from that evidence, each with the count that earned it, and installs
+them on one typed yes.
 
 ```
 npx stratless
 ```
 
 That's the free read — what your AI already knows about you, computed on your machine, changing
-nothing. When you want to keep it, `npx stratless init` archives your history and builds the full
-profile after asking once.
+nothing. When you want to keep it, `npx stratless init` archives your history and builds the
+evidence after asking once; `stratless tune` is the sitting that turns it into skills.
 
 No account. No API key. No cloud. The reading and the pattern-finding happen on your own disk; the
 only borrowed thing is your own assistant (`claude` or `codex`), which names what the maths found.
@@ -21,18 +22,17 @@ only borrowed thing is your own assistant (`claude` or `codex`), which names wha
 You need four things, and you probably have all of them: **Claude Code or Codex** installed and
 signed in (the `claude` or `codex` command), **Node 18+**, **macOS or Linux**, and a few sessions of
 history on this machine. Native Windows is not supported yet; run stratless inside WSL. Use both
-assistants and each gets its own profile, built only from the history you made together and loaded
-back into that assistant.
+assistants and each pair gets its own evidence, built only from the history you made together —
+nothing measured in one tool is ever presented to the other.
 
 ---
 
 ## What it builds
 
-Run `stratless profile` and it shows you the brief it has built, the one `stratless update` hands to
-your assistant: your shorthand decoded, what to offer you before you ask, what to catch for you, and
-how to talk to you. Every line is an instruction to the AI, observed from your own history, with the
-real count behind it — and rows that read almost alike fold into one row carrying each situation's
-own count, so the brief stays as short as your history honestly allows:
+The evidence lives at `~/.stratless/HUMAN.<assistant>.md` — a plain-text brief on how you actually
+work, internal to stratless: the sitting reads it, nothing loads it into your assistant. Your
+shorthand decoded, what to offer you before you ask, what to catch for you, how to talk to you.
+Every line is observed from your own history with the real count behind it:
 
 ```
 Who you are working with              (stratless · read from your own history)
@@ -68,7 +68,8 @@ Who you are working with              (stratless · read from your own history)
 ```
 
 Not a rules sheet you wrote. A brief on a person, derived from your real history and nothing you
-declared, and it sharpens as that history grows.
+declared, and it sharpens as that history grows. From it, `stratless tune` proposes the skills the
+evidence supports — and every proposed line must cite this file's measurements or it dies.
 
 It also thins. A when-clause and its slip count disappear once the gap they mark closes. And the
 decode key can carry two lines measured from how your own questions land: your comprehension
@@ -85,13 +86,11 @@ prefixing every command below with `npx `. Both work.
 
 ```
 stratless mirror     a free read of you and your AI, changes nothing (--share for a card)
-stratless init       keep your history, and build your profile
-stratless tune       derive skills from your base map, and install them through one door
-stratless profile    see the model of you, free and instant
-stratless update     read what is new, rebuild and load the profile
-stratless stop       turn it off, and unload the profile and the tune
+stratless init       keep your history, and build your record's evidence
+stratless tune       the sitting: measure, hear the proposal with receipts, one yes installs
+stratless update     read what is new, keep the evidence current
+stratless stop       turn it off, and remove everything installed
 stratless status     its own state, and what it has cost (--check: newer version?)
-stratless mcp        serve the profile to any MCP client (for their config, not for typing)
 ```
 
 `mirror` is the run-it-now, change-nothing door: it reads your live history and shows the free read,
@@ -122,16 +121,22 @@ No model of ours. No server. No training. No separate bill.
 3. **Count.** Every count is plain arithmetic: how often, over what span, rising, fading, or `met`,
    which means the asking faded because the assistant already does the thing, read from both sides
    of the conversation. The model names, the code counts, so no number in your profile is a guess.
-4. **Load.** `stratless update` writes one profile per assistant — `~/.stratless/HUMAN.claude-code.md`, `~/.stratless/HUMAN.codex.md` — each derived only from that assistant's own history, and points your
-   assistant's config at it, so your next session starts already knowing you. The after-session
-   refresh keeps it current; `stratless stop` turns that off and unloads it.
+4. **The sitting.** `stratless tune` holds one sitting per pair: it measures that record five
+   ways — rituals, lessons, rules, wins, arrivals — asks that pair's own assistant to propose
+   skills from the evidence, and disposes of every claim by code: no citation, no skill; no
+   verbatim quote, no quote; every count stamped from the receipts. You see the whole report,
+   and one typed yes installs the skillpack through that tool's own skill door —
+   `~/.claude/skills/` or `~/.codex/skills/`, same format, and nowhere else; styles ship as
+   always-on skills, and stratless never writes your instructions files. The after-session
+   refresh keeps the evidence current; `stratless stop` removes everything installed, from
+   every door.
 
    Codex keys hook approval by position. If you add another `SessionEnd` hook after stratless and
    later run `stratless stop`, removing stratless shifts that hook; stop warns that Codex will ask
    you to approve the later hook again rather than leaving the surprise for your next session.
 
    Before signalling a running refresh, `stop` verifies that the PID really belongs to that worker.
-   If it cannot prove that, it still removes the hooks and unloads the profiles, but it leaves the
+   If it cannot prove that, it still removes the hooks and the tune, but it leaves the
    process alone, names the PID, and exits non-zero rather than claiming everything is off.
 
 It spends your own plan's tokens, never a separate bill (`stratless status` shows the running
@@ -141,7 +146,7 @@ cents-sized map rebuilds as your history grows into it: announced in `status`, c
 consent, and self-stopping as the map matures. If the assistant can't answer honestly, it writes
 nothing: a confidently-wrong profile is the one failure that would end this, so silence always beats
 a guess. Model-authored wording may contain no numerals at all; every quantitative receipt is added
-by code, and a response that crosses that boundary is refused without replacing the loaded profile.
+by code, and a response that crosses that boundary is refused, and the previous evidence stands.
 
 ## Privacy
 
@@ -153,8 +158,8 @@ registry.npmjs.org and the model weights from huggingface.co, both pinned and ch
 permanently offline), the version check comes **in**, and the only thing that goes **out** is the
 borrowed call to your own assistant, on your own plan, the same place your code was already going.
 
-The profile is a plain text file. It's yours: load it into any other assistant, read it, or delete
-it.
+The evidence is a plain text file, and every installed skill carries its receipts in the file
+itself. All of it is yours: read it, edit your copy, or delete it.
 
 ---
 

@@ -18,6 +18,29 @@ const md = new MarkdownIt({ html: false, linkify: true, typographer: true })
 // `foo.md` as a domain link. fuzzyLink:false keeps explicit https:// links but stops the scheme-less ones.
 md.linkify.set({ fuzzyLink: false })
 
+// PERFORMED SESSIONS GET A TERMINAL. A fence whose first line starts with `$ ` is a transcript —
+// the reader should see the window it happened in, matching the hero's terminal. Bare one-line
+// fences (`npx stratless`) stay plain: those are for copying, and chrome on a copy target is
+// noise. Prompt lines get the shell's own emphasis; output lines stay untouched.
+const escapeHtml = (x: string): string => x.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+const defaultFence = md.renderer.rules.fence!.bind(md.renderer.rules)
+md.renderer.rules.fence = (tokens, idx, options, env, self) => {
+  const content = tokens[idx]!.content
+  if (!content.startsWith('$ ')) return defaultFence(tokens, idx, options, env, self)
+  const body = content
+    .replace(/\r/g, '')
+    .replace(/\n+$/, '')
+    .split('\n')
+    .map((line) =>
+      line.startsWith('$ ')
+        ? `<span class="dt-p">$</span> <span class="dt-c">${escapeHtml(line.slice(2))}</span>`
+        : escapeHtml(line),
+    )
+    .join('\n')
+  return `<div class="docterm"><div class="docterm-bar" aria-hidden="true"><span class="dt-dot dt-r"></span><span class="dt-dot dt-y"></span><span class="dt-dot dt-g"></span></div><pre class="docterm-body"><code>${body}</code></pre></div>
+`
+}
+
 export interface Doc {
   title: string
   html: string

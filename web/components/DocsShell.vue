@@ -14,7 +14,7 @@ const nav = [
     group: 'stratless',
     links: [
       { to: '/docs', label: 'Install' },
-      { to: '/docs/human-md', label: 'HUMAN.md' },
+      { to: '/docs/human-md', label: 'The evidence' },
       { to: '/docs/commands', label: 'Commands' },
       { to: '/docs/assistants', label: 'Assistants' },
     ],

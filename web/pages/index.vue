@@ -99,62 +99,40 @@ useHead({
           <div class="term-dots"><span class="d-r" /><span class="d-y" /><span class="d-g" /></div>
           <div class="term-title">~ — -zsh — 72×24</div>
         </div>
-        <pre class="term-body" tabindex="0" role="region" aria-label="stratless free read and tune prescription, printed to the terminal"><code><span class="t-arrow" aria-hidden="true">➜</span>  <span class="t-path">~</span> <span class="t-c">npx stratless</span>
+        <pre class="term-body" tabindex="0" role="region" aria-label="a stratless sitting: measured evidence, proposed skills with receipts, one install question"><code><span class="t-arrow" aria-hidden="true">➜</span>  <span class="t-path">~</span> <span class="t-c">stratless tune</span>
 
-  <span class="t-b">You and your AI, measured</span>
+  <span class="t-b">Your tune — Claude Code pair</span>
 
-    <span class="t-d">you and your assistant</span>    6,177 messages · 52 active days
-    <span class="t-d">a median day</span>              122 messages
-    <span class="t-d">span</span>                      2026-06-09 → 2026-07-30
-                              · longest streak 52 days
-    <span class="t-d">how you write</span>             median 17 words · 8% four words
-                              or fewer · 42% questions
-    <span class="t-d">what you keep typing</span>      "go" 23× · "continue" 19× · "sure" 11×
-    <span class="t-d">screenshots sent</span>          210
-    <span class="t-d">course corrections</span>        2.44 / 100 messages
-    <span class="t-d">tool declines</span>             57
-    <span class="t-d">friction days</span>             47 of 52 active days
-    <span class="t-d">not counted against you</span>   69 permission stops · 34 system blocks
-    <span class="t-d">busiest repo</span>              stratless · across 6 repos · 52 branches
-    <span class="t-d">tools it ran for you</span>      29,101 calls · Bash 38% · Edit 27%
-    <span class="t-d">work it handed off</span>        636 agent runs · Explore 46%
-    <span class="t-d">skills it loaded</span>          54 times · research 17%
+  <span class="t-b">Measured from this record:</span> 8 rituals · 8 lessons · 9 rules
+                             · 1 win · 8 arrivals
 
-  <span class="t-d">Nothing was changed on your machine.</span>
+  The sitting asks your own Claude Code once — about $0.08
+  of your plan. Proceed? <span class="t-d">[y/N]</span> y
 
-<span class="t-arrow" aria-hidden="true">➜</span>  <span class="t-path">~</span> <span class="t-c">stratless tune</span>
+  <span class="t-b">2 skills proposed from the evidence</span>
 
-  <span class="t-b">Your tune — claude-code pair</span>
+  <span class="t-d">THE PACK — every entry is a skill file</span>
+    ⚙ <span class="t-b">watch-ci-after-merge</span>  <span class="t-d">(occurrences 283 · sessions 88)</span>  <span class="t-ok">new</span>
+      <span class="t-d">A completed merge is followed by an actual CI status
+      check before the turn is called finished.</span>
+    ⚙ <span class="t-b">name-the-mechanism-plainly</span>  <span class="t-d">(count 4 · sessions 4)</span>  <span class="t-ok">new</span>
+      <span class="t-d">Every direct meaning-question gets a concrete,
+      jargon-free answer naming the actual mechanism.</span>
 
-  <span class="t-b">Stage 3 · 6 skills + 3 styles</span>
-
-  <span class="t-d">SKILLS — habits at their moments</span>
-    ⚙ <span class="t-b">ask-assistant-to-verify-remote-state</span>  <span class="t-d">(198×)</span>  <span class="t-ok">new</span>
-    ⚙ <span class="t-b">give-minimal-continuation-signal</span>  <span class="t-d">(207× · slip 16×)</span>  <span class="t-ok">new</span>
-    ⚙ <span class="t-b">request-a-plan-before-implementing</span>  <span class="t-d">(270× · slip 28×)</span>  <span class="t-ok">new</span>
-    ⚙ <span class="t-b">ask-how-to-set-up-integration</span>  <span class="t-d">(288×)</span>  <span class="t-ok">new</span>
-
-  <span class="t-d">STYLE — always on</span>
-    ≈ <span class="t-b">check-in-on-session-progress</span>  <span class="t-d">(230×)</span>  <span class="t-ok">new</span>
-    ≈ <span class="t-b">give-terse-followup-directive</span>  <span class="t-d">(329×)</span>  <span class="t-ok">new</span>
-
-  <span class="t-d">5 rows stay rows — the map carries them, the tune does not.</span>
-
+  <span class="t-d">writes to ~/.claude/skills · nothing else touched</span>
   <span class="t-d">every receipt is your own count · remove any time: stratless stop</span>
 
   Install? <span class="t-d">[y/N]</span> <span class="term-cursor" aria-hidden="true" /></code></pre>
       </div>
 
-      <!-- THE TWO-BEAT SCENE — the landing page in miniature, performed. Beat 1 (above the shell's
-           fold): `npx stratless`, the command the pill below sells, printing the AUTHOR'S REAL
-           mirror run verbatim (minus the spinner and the `profile captures` row, which belongs to
-           the after-state). Beat 2 (the scroll reward, Solo V2): `stratless tune` — the DOOR,
-           printed from the author's real run (the spinner dropped, two skills and one style
-           trimmed as whole lines; every remaining line verbatim, order preserved), ending at the
-           real prompt: Install? [y/N] with the cursor blinking on the unanswered question. The
+      <!-- THE ONE-BEAT SCENE — the sitting, performed (2026-08-11: the mirror beat was cut; the
+           product is the pack, and `npx stratless` stays the pill's job below). Every line is
+           from the author's REAL per-pair run and his two REAL installed skills: the measured
+           line, the quote, both skills with the receipts their own files carry, ending at the
+           real prompt — Install? [y/N] with the cursor blinking on the unanswered question. The
            skill names here must agree with the blessed sample (content/samples/skill.md) — the
-           one-sample law covers this beat. Re-pull BOTH beats when the mirror or door format
-           changes: the terminal must never say what a real run would not. -->
+           one-sample law covers this beat. Re-pull the beat when the door format changes: the
+           terminal must never say what a real run would not. -->
 
       <div class="cta-row">
         <Btn href="#install" primary>Install</Btn>
@@ -165,7 +143,7 @@ useHead({
   </section>
 
   <!-- INSTALL — one command, nothing else. The TRY is the whole ask; init/stop and the rest of the
-       reference live at /docs/commands, and the sample HUMAN.md lives at the end of the boundary
+       reference live at /docs/commands, and the sample SKILL.md lives at the end of the boundary
        diagram below, where the pipeline that writes it finishes. -->
   <section id="install" class="section install">
     <div class="container">
@@ -178,12 +156,12 @@ useHead({
     </div>
   </section>
 
-  <!-- THE BRIEF MODAL — the one sample source (content/samples/HUMAN.md), summoned. -->
+  <!-- THE SKILL MODAL — the one sample source (content/samples/skill.md), summoned. -->
   <Teleport to="body">
     <div v-if="briefOpen" class="brief-overlay" @click.self="briefOpen = false">
       <div class="brief-dialog" role="dialog" aria-modal="true" aria-label="one of the author's real derived skills, unedited" @keydown.esc="briefOpen = false">
         <div class="filebar">
-          <span class="fname">~/.claude/skills/request-a-plan-before-implementing/SKILL.md</span>
+          <span class="fname">~/.claude/skills/watch-ci-after-merge/SKILL.md</span>
           <button ref="briefClose" type="button" class="brief-x" aria-label="close" @click="briefOpen = false">×</button>
         </div>
         <div class="filebody"><div v-for="(l, i) in sampleLines" :key="i" class="fline" :class="{ 'md-h': l.startsWith('#') }"><template v-if="l.startsWith('- ')"><span class="md-li">-</span>{{ l.slice(1) }}</template><template v-else>{{ l }}</template></div></div>
@@ -197,8 +175,9 @@ useHead({
       <p class="eyebrow">There's no trick</p>
       <h2>The conversation was always there.</h2>
       <p>
-        No cloud. No training. No separate bill. Claude Code already keeps your chats in
-        <code>~/.claude/projects</code>, and <strong>probably nobody reads them.</strong><br>
+        No cloud. No training. No separate bill. Your assistant already keeps every chat on your
+        disk, Claude Code in <code>~/.claude/projects</code> and Codex in <code>~/.codex/sessions</code>,
+        and <strong>probably nobody reads them.</strong><br>
         Stratless reads what you did, counts what recurs, and compiles the skills your history
         already earned.
       </p>
@@ -212,7 +191,7 @@ useHead({
            subtree. The decorative flow hides as one piece; the sr-only line narrates instead. -->
       <div class="machine">
         <span class="machine-tag" aria-hidden="true">your machine</span>
-        <p class="sr-only">On your machine, your chats become moments, then clusters, then counts, then the base map, and finally skills. One runtime comes in at init. Nothing goes out.</p>
+        <p class="sr-only">On your machine, your chats are measured into evidence, and the sitting turns the evidence into skills. One runtime comes in at init. Nothing goes out.</p>
         <div class="flow">
           <span class="flow-deco" aria-hidden="true">
             <span class="mdoc-item">
@@ -220,13 +199,9 @@ useHead({
               <span class="mdoc-name">your chats</span>
             </span>
             <span class="flow-arrow" />
-            <span class="flow-step">moments</span>
+            <span class="flow-step">measured</span>
             <span class="flow-arrow" />
-            <span class="flow-step">cluster</span>
-            <span class="flow-arrow" />
-            <span class="flow-step">count</span>
-            <span class="flow-arrow" />
-            <span class="flow-step">base map</span>
+            <span class="flow-step">the sitting</span>
             <span class="flow-arrow" />
           </span>
           <button type="button" class="mdoc-item mdoc-btn" aria-haspopup="dialog" aria-label="SKILL.md: read one of the author's real derived skills, unedited" @click="briefOpen = true">
@@ -243,7 +218,7 @@ useHead({
     </div>
   </section>
 
-  <!-- THE ROADMAP — a monochrome marquee of where HUMAN.md is headed. Two read, many reached. -->
+  <!-- THE ROADMAP — a monochrome marquee: the two assistants, named. Two read, two installed. -->
   <section class="section roadmap">
     <div class="container narrow">
       <p class="eyebrow center">Reads Claude Code and Codex</p>
@@ -256,7 +231,7 @@ useHead({
       </span>
     </div>
     <div class="container narrow">
-      <p class="quiet center rm-note">The two assistants stratless reads today, and the only two it names. Skills install to Claude Code now; Codex follows once it is measured against the real tool.</p>
+      <p class="quiet center rm-note">The two assistants stratless reads today, and the only two it names. Skills install to both, each through its own native skill door, measured against the real thing.</p>
     </div>
   </section>
 
@@ -401,7 +376,7 @@ h1 {
   padding: 1.15rem 1.25rem 1.4rem;
   /* A fixed-height shell you scroll inside — the scene is longer than the window, like real output.
      Sized so the fold lands inside beat 1's mirror rows (the "what you keep typing" row safely
-     visible) and beat 2 (`stratless profile` → the rows → `update` → loaded) stays below the fold
+     visible) and beat 2 (`stratless tune` → the sitting) stays below the fold
      as the reward for scrolling. */
   max-height: 20.5rem;
   overflow: auto;
