@@ -13,5 +13,5 @@ export const legal = {
   email: 'sun@stratless.com',
   license: 'MIT',
   source: 'https://github.com/stratless-ai/stratless',
-  effectiveDate: 'August 1, 2026',
+  effectiveDate: 'August 11, 2026',
 }

@@ -32,15 +32,18 @@ useSeo({
 
         <h2>What it does, and what it does not promise</h2>
         <p>
-          stratless reads your coding assistants' own conversation history and writes a profile of
-          you (<code>HUMAN.md</code>) that your assistants load at the start of each session. It is
-          built to <strong>refuse rather than guess</strong>: when it cannot read your history
-          honestly, it says nothing. But it is software, and software is wrong sometimes.
+          stratless reads your coding assistants' own conversation history, measures it into
+          evidence, and — only on your typed yes — installs skills derived from that evidence into
+          your assistants' own skill directories. It is built to
+          <strong>refuse rather than guess</strong>: a proposed skill that cannot cite measured
+          evidence is discarded, and when it cannot read your history honestly, it says nothing.
+          But it is software, and software is wrong sometimes.
         </p>
         <p>
-          <strong>Do not treat the profile as authoritative.</strong> It is a description of you,
-          not a fact about you. Read it, and if it reads wrong, edit it, delete it, or unload it
-          with <code>stratless stop</code>.
+          <strong>Do not treat the evidence or the skills as authoritative.</strong> They are
+          derived descriptions, not facts about you. Read them, and if one reads wrong, edit it,
+          delete its folder, or remove everything stratless installed with
+          <code>stratless stop</code>.
         </p>
 
         <h2>Third-party software it downloads</h2>
@@ -69,8 +72,9 @@ useSeo({
 
         <h2>Your own assistant, your own bill</h2>
         <p>
-          Naming what the model found is done by the coding assistant already installed on your
-          machine, on your own subscription or key. Any cost, rate limit, or term attached to that
+          Naming what the maths found, wording the evidence, and proposing your skills at the
+          sitting are done by the coding assistant already installed on your machine, on your own
+          subscription or key, and the sitting quotes its cost before it spends. Any cost, rate limit, or term attached to that
           is between you and that provider. {{ legal.operator }} is not a party to it.
         </p>
 
