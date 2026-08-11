@@ -1,11 +1,11 @@
 import { readFileSync } from 'node:fs'
 
-const TITLE = 'stratless · Get your AI to understand you.'
+const TITLE = 'stratless · Turn your logs into skills.'
 // Mechanism and pain both land inside the first ~155 chars, so a search snippet never truncates
 // mid-claim. Deliberately does NOT repeat the headline — the title already carries it, and a
 // duplicated line spends the snippet twice.
 const DESC =
-  'Stratless reads your own AI logs and writes down who you are, so your assistant stops talking over your head or under it. Nothing declared, everything counted. Runs locally. Nothing leaves your machine.'
+  'Stratless measures how you actually work and installs the skills your history already earned, receipts on every line. Nothing declared, everything counted. Runs locally. Nothing leaves your machine.'
 const URL = 'https://stratless.com'
 
 // The version shown on the site is the CLI's real version, read from cli/package.json at BUILD so it
