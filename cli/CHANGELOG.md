@@ -6,6 +6,26 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+## [0.15.1] · 2026-08-11 · the guide learns the craft
+
+### Changed
+- **The sitting's proposals learned the top skills' craft.** Seven levers wired into the guide,
+  distilled from reading the most-adopted skills of the ecosystem at source: proposals now bias
+  toward skills that ACT (run a chain, perform a check) over skills that remind; every
+  description ends with one thing the skill must NOT be used for; the last move is always the
+  self-test that proves the move happened; every skill states where it ends; descriptions got
+  pushier (assistants under-trigger); patch evidence — a standard you demonstrably hold but
+  arrive at late — is now named to the guide as the strongest skill it can propose; and the
+  register is plain imperatives with reasons, never shouted absolutes. The gate, the receipts,
+  and the cap of five are untouched.
+
+### Fixed
+- The post-publish smoke asked the installed CLI for a command retired in 0.15.0, failing the
+  verify step after a successful publish and skipping the GitHub-release mirror. It asks for
+  `stratless tune` now.
+- npm keywords added, so the package surfaces where skill tooling is searched.
+
+
 ## [0.15.0] · 2026-08-11 · the sitting — your logs become skills
 
 The product reshaped: MEASURE · REPORT · INSTALL. stratless no longer loads anything into your
