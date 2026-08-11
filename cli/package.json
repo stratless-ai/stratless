@@ -33,12 +33,15 @@
   },
   "keywords": [
     "claude-code",
-    "cursor",
-    "ai",
-    "personalization",
-    "human-context",
-    "memory",
-    "agents-md"
+    "codex",
+    "skills",
+    "agent-skills",
+    "claude",
+    "ai-coding-assistant",
+    "skill-generator",
+    "developer-tools",
+    "cli",
+    "local-first"
   ],
   "license": "MIT",
   "//dep": "ZERO RUNTIME DEPENDENCIES, again (0.6.0). The local embedding engine is NOT a dependency:",

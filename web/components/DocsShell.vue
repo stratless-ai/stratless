@@ -16,6 +16,7 @@ const nav = [
       { to: '/docs', label: 'Install' },
       { to: '/docs/human-md', label: 'The evidence' },
       { to: '/docs/commands', label: 'Commands' },
+      { to: '/docs/creating-skills', label: 'Creating skills' },
       { to: '/docs/assistants', label: 'Assistants' },
     ],
   },

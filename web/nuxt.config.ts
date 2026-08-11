@@ -32,6 +32,26 @@ export default defineNuxtConfig({
     head: {
       htmlAttrs: { lang: 'en' },
       title: TITLE,
+      script: [
+        {
+          type: 'application/ld+json',
+          // Structured data for search and answer engines: what stratless IS, machine-readable.
+          // The version is NOT stamped here on purpose — it would freeze at build time and rot.
+          innerHTML: JSON.stringify({
+            '@context': 'https://schema.org',
+            '@type': 'SoftwareApplication',
+            name: 'stratless',
+            applicationCategory: 'DeveloperApplication',
+            operatingSystem: 'macOS, Linux',
+            description:
+              'Turns your own AI conversation logs into skills your coding assistant gains. Reads Claude Code and Codex history locally, measures what recurs, and installs evidence-backed skills into each tool\'s native skill directory. Free, MIT, nothing leaves your machine.',
+            url: 'https://stratless.com',
+            downloadUrl: 'https://www.npmjs.com/package/stratless',
+            offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+            license: 'https://opensource.org/licenses/MIT',
+          }),
+        },
+      ],
       link: [
         { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' },
         // iOS home screen + anything that won't take an SVG. Full-bleed on the tile's own blue so
