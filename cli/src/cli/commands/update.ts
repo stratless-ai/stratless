@@ -205,6 +205,14 @@ export async function update(_rest: string[], opts: { consented?: boolean } = {}
   }
 
   // Any brain will do, and the message must say so: naming only Claude Code told a Codex user to
+  // `--rebuild` off a terminal refuses BEFORE any other gate: the refusal is a guard with no
+  // dependencies, and a machine with no brain installed must still hear it rather than the
+  // brain error — a stranger's clean clone (CI) is exactly that machine.
+  if (_rest.includes('--rebuild') && (!process.stdin.isTTY || !process.stderr.isTTY)) {
+    console.log(`\n  ${C.dim('run --rebuild in a terminal — it clears your built map on a typed yes, never an implied one.')}\n`);
+    return;
+  }
+
   // install a second assistant in order to be understood by the one they already run.
   const brain = pickBrain();
   if (!brain) {
@@ -227,10 +235,6 @@ export async function update(_rest: string[], opts: { consented?: boolean } = {}
   // On yes it removes the derived state, which manufactures exactly the condition the existing
   // cold-build path was built for — one build path, no second one to maintain.
   if (_rest.includes('--rebuild')) {
-    if (!process.stdin.isTTY || !process.stderr.isTTY) {
-      console.log(`\n  ${C.dim('run --rebuild in a terminal — it clears your built map on a typed yes, never an implied one.')}\n`);
-      return;
-    }
     // Never clear under a live process: a worker mid-flush holds this map in memory and would
     // write half of the old world back over the cleared shelf.
     const running = readLock();
