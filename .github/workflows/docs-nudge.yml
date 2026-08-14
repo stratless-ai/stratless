@@ -1,9 +1,9 @@
 name: docs nudge
 
 # House rule (AGENTS.md): docs move with the code. The 0.2.4 release shipped a new meter and a
-# synthesis gate while the site kept documenting the old behavior — on a product whose moat is
-# cost honesty. This is the soft guard: a PR that changes cli/src/ but touches neither the site
-# docs nor the npm README gets ONE bot comment. It never blocks — refactors are real; a human
+# synthesis gate while the npm README kept documenting the old behavior — on a product whose moat
+# is cost honesty. This is the soft guard: a PR that changes cli/src/ but does not touch the npm
+# README gets ONE bot comment. It never blocks — refactors are real; a human
 # decides whether the docs needed to move.
 
 # WHY pull_request_target AND NOT pull_request. On a `pull_request` event raised from a FORK, GitHub
@@ -47,7 +47,7 @@ jobs:
           # had nothing to do with the diff.
           changed="$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename')"
           echo "$changed"
-          if grep -qE '^(web/content/docs/|cli/README\.md)' <<<"$changed"; then
+          if grep -qE '^cli/README\.md$' <<<"$changed"; then
             echo "docs moved too — nothing to say."
             exit 0
           fi
@@ -57,5 +57,5 @@ jobs:
             exit 0
           fi
           gh pr comment "$PR" --body "$marker
-          **Docs nudge:** this PR changes \`cli/src/\` but touches neither \`web/content/docs/\` nor \`cli/README.md\`. House rule: if behavior changed, the docs move in the same PR. If this is a pure refactor with no surface change, ignore me — I only comment once."
+          **Docs nudge:** this PR changes \`cli/src/\` but does not touch \`cli/README.md\`. House rule: if behavior changed, the npm guide moves in the same PR. If this is a pure refactor with no surface change, ignore me — I only comment once."
           echo "nudged."

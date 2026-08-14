@@ -1,6 +1,6 @@
 # @stratless/runtime
 
-The local embedding runtime for [stratless](https://stratless.com) — transformers.js and the ONNX
+The local embedding runtime for [stratless](https://github.com/stratless-ai/stratless) — transformers.js and the ONNX
 Runtime WASM backend, pre-bundled into ~11MB with everything else stubbed out.
 
 **You never install this package yourself.** The stratless CLI downloads it once, into

@@ -18,7 +18,6 @@
     "url": "git+https://github.com/stratless-ai/stratless.git",
     "directory": "runtime"
   },
-  "homepage": "https://stratless.com",
   "bugs": "https://github.com/stratless-ai/stratless/issues",
   "files": [
     "dist"

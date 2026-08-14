@@ -77,7 +77,6 @@ export async function main(): Promise<void> {
     ${C.b('stratless status')}     ${C.dim("stratless's own state and what it has cost (--check: newer version?)")}
 
   ${C.dim('Runs on your machine. Reads your own history. Nothing leaves.')}
-  ${C.dim('docs: https://stratless.com/docs')}
 `);
     return;
   }
