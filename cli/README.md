@@ -97,6 +97,21 @@ stratless status     its own state, and what it has cost (--check: newer version
 with no setup and no archive, so bare `npx stratless` (no verb) runs it too. `stratless --version`
 (or `-v`) prints the installed version.
 
+The complete option list is deliberately small:
+
+```
+stratless mirror --share       print the screenshot-safe card (no repo or session names)
+stratless update --daily       let automatic rebuilds run at most daily; update now too
+stratless update --weekly      let automatic rebuilds run at most weekly; update now too
+stratless update --rebuild     clear the built map on a typed yes, then rebuild everything
+stratless status --check       check whether a newer npm version exists
+stratless help                 show command help (-h and --help work too)
+stratless --version            print the installed version (-v works too)
+```
+
+Unknown commands and flags are refused. Colour turns itself off when output is piped, or when
+`NO_COLOR` is set.
+
 `init` is the one thing you can't do later. Claude Code **deletes your transcripts after 30 days**,
 per file, so your history rots from the back even in a project you use every day. `init` stops that
 and copies everything somewhere safe. (Codex has no such timer; `init` still keeps its own copy, and
@@ -147,6 +162,48 @@ consent, and self-stopping as the map matures. If the assistant can't answer hon
 nothing: a confidently-wrong profile is the one failure that would end this, so silence always beats
 a guess. Model-authored wording may contain no numerals at all; every quantitative receipt is added
 by code, and a response that crosses that boundary is refused, and the previous evidence stands.
+
+## Supported assistants
+
+stratless supports **Claude Code** and **Codex** today. Claude Code history is read from
+`~/.claude/projects` and its generated skills are installed under `~/.claude/skills`. Codex history
+is read from `~/.codex/sessions` and its skills go under `~/.codex/skills`. Each assistant gets a
+separate record built only from the conversations you had with that assistant.
+
+The after-session refresh is installed through each tool's own hook mechanism. Codex asks you to
+approve that hook; stratless does not bypass the prompt. Claude Code's expiring live transcripts are
+why `init` archives first. Codex does not currently need that rescue, but stratless still keeps an
+owned, deduplicated archive for consistent updates.
+
+## Honest limits
+
+- Only Claude Code and Codex are supported. Other assistants are ignored.
+- stratless can only learn from transcript history still present on this machine. Deleted, excluded,
+  or never-recorded conversations cannot be recovered.
+- The evidence is derived from observed conversations, so it can be incomplete or wrong. Read the
+  receipts before accepting a tune; declining changes nothing.
+- Skills can improve fit and consistency. They do not make the underlying model more intelligent or
+  guarantee a correct result.
+- This is a reading of one human-and-assistant pair, not a comparison, score, benchmark, or population
+  claim.
+
+## Writing a skill by hand
+
+You do not need stratless to make a skill. Create one folder in your assistant's skills directory
+and put a `SKILL.md` inside it:
+
+```md
+---
+name: verify-before-handoff
+description: Use when a coding task is complete and the result needs to be handed back.
+---
+
+Run the relevant checks, inspect the final diff, and state what remains unverified.
+```
+
+The `description` is the trigger the assistant sees up front; the body is loaded when the trigger
+matches. Keep the trigger specific and the body actionable. A stratless tune uses the same ordinary
+format—it only earns the content from repeated evidence and installs it for you after approval.
 
 ## Privacy
 

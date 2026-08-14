@@ -33,7 +33,8 @@ default for public repos, not a comment on you.
 
 ## Development
 
-This is a pnpm workspace: `cli/` is the npm package, `web/` is stratless.com.
+This is a pnpm workspace: `cli/` is the npm package and `runtime/` is the consent-fetched,
+pre-bundled embedding runtime.
 
 From the repo root (pnpm):
 
@@ -60,8 +61,8 @@ every contributor must know:
 
 1. **`cli/` stays dependency-free.** Zero runtime dependencies, permanently. A PR that adds one
    is declined on arrival; the whole tool must stay auditable in an afternoon.
-2. **Docs move with code.** A PR that changes CLI behavior updates `cli/CHANGELOG.md`,
-   `cli/README.md`, and `web/content/docs/` in the same PR. CI will nudge you if you forget.
+2. **Docs move with code.** A PR that changes CLI behavior updates `cli/CHANGELOG.md` and
+   `cli/README.md` in the same PR. CI will nudge you if you forget.
 
 Releases are maintainer-only (a tag ritual with its own gates: only an admin can create a `cli-v*`
 tag, and once created it can never be moved — the npm provenance signature binds a published
