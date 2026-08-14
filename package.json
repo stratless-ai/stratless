@@ -1,13 +1,11 @@
 {
   "name": "stratless",
   "private": true,
-  "description": "stratless — the person-layer profiler (cli/) and stratless.com (web/)",
+  "description": "stratless — the local, private person-layer profiler",
   "scripts": {
     "test": "pnpm --filter ./cli test",
     "typecheck": "pnpm -r typecheck",
-    "build": "pnpm -r build",
-    "dev:web": "pnpm --filter ./web dev",
-    "generate": "pnpm --filter ./web generate"
+    "build": "pnpm -r build"
   },
   "packageManager": "pnpm@9.15.0",
   "engines": { "node": ">=18" }

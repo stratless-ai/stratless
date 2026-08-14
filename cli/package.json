@@ -1,20 +1,19 @@
 {
   "name": "stratless",
-  "version": "0.15.1",
+  "version": "0.15.2",
   "description": "Give your AI coding assistant a brief on who you are, read from your own history, so it stops making you feel stupid. Local, private, no account.",
   "type": "module",
   "bin": {
     "stratless": "dist/index.js"
   },
   "//": "The npm page is where a stranger lands, and this package asks to read their entire",
-  "//1": "conversation history. Without these three links it would ask for that trust while",
-  "//2": "showing no source at all. The line count IS the argument \u2014 so point at the lines.",
+  "//1": "conversation history. The source and issue tracker are the trust surface; keep both",
+  "//2": "pointed at this public repository and do not replace them with a product website.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/stratless-ai/stratless.git",
     "directory": "cli"
   },
-  "homepage": "https://stratless.com",
   "bugs": "https://github.com/stratless-ai/stratless/issues",
   "files": [
     "dist",

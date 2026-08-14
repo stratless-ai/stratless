@@ -12,7 +12,7 @@
 [![runtime deps](https://img.shields.io/badge/runtime%20deps-0-3fb950)](cli/package.json)
 [![license](https://img.shields.io/npm/l/stratless?color=3fb950)](LICENSE)
 
-[stratless.com](https://stratless.com) &nbsp;·&nbsp; [npm](https://www.npmjs.com/package/stratless) &nbsp;·&nbsp; [How it works](#how-it-works-theres-no-trick) &nbsp;·&nbsp; [Privacy](#privacy)
+[npm](https://www.npmjs.com/package/stratless) &nbsp;·&nbsp; [How it works](#how-it-works-theres-no-trick) &nbsp;·&nbsp; [Privacy](#privacy)
 
 </div>
 
@@ -62,13 +62,15 @@ Everything runs on your machine. **Your conversations, the moments stratless der
 
 Three things touch the network, and the direction matters: the local engine comes **in** once at `init` (with your consent — a ~3MB runtime from npm and ~34MB of model weights from Hugging Face, both checksum-pinned, then permanently offline), the version check comes **in**, and the only thing that goes **out** is the borrowed call to your own assistant, on your own plan, the same place your code was already going.
 
-The profile is a plain text file. It's yours: load it into any other assistant, read it, or delete it.
+The evidence is a plain text file. It's yours: read it, keep it, or delete it. stratless never loads
+one assistant's evidence into another.
 
 ## What's in here
 
 ```
-cli/    the tool. TypeScript, zero runtime deps (the runtime arrives at init's consent). npm: stratless
-web/    stratless.com. Nuxt, no modules, prerendered to static HTML
+cli/      the tool. TypeScript, zero runtime deps. npm: stratless
+runtime/  the pre-bundled local embedding runtime, fetched only after consent
+assets/   README artwork and canonical real sample artifacts
 ```
 
 ## Develop
@@ -76,7 +78,6 @@ web/    stratless.com. Nuxt, no modules, prerendered to static HTML
 ```
 pnpm install
 pnpm test        # the CLI's tests
-pnpm dev:web     # stratless.com, locally
 ```
 
 The `cli/` is published standalone and carries **zero runtime dependencies** — the local embedding engine is not one: it arrives once at `init`, after your yes, pinned and checksummed (`runtime/` in this repo is that package). The bar for ever adding a real dependency is very high. Never auto-commit. The tree is left green and uncommitted for a human to review.

@@ -6,6 +6,12 @@ and each version matches its `cli-v*` git tag.
 
 ## [Unreleased]
 
+## [0.15.2] · 2026-08-13 · the source is the front door
+
+### Changed
+- **Stratless Solo now stands entirely on GitHub and npm.** The CLI help and package metadata no
+  longer point at a separate product website; the npm README carries the complete user guide.
+
 ## [0.15.1] · 2026-08-11 · the guide learns the craft
 
 ### Changed
